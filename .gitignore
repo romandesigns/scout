@@ -1,0 +1,101 @@
+# Secrets and machine-local configuration
+.env
+.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.venv/
+venv/
+env/
+dist/
+build/
+*.egg-info/
+
+# Scout runtime state
+data/*
+!data/.gitkeep
+charts/*
+!charts/.gitkeep
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.log
+logs/
+
+# Next.js / Bun / Node
+web/node_modules/
+web/.next/
+web/out/
+web/.turbo/
+web/.vercel/
+web/coverage/
+web/tsconfig.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+bun-debug.log*
+
+# Tauri / Rust
+web/src-tauri/target/
+**/*.rs.bk
+
+# Release artifacts and installers
+release/
+artifacts/
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.exe
+*.msi
+*.msix
+*.appx
+*.apk
+*.aab
+
+# Replay downloads and generated evaluations
+data/replay-datasets/
+data/replays/
+replay-*/
+
+# Local deployment/recovery material
+backups/
+recovery/
+deploy.local.*
+*.local.ps1
+
+# IDE and OS metadata
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.example.json
+*.code-workspace
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+*.swp
+*.swo
+*~

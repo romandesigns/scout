@@ -1,0 +1,1472 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import math
+import statistics
+import time
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+import orjson
+import requests
+import websockets
+
+from .config import settings
+from .db import Store
+from .dispatch import Dispatcher
+from .indicators import ema, pct_change, median_positive
+from .models import Bucket, Finding, SymbolState
+from .events import EventHub
+
+log = logging.getLogger("scout.market")
+ET = ZoneInfo(settings.timezone)
+ALLOWED_EXCHANGES = {"NASDAQ", "NYSE", "AMEX"}
+
+
+def trading_session_key(ts: float) -> str:
+    """Return the U.S. equity trade date for a timestamp.
+
+    Alpaca's overnight session starts at 8 PM ET and belongs to the next
+    trading day, so 9 PM Monday and 10 AM Tuesday share Tuesday's session key.
+    """
+    local = datetime.fromtimestamp(ts, ET)
+    trade_date = local.date() + timedelta(days=1) if local.hour >= 20 else local.date()
+    return trade_date.isoformat()
+
+
+def _headers() -> dict[str, str]:
+    return {"APCA-API-KEY-ID": settings.alpaca_key, "APCA-API-SECRET-KEY": settings.alpaca_secret}
+
+
+def _chunks(seq: list[str], size: int):
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
+
+
+class Universe:
+    def __init__(self):
+        self.symbols: set[str] = set()
+        self.min_price = settings.universe_min_price
+        self.max_price = settings.universe_max_price
+        self.metadata: dict[str, dict] = {}
+
+    def refresh_sync(self) -> set[str]:
+        if settings.wildcard_market_stream:
+            self.symbols = {"*"}
+            return self.symbols
+        r = requests.get(
+            f"{settings.alpaca_trading_base}/v2/assets",
+            params={"status": "active", "asset_class": "us_equity"},
+            headers=_headers(), timeout=20,
+        )
+        r.raise_for_status()
+        assets = r.json()
+        symbols = [
+            str(a.get("symbol", "")).upper()
+            for a in assets
+            if a.get("tradable") and str(a.get("exchange", "")).upper() in ALLOWED_EXCHANGES and a.get("symbol")
+        ]
+        symbols = symbols[:settings.universe_max_symbols]
+
+        selected: set[str] = set()
+        self.metadata = {}
+        for chunk in _chunks(symbols, settings.universe_batch_size):
+            rr = requests.get(
+                f"{settings.alpaca_data_base}/v2/stocks/snapshots",
+                params={"symbols": ",".join(chunk), "feed": settings.alpaca_feed},
+                headers=_headers(), timeout=20,
+            )
+            rr.raise_for_status()
+            payload = rr.json()
+            # Alpaca's multi-symbol snapshots response is normally keyed
+            # directly by symbol. Accept a wrapped shape as well so Scout is
+            # resilient to gateways/SDK adapters that add a `snapshots` key.
+            snapshots = payload.get("snapshots", payload) if isinstance(payload, dict) else {}
+            for symbol, snapshot in snapshots.items():
+                try:
+                    latest = snapshot.get("latestTrade") or {}
+                    daily = snapshot.get("dailyBar") or {}
+                    previous = snapshot.get("prevDailyBar") or {}
+                    px = float(latest.get("p") or daily.get("c") or 0)
+                except Exception:
+                    continue
+                if self.min_price <= px <= self.max_price:
+                    ticker = symbol.upper()
+                    selected.add(ticker)
+                    previous_close = float(previous.get("c") or 0) or None
+                    self.metadata[ticker] = {
+                        "previous_close": previous_close,
+                        "day_volume": float(daily.get("v") or 0),
+                        "day_high": float(daily.get("h") or 0) or None,
+                        "day_low": float(daily.get("l") or 0) or None,
+                    }
+        self.symbols = selected
+        return set(selected)
+
+
+class MarketWatcher:
+    def __init__(self, store: Store, dispatcher: Dispatcher, events: EventHub | None = None):
+        self.store = store
+        self.dispatcher = dispatcher
+        self.events = events
+        self.universe = Universe()
+        self.states: dict[str, SymbolState] = {}
+        self.subscribed: set[str] = set()
+        self.overnight_subscribed: set[str] = set()
+        self.ws = None
+        self.overnight_ws = None
+        self._desired: set[str] = set()
+        self._universe_ready = asyncio.Event()
+        self.halts: dict[str, dict] = {}
+        self.outcome_trackers: dict[str, dict[int, dict]] = {}
+        scanner = self.store.get_scanner_settings()
+        self.min_price = float(scanner["min_price"])
+        self.max_price = float(scanner["max_price"])
+        self.universe.min_price = self.min_price
+        self.universe.max_price = self.max_price
+        stored_profile = self.store.get_notification_preferences().get("market_quality_profile", settings.quality_profile)
+        self.quality_profile = stored_profile if stored_profile in {"strict", "balanced", "permissive"} else "balanced"
+
+    def set_quality_profile(self, profile: str) -> None:
+        normalized = str(profile).lower()
+        if normalized in {"strict", "balanced", "permissive"}:
+            self.quality_profile = normalized
+
+    async def apply_scanner_range(self, minimum: float, maximum: float) -> dict[str, float]:
+        value = await asyncio.to_thread(self.store.set_scanner_settings, minimum, maximum)
+        self.min_price = float(value["min_price"])
+        self.max_price = float(value["max_price"])
+        self.universe.min_price = self.min_price
+        self.universe.max_price = self.max_price
+        selected = await asyncio.to_thread(self.universe.refresh_sync)
+        self._desired = selected
+        self._universe_ready.set()
+        if self.ws:
+            await self._reconcile(self.ws, self.subscribed, "SIP")
+        if self.overnight_ws:
+            await self._reconcile(self.overnight_ws, self.overnight_subscribed, "BOATS")
+        return value
+
+    def snapshot(self, ticker: str):
+        s = self.states.get(ticker.upper())
+        if not s:
+            return None
+        buckets = [Bucket(b.start_ts, b.open, b.high, b.low, b.close, b.volume, b.trades) for b in s.buckets]
+        cur = None
+        if s.current:
+            b = s.current
+            cur = Bucket(b.start_ts, b.open, b.high, b.low, b.close, b.volume, b.trades)
+        return buckets, cur
+
+    def register_finding(self, finding_id: int, finding: Finding) -> None:
+        if finding.price <= 0:
+            return
+        session = trading_session_key(finding.detected_at)
+        self.outcome_trackers.setdefault(finding.ticker.upper(), {})[int(finding_id)] = {
+            "id": int(finding_id),
+            "detected_at": float(finding.detected_at),
+            "price": float(finding.price),
+            "session": session,
+            "max_1m_pct": 0.0,
+            "max_5m_pct": 0.0,
+            "max_15m_pct": 0.0,
+            "max_session_pct": 0.0,
+            "time_to_peak_seconds": None,
+            "last_persist": 0.0,
+        }
+
+    def _update_outcomes(self, symbol: str, ts: float, price: float) -> None:
+        trackers = self.outcome_trackers.get(symbol)
+        if not trackers:
+            return
+        session = trading_session_key(ts)
+        stale: list[int] = []
+        for finding_id, tracker in list(trackers.items()):
+            if tracker["session"] != session:
+                stale.append(finding_id)
+                continue
+            elapsed = max(0.0, ts - tracker["detected_at"])
+            move = pct_change(tracker["price"], price)
+            if tracker["max_session_pct"] is None or move > tracker["max_session_pct"]:
+                tracker["max_session_pct"] = move
+                tracker["time_to_peak_seconds"] = elapsed
+            if elapsed <= 60 and (tracker["max_1m_pct"] is None or move > tracker["max_1m_pct"]):
+                tracker["max_1m_pct"] = move
+            if elapsed <= 300 and (tracker["max_5m_pct"] is None or move > tracker["max_5m_pct"]):
+                tracker["max_5m_pct"] = move
+            if elapsed <= 900 and (tracker["max_15m_pct"] is None or move > tracker["max_15m_pct"]):
+                tracker["max_15m_pct"] = move
+            if ts - tracker["last_persist"] >= 15 or elapsed >= 900:
+                tracker["last_persist"] = ts
+                self.store.upsert_outcome(
+                    finding_id, tracker["max_1m_pct"], tracker["max_5m_pct"], tracker["max_15m_pct"],
+                    tracker["max_session_pct"], tracker["time_to_peak_seconds"],
+                )
+        for finding_id in stale:
+            tracker = trackers.pop(finding_id, None)
+            if tracker:
+                self.store.upsert_outcome(
+                    finding_id, tracker["max_1m_pct"], tracker["max_5m_pct"], tracker["max_15m_pct"],
+                    tracker["max_session_pct"], tracker["time_to_peak_seconds"],
+                )
+        if not trackers:
+            self.outcome_trackers.pop(symbol, None)
+
+    def snapshot_payload(self, ticker: str) -> dict | None:
+        ticker = ticker.upper()
+        snap = self.snapshot(ticker)
+        state = self.states.get(ticker)
+        if not snap or not state:
+            return None
+        buckets, current = snap
+        rows = buckets[-120:] + ([current] if current else [])
+        metrics = self._metrics(state, time.time()) if state.current else None
+        return {
+            "ticker": ticker,
+            "session_date": state.session_date,
+            "session_first_price": state.session_first_price,
+            "buckets": [
+                {
+                    "start_ts": b.start_ts, "open": b.open, "high": b.high, "low": b.low,
+                    "close": b.close, "volume": b.volume, "trades": b.trades,
+                } for b in rows if b is not None
+            ],
+            "metrics": metrics or {},
+            "halt": self.halts.get(ticker),
+        }
+
+    def diagnostics(self, ticker: str) -> dict:
+        ticker = ticker.upper()
+        state = self.states.get(ticker)
+        if not state or not state.current:
+            return {"ticker": ticker, "available": False, "reasons": ["symbol is not warm in the live state cache"]}
+        m = self._metrics(state, time.time())
+        if not m:
+            return {"ticker": ticker, "available": False, "reasons": ["insufficient warmup buckets"]}
+        gates = {
+            "price_range": self.min_price <= m["price"] <= self.max_price,
+            "participation_30s": m["dollar30"] >= settings.min_30s_dollar_volume and m["trades30"] >= settings.min_30s_trades,
+            "relative_activity": m["vol15"] >= settings.vol_ratio_trigger or m["vol30"] >= settings.vol_ratio_trigger,
+            "early_velocity": m["change15"] >= settings.early_min_change_15s_pct or m["change30"] >= settings.early_min_change_30s_pct,
+            "surge": bool(m.get("surge")),
+            "breakout": bool(m.get("breakout")),
+            "staircase": bool(m.get("staircase")),
+            "ema_rising": bool(m.get("ema_up")),
+            "above_vwap": bool(m.get("above_vwap")),
+            "quiet_break": bool(m.get("quiet_break")),
+            "market_quality_clean": m.get("quality_label") == "CLEAN",
+            "bullish_confirmed": bool(m.get("bullish_confirmed")),
+        }
+        return {"ticker": ticker, "available": True, "metrics": m, "gates": gates, "rejection_reasons": m.get("rejection_reasons", [])}
+
+    def make_catalyst_finding(self, ticker: str, headline: str, category: str, catalyst_score: int, url: str, detected_at: float) -> tuple[Finding, list[Bucket], Bucket | None]:
+        ticker = ticker.upper()
+        s = self.states.get(ticker)
+        m = self._metrics(s, detected_at) if s else None
+        price = (m or {}).get("price", s.current.close if s and s.current else 0.0)
+        reaction_active = bool(
+            m and m.get("quality_label") == "CLEAN" and m.get("above_vwap")
+            and (float(m.get("change15") or 0) >= .7 or float(m.get("change60") or 0) >= 2.0)
+            and (int(m.get("trades30") or 0) >= 12 or float(m.get("dollar30") or 0) >= 5000)
+        )
+        catalyst_stage = "CATALYST_ACTIVE" if reaction_active else "CATALYST_WATCH"
+        f = Finding(
+            ticker=ticker, stage=catalyst_stage, detected_at=detected_at, price=float(price or 0.0),
+            score=max(1, min(10, catalyst_score * 2)),
+            vol_ratio_15s=float((m or {}).get("vol15", 0.0)), vol_ratio_30s=float((m or {}).get("vol30", 0.0)),
+            change_60s_pct=float((m or {}).get("change60", 0.0)), extension_pct=float((m or {}).get("extension", 0.0)),
+            ema9=(m or {}).get("ema9"), ema21=(m or {}).get("ema21"), ema9_slope=(m or {}).get("ema9_slope"),
+            vwap=(m or {}).get("vwap"), above_vwap=bool((m or {}).get("above_vwap", False)),
+            quiet_break=bool((m or {}).get("quiet_break", False)),
+            evidence=list((m or {}).get("evidence", [])) + [f"bullish catalyst: {category}"],
+            catalyst_headline=headline, catalyst_category=category, catalyst_score=catalyst_score, catalyst_url=url,
+            change_3s_pct=(m or {}).get("change3"), change_5s_pct=(m or {}).get("change5"),
+            change_10s_pct=(m or {}).get("change10"), change_15s_pct=(m or {}).get("change15"),
+            change_30s_pct=(m or {}).get("change30"), accel_15s_pp=(m or {}).get("accel15_pp"),
+            dollar_volume_15s=(m or {}).get("dollar15"), dollar_volume_30s=(m or {}).get("dollar30"),
+            trades_15s=(m or {}).get("trades15"), trades_30s=(m or {}).get("trades30"),
+            breakout_level=(m or {}).get("breakout_level"), breakout_window=(m or {}).get("breakout_window"),
+            signals=[catalyst_stage, "CATALYST"], urgency="NOW" if reaction_active else "WATCH",
+            quality_label=(m or {}).get("quality_label", "DEVELOPING"), quality_score=int((m or {}).get("quality_score", 0)),
+            actionable_rank=(m or {}).get("actionable_rank", "C"), rejection_reasons=list((m or {}).get("rejection_reasons", [])),
+            directional_efficiency=(m or {}).get("directional_efficiency"), active_bucket_ratio=(m or {}).get("active_bucket_ratio"),
+            direction_reversals=(m or {}).get("direction_reversals"), previous_close=(m or {}).get("previous_close"),
+            gap_pct=(m or {}).get("gap_pct"), day_volume=(m or {}).get("day_volume"), projected_session_volume=(m or {}).get("projected_session_volume"),
+            volume_rate_per_minute=(m or {}).get("volume_rate_per_minute"), candidate_profile={**dict((m or {}).get("candidate_profile", {})), "catalyst": min(100, catalyst_score * 20)},
+        )
+        snap = self.snapshot(ticker)
+        buckets, current = snap if snap else ([], None)
+        return f, buckets, current
+
+    def top_movers_sync(self, top: int = 20) -> dict:
+        top = max(1, min(50, int(top)))
+        r = requests.get(
+            f"{settings.alpaca_data_base}/v1beta1/screener/stocks/movers",
+            params={"top": top},
+            headers=_headers(),
+            timeout=15,
+        )
+        r.raise_for_status()
+        payload = r.json()
+        gainers = payload.get("gainers", []) if isinstance(payload, dict) else []
+        tickers = [str(x.get("symbol", "")).upper() for x in gainers if x.get("symbol")]
+        scout = self.store.latest_findings_by_ticker(tickers)
+        for row in gainers:
+            symbol = str(row.get("symbol", "")).upper()
+            if symbol in scout:
+                row["scout"] = scout[symbol]
+        return {"gainers": gainers, "losers": payload.get("losers", []) if isinstance(payload, dict) else []}
+
+    def current_halts(self) -> list[dict]:
+        return sorted(
+            (dict(value) for value in self.halts.values() if value.get("is_halted")),
+            key=lambda x: x.get("event_at", 0),
+            reverse=True,
+        )
+
+    async def _handle_status(self, msg: dict) -> None:
+        symbol = str(msg.get("S", "")).upper()
+        if not symbol:
+            return
+        status_code = str(msg.get("sc", ""))
+        status_message = str(msg.get("sm", ""))
+        reason_code = str(msg.get("rc", ""))
+        reason_message = str(msg.get("rm", ""))
+        raw_ts = msg.get("t")
+        try:
+            event_ts = int(datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00")).timestamp())
+        except Exception:
+            event_ts = int(time.time())
+
+        description = f"{status_message} {reason_message}".lower()
+        is_halted = (
+            status_code in {"H", "2"}
+            or "halt" in description
+            or "pause" in description
+        )
+        is_resume = (
+            status_code == "3"
+            or "resume" in description
+            or "resumption" in description
+            or "quotation to resume" in description
+        )
+        if is_resume:
+            is_halted = False
+
+        previous = self.halts.get(symbol)
+        row = {
+            "ticker": symbol,
+            "status_code": status_code,
+            "status_message": status_message,
+            "reason_code": reason_code,
+            "reason_message": reason_message,
+            "event_at": event_ts,
+            "is_halted": is_halted,
+        }
+        self.halts[symbol] = row
+        await asyncio.to_thread(
+            self.store.save_market_status,
+            symbol, status_code, status_message, reason_code, reason_message, event_ts, is_halted,
+        )
+        transition = previous is None or bool(previous.get("is_halted")) != is_halted
+        if self.events:
+            self.events.publish("halt" if is_halted else "resume", row)
+
+        if transition and (is_halted or is_resume):
+            state = self.states.get(symbol)
+            metrics = self._metrics(state, float(event_ts)) if state else None
+            price = float((metrics or {}).get("price", state.current.close if state and state.current else 0.0) or 0.0)
+            finding = Finding(
+                ticker=symbol,
+                stage="HALT" if is_halted else "RESUME",
+                detected_at=float(event_ts),
+                price=price,
+                score=10 if is_halted else 7,
+                vol_ratio_15s=float((metrics or {}).get("vol15", 0.0)),
+                vol_ratio_30s=float((metrics or {}).get("vol30", 0.0)),
+                change_60s_pct=float((metrics or {}).get("change60", 0.0)),
+                extension_pct=float((metrics or {}).get("extension", 0.0)),
+                ema9=(metrics or {}).get("ema9"),
+                ema21=(metrics or {}).get("ema21"),
+                ema9_slope=(metrics or {}).get("ema9_slope"),
+                vwap=(metrics or {}).get("vwap"),
+                above_vwap=bool((metrics or {}).get("above_vwap", False)),
+                quiet_break=bool((metrics or {}).get("quiet_break", False)),
+                evidence=[
+                    f"market status: {status_message or status_code}",
+                    f"reason: {reason_message or reason_code}",
+                ],
+            )
+            snap = self.snapshot(symbol)
+            buckets, current = snap if snap else ([], None)
+            await self.dispatcher.emit(finding, buckets, current)
+
+        log.info(
+            "Market status %s %s code=%s reason=%s",
+            symbol, "HALTED" if is_halted else "RESUMED/STATUS", status_code, reason_code,
+        )
+
+    async def universe_loop(self):
+        while True:
+            try:
+                selected = await asyncio.to_thread(self.universe.refresh_sync)
+                self._desired = selected
+                self._universe_ready.set()
+                log.info("Universe refreshed: %d symbols%s", len(selected), " (wildcard)" if "*" in selected else "")
+                if self.ws:
+                    await self._reconcile(self.ws, self.subscribed, "SIP")
+                if self.overnight_ws:
+                    await self._reconcile(self.overnight_ws, self.overnight_subscribed, "BOATS")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Universe refresh failed")
+            await asyncio.sleep(settings.universe_refresh_seconds)
+
+    async def _reconcile(self, ws, subscribed: set[str], label: str):
+        if not ws:
+            return
+        desired = set(self._desired)
+        if "*" in desired:
+            if subscribed != {"*"}:
+                await ws.send(json.dumps({"action": "subscribe", "trades": ["*"]}))
+                subscribed.clear()
+                subscribed.add("*")
+            return
+        add = sorted(desired - subscribed)
+        remove = sorted(subscribed - desired)
+        # Chunk subscription messages to avoid giant frames.
+        for chunk in _chunks(remove, 1000):
+            await ws.send(json.dumps({"action": "unsubscribe", "trades": chunk}))
+        for chunk in _chunks(add, 1000):
+            await ws.send(json.dumps({"action": "subscribe", "trades": chunk}))
+        subscribed.difference_update(remove)
+        subscribed.update(add)
+        if add or remove:
+            log.info("%s subscriptions updated: +%d -%d total=%d", label, len(add), len(remove), len(subscribed))
+
+    def _metrics(self, s: SymbolState, now: float) -> dict | None:
+        if not s.current or len(s.buckets) < 4:
+            return None
+
+        closed = list(s.buckets)
+        full_warmup = len(closed) >= settings.warmup_buckets
+        baseline_rows = closed[-settings.baseline_buckets:]
+        positive_volumes = [b.volume for b in baseline_rows if b.volume > 0]
+        active_median = statistics.median(positive_volumes) if positive_volumes else 0.0
+        baseline = max(settings.baseline_volume_floor, active_median)
+
+        current_vol = s.current.volume
+        prev = closed[-1] if closed else None
+        prev_vol = prev.volume if prev else 0.0
+        vol15 = current_vol / baseline
+        vol30 = (current_vol + prev_vol) / max(1.0, baseline * 2.0)
+
+        price = s.current.close
+        trades15 = s.current.trades
+        trades30 = trades15 + (prev.trades if prev else 0)
+        dollar15 = current_vol * price
+        dollar30 = dollar15 + ((prev.volume * prev.close) if prev else 0.0)
+        active_buckets30 = int(s.current.trades > 0) + int(bool(prev and prev.trades > 0))
+
+        def price_ago(seconds: int, minimum_coverage: int):
+            target = now - seconds
+            candidate = None
+            for ts, px in s.price_points:
+                if ts <= target:
+                    candidate = px
+                else:
+                    break
+            if candidate is not None:
+                return candidate
+            if s.price_points:
+                first_ts, first_px = s.price_points[0]
+                if now - first_ts >= minimum_coverage:
+                    return first_px
+            return None
+
+        price3 = price_ago(3, 2)
+        price5 = price_ago(5, 4)
+        price10 = price_ago(10, 8)
+        price15 = price_ago(15, 12)
+        price30 = price_ago(30, 25)
+        price60 = price_ago(60, 50)
+
+        change3 = pct_change(price3, price) if price3 else 0.0
+        change5 = pct_change(price5, price) if price5 else 0.0
+        change10 = pct_change(price10, price) if price10 else 0.0
+        change15 = pct_change(price15, price) if price15 else 0.0
+        change30 = pct_change(price30, price) if price30 else 0.0
+        change60 = pct_change(price60, price) if price60 else 0.0
+
+        prior15_change = pct_change(price30, price15) if price30 is not None and price15 is not None else None
+        accel15_pp = change15 - prior15_change if prior15_change is not None else None
+        price_accelerating = bool(
+            accel15_pp is not None
+            and accel15_pp >= settings.price_acceleration_min_pp
+            and change15 > 0
+        )
+
+        closes = [b.close for b in closed[-40:]] + [price]
+        e9 = ema(closes, 9)
+        e21 = ema(closes, 21)
+        prior_e9 = ema(closes[:-1], 9) if len(closes) > 1 else e9
+        e9_gap_pct = pct_change(e21, e9) if e9 is not None and e21 is not None else 0.0
+        e9_slope_pct = pct_change(prior_e9, e9) if e9 is not None and prior_e9 is not None else 0.0
+        ema_up = e9_slope_pct >= settings.ema_slope_tolerance_pct
+        ema_bull = e9_gap_pct >= settings.ema_gap_tolerance_pct
+        ema_bear = e9_gap_pct <= -settings.ema_gap_tolerance_pct
+
+        quiet = closed[-8:] if len(closed) >= 8 else closed
+        quiet_base = statistics.median([b.close for b in quiet]) if quiet else price
+        quiet_high = max((b.high for b in quiet), default=price)
+        extension = pct_change(quiet_base, price)
+        quiet_break = price >= quiet_high * 1.005
+
+        vwap = s.session_pv / s.session_volume if s.session_volume > 0 else None
+        vwap_gap_pct = pct_change(vwap, price) if vwap else None
+        above_vwap = bool(vwap is not None and price >= vwap)
+        near_vwap = bool(vwap is None or (vwap_gap_pct is not None and vwap_gap_pct >= -settings.vwap_tolerance_pct))
+
+        # Staircase: gradual 1-2 minute participation + higher lows.
+        stair_rows = closed[-(settings.staircase_window_buckets - 1):] + [s.current]
+        active_stair = [b for b in stair_rows if b.trades > 0]
+        stair_change = 0.0
+        stair_up_ratio = 0.0
+        stair_higher_low_ratio = 0.0
+        stair_dollar = 0.0
+        stair_trades = 0
+        if active_stair:
+            stair_change = pct_change(active_stair[0].close, price)
+            stair_dollar = sum(b.volume * b.close for b in active_stair)
+            stair_trades = sum(b.trades for b in active_stair)
+        if len(active_stair) >= 2:
+            pairs = list(zip(active_stair, active_stair[1:]))
+            up_steps = sum(1 for a, b in pairs if pct_change(a.close, b.close) >= 0.02)
+            higher_lows = sum(1 for a, b in pairs if pct_change(a.low, b.low) >= -0.05)
+            stair_up_ratio = up_steps / len(pairs)
+            stair_higher_low_ratio = higher_lows / len(pairs)
+        staircase = bool(
+            full_warmup
+            and len(active_stair) >= settings.staircase_min_active_buckets
+            and stair_change >= settings.staircase_min_change_pct
+            and stair_up_ratio >= settings.staircase_min_up_step_ratio
+            and stair_higher_low_ratio >= settings.staircase_min_higher_low_ratio
+            and stair_dollar >= settings.staircase_min_dollar_volume
+            and stair_trades >= settings.staircase_min_trades
+            and ema_up
+        )
+
+        # Immediate-surge sensor. Velocity is trade-by-trade rather than waiting
+        # for a completed 15-second candle.
+        surge_velocity = (
+            change3 >= settings.surge_min_change_3s_pct
+            or change5 >= settings.surge_min_change_5s_pct
+            or change10 >= settings.surge_min_change_10s_pct
+            or change15 >= settings.surge_min_change_15s_pct
+        )
+        surge = bool(
+            surge_velocity
+            and vol15 >= settings.surge_min_vol_ratio
+            and dollar15 >= settings.surge_min_dollar_15s
+            and trades15 >= settings.surge_min_trades_15s
+            and change3 > -0.10
+            and change5 > -0.10
+        )
+
+        # Structural breakout levels are based only on completed buckets.
+        resistance_levels: dict[str, float] = {}
+        broken_levels: list[tuple[str, float, float]] = []
+        for label, count in (("1m", 4), ("3m", 12), ("5m", 20)):
+            if len(closed) < count:
+                continue
+            level = max(b.high for b in closed[-count:])
+            resistance_levels[label] = level
+            penetration = pct_change(level, price)
+            if penetration >= settings.breakout_min_penetration_pct:
+                broken_levels.append((label, level, penetration))
+        breakout_window = broken_levels[-1][0] if broken_levels else None
+        breakout_level = broken_levels[-1][1] if broken_levels else None
+        breakout_penetration_pct = broken_levels[-1][2] if broken_levels else 0.0
+        breakout = bool(
+            broken_levels
+            and vol30 >= settings.breakout_min_vol_ratio
+            and dollar30 >= settings.breakout_min_dollar_30s
+            and trades30 >= settings.breakout_min_trades_30s
+            and (ema_up or ema_bull or above_vwap or price_accelerating)
+            and change15 > -0.05
+        )
+
+        volume_accelerating = current_vol > prev_vol * 1.25 if prev_vol > 0 else current_vol > baseline * 2
+
+        # Market-quality gate: distinguish continuous, directional participation
+        # from isolated prints, empty buckets, gap noise, and alternating chop.
+        quality_rows = (closed + [s.current])[-settings.quality_window_buckets:]
+        active_rows = [b for b in quality_rows if b.trades > 0]
+        active_bucket_ratio = len(active_rows) / max(1, len(quality_rows))
+        row_moves = [pct_change(a.close, b.close) for a, b in zip(active_rows, active_rows[1:])]
+        path_move = sum(abs(move) for move in row_moves)
+        directional_efficiency = abs(pct_change(active_rows[0].close, active_rows[-1].close)) / path_move if len(active_rows) >= 2 and path_move > 0 else 0.0
+        directions = [1 if move > 0.02 else -1 if move < -0.02 else 0 for move in row_moves]
+        directions = [direction for direction in directions if direction]
+        direction_reversals = sum(1 for a, b in zip(directions, directions[1:]) if a != b)
+        max_gap_pct = max((abs(pct_change(a.close, b.open)) for a, b in zip(quality_rows, quality_rows[1:])), default=0.0)
+        wick_ratios = []
+        for row in active_rows:
+            body = max(abs(row.close - row.open), max(row.close, 0.01) * 0.0002)
+            wick_ratios.append(max(0.0, (row.high - row.low - abs(row.close - row.open)) / body))
+        median_wick_ratio = statistics.median(wick_ratios) if wick_ratios else 0.0
+        latest_trade_age = max(0.0, now - s.price_points[-1][0]) if s.price_points else float("inf")
+
+        profile = self.quality_profile
+        profile_factor = {"strict": 1.25, "balanced": 1.0, "permissive": 0.70}[profile]
+        min_active_ratio = min(0.90, settings.quality_min_active_ratio * profile_factor)
+        min_trades30 = max(2, round(settings.quality_min_trades_30s * profile_factor))
+        min_dollar30 = settings.quality_min_dollar_30s * profile_factor
+        min_efficiency = min(0.80, settings.quality_min_directional_efficiency * profile_factor)
+        max_reversals = max(2, round(settings.quality_max_direction_reversals / profile_factor))
+        max_gap = settings.quality_max_gap_pct / profile_factor
+        max_wick = settings.quality_max_wick_ratio / profile_factor
+        impulse_quality = bool(
+            trades15 >= settings.quality_impulse_min_trades_15s
+            and dollar15 >= settings.quality_impulse_min_dollar_15s
+            and (change5 >= settings.surge_min_change_5s_pct or change15 >= settings.early_min_change_15s_pct)
+        )
+
+        rejection_reasons: list[str] = []
+        illiquid = trades30 < min_trades30 or dollar30 < min_dollar30
+        if illiquid and not impulse_quality:
+            rejection_reasons.append("LOW PARTICIPATION")
+        if active_bucket_ratio < min_active_ratio and not impulse_quality:
+            rejection_reasons.append("SPARSE PRINTS")
+        if directional_efficiency < min_efficiency and len(active_rows) >= 4:
+            rejection_reasons.append("CHOPPY PATH")
+        if direction_reversals > max_reversals:
+            rejection_reasons.append("EXCESS REVERSALS")
+        if max_gap_pct > max_gap:
+            rejection_reasons.append("GAP NOISE")
+        if median_wick_ratio > max_wick:
+            rejection_reasons.append("WICK NOISE")
+        if latest_trade_age > settings.quality_max_stale_seconds:
+            rejection_reasons.append("STALE TRADES")
+
+        bullish_confirmations = sum((
+            bool(ema_up), bool(ema_bull), bool(above_vwap),
+            change15 >= settings.early_min_change_15s_pct,
+            change30 >= settings.early_min_change_30s_pct,
+            directional_efficiency >= min_efficiency,
+        ))
+        bullish_confirmed = bool(bullish_confirmations >= 3 and not (ema_bear and not above_vwap) and change15 > -0.05)
+        if not bullish_confirmed:
+            rejection_reasons.append("BULLISH STRUCTURE UNCONFIRMED")
+
+        quality_score = 100
+        quality_score -= 24 if "LOW PARTICIPATION" in rejection_reasons else 0
+        quality_score -= 18 if "SPARSE PRINTS" in rejection_reasons else 0
+        quality_score -= 22 if "CHOPPY PATH" in rejection_reasons else 0
+        quality_score -= 12 if "EXCESS REVERSALS" in rejection_reasons else 0
+        quality_score -= 15 if "GAP NOISE" in rejection_reasons else 0
+        quality_score -= 12 if "WICK NOISE" in rejection_reasons else 0
+        quality_score -= 30 if "STALE TRADES" in rejection_reasons else 0
+        quality_score -= 18 if "BULLISH STRUCTURE UNCONFIRMED" in rejection_reasons else 0
+        quality_score = max(0, min(100, quality_score))
+        if "STALE TRADES" in rejection_reasons or "LOW PARTICIPATION" in rejection_reasons:
+            quality_label = "ILLIQUID"
+        elif any(reason in rejection_reasons for reason in ("CHOPPY PATH", "EXCESS REVERSALS", "GAP NOISE", "WICK NOISE")):
+            quality_label = "CHOPPY"
+        elif bullish_confirmed and quality_score >= 70:
+            quality_label = "CLEAN"
+        else:
+            quality_label = "DEVELOPING"
+        actionable_rank = "B" if quality_label == "CLEAN" else "C"
+
+        score = 0
+        evidence: list[str] = []
+        if vol15 >= settings.vol_ratio_trigger:
+            score += 3
+            evidence.append(f"15s volume {vol15:.1f}× baseline")
+        if vol15 >= settings.vol_ratio_trigger * 2:
+            score += 1
+            evidence.append("extreme volume anomaly")
+        if vol30 >= settings.vol_ratio_trigger:
+            score += 2
+            evidence.append(f"30s volume {vol30:.1f}× baseline")
+        if change15 >= settings.early_min_change_15s_pct:
+            score += 2
+            evidence.append(f"15s price +{change15:.2f}%")
+        if change30 >= settings.early_min_change_30s_pct:
+            score += 2
+            evidence.append(f"30s price +{change30:.2f}%")
+        if change60 >= settings.price_60s_trigger_pct:
+            score += 1
+            evidence.append(f"60s context +{change60:.2f}%")
+        if price_accelerating:
+            score += 1
+            evidence.append(f"price acceleration +{accel15_pp:.2f}pp vs prior 15s")
+        if surge:
+            score += 3
+            evidence.append(f"immediate surge: 3s {change3:+.2f}% / 5s {change5:+.2f}% / 10s {change10:+.2f}%")
+        if breakout:
+            score += 3
+            evidence.append(f"{breakout_window} resistance ${breakout_level:.4f} broken by {breakout_penetration_pct:.2f}%")
+        if staircase:
+            score += 3
+            evidence.append(f"staircase +{stair_change:.2f}% up={stair_up_ratio:.0%} higher-lows={stair_higher_low_ratio:.0%}")
+        if quiet_break:
+            score += 2
+            evidence.append("quiet range broken")
+        if ema_up:
+            score += 1
+            evidence.append("EMA9 slope rising")
+        if ema_bull:
+            score += 1
+            evidence.append("EMA9 > EMA21")
+        if above_vwap:
+            score += 1
+            evidence.append("price > session VWAP")
+        if volume_accelerating:
+            score += 1
+            evidence.append("volume accelerating")
+        if dollar30 >= settings.min_30s_dollar_volume and trades30 >= settings.min_30s_trades:
+            evidence.append(f"30s participation ${dollar30:,.0f} across {trades30} trades")
+        if quality_label == "CLEAN" and score >= settings.ignition_score:
+            actionable_rank = "A"
+
+        meta = self.universe.metadata.get(s.symbol, {})
+        previous_close = meta.get("previous_close")
+        gap_pct = pct_change(previous_close, price) if previous_close else None
+        day_volume = max(float(meta.get("day_volume") or 0), s.session_volume)
+        local_now = datetime.fromtimestamp(now, ET)
+        session_start = local_now.replace(hour=20, minute=0, second=0, microsecond=0)
+        if local_now.hour < 20:
+            session_start -= timedelta(days=1)
+        elapsed_minutes = max(1.0, (local_now - session_start).total_seconds() / 60.0)
+        projected_session_volume = s.session_volume / elapsed_minutes * 1440.0
+        recent_minutes = max(.25, len(quality_rows) * settings.bucket_seconds / 60.0)
+        volume_rate_per_minute = sum(row.volume for row in quality_rows) / recent_minutes
+
+        # Reversal context uses a longer window than the wake-up engine. The
+        # peak must precede the local low; otherwise an ordinary pullback from
+        # a fresh high could be mislabeled as a reversal.
+        reversal_rows = (closed + [s.current])[-settings.reversal_lookback_buckets:]
+        low_rows = reversal_rows[-settings.reversal_low_window_buckets:]
+        reversal_low_row = min(low_rows, key=lambda row: row.low) if low_rows else s.current
+        low_index = reversal_rows.index(reversal_low_row) if reversal_low_row in reversal_rows else len(reversal_rows) - 1
+        pre_low_rows = reversal_rows[:low_index] or reversal_rows[:1]
+        reversal_prior_peak = max((row.high for row in pre_low_rows), default=price)
+        reversal_low = float(reversal_low_row.low)
+        reversal_drawdown_pct = max(0.0, -pct_change(reversal_prior_peak, reversal_low)) if reversal_prior_peak > 0 else 0.0
+        reversal_bounce_pct = pct_change(reversal_low, price) if reversal_low > 0 else 0.0
+        reversal_low_age_seconds = max(0.0, now - reversal_low_row.start_ts)
+        ema9_reclaimed = bool(e9 is not None and price >= e9 and prev is not None and prior_e9 is not None and prev.close < prior_e9)
+        ema21_reclaimed = bool(e21 is not None and price >= e21 and prev is not None and prev.close < (ema(closes[:-1], 21) or e21))
+        reclaim_structure = bool(
+            e9 is not None and price >= e9 and ema_up
+            and (e21 is None or price >= e21 or above_vwap or near_vwap)
+        )
+        candidate_profile = {
+            "velocity": min(100, round(max(0.0, change5) * 28 + max(0.0, change15) * 14 + max(0.0, change30) * 7)),
+            "participation": min(100, round(min(vol15 / 8.0, 1.0) * 40 + min(trades30 / 30.0, 1.0) * 30 + min(dollar30 / 25000.0, 1.0) * 30)),
+            "structure": min(100, bullish_confirmations * 16 + (10 if quiet_break else 0)),
+            "catalyst": 0,
+            "quality": quality_score,
+            "supply": None,
+        }
+
+        # First-leg context is intentionally independent of the later breakout
+        # engine. It looks for the transition out of compression while price is
+        # still close to the structure that defines risk.
+        base_rows = closed[-settings.first_leg_base_buckets:]
+        base_low = min((row.low for row in base_rows), default=price)
+        base_high = max((row.high for row in base_rows), default=price)
+        base_mid = statistics.median([row.close for row in base_rows]) if base_rows else price
+        base_range_pct = pct_change(base_low, base_high) if base_low > 0 else 999.0
+        base_extension_pct = pct_change(base_mid, price) if base_mid > 0 else 999.0
+        base_pairs = list(zip(base_rows, base_rows[1:]))
+        higher_low_ratio = (
+            sum(1 for left, right in base_pairs if right.low >= left.low * 0.998) / len(base_pairs)
+            if base_pairs else 0.0
+        )
+        compressed = bool(
+            len(base_rows) >= settings.first_leg_base_buckets
+            and base_range_pct <= settings.first_leg_max_base_range_pct
+        )
+        orderly_base = bool(compressed or higher_low_ratio >= 0.65)
+        near_base = abs(base_extension_pct) <= settings.first_leg_max_extension_pct
+        micro_resistance = max((row.high for row in closed[-4:]), default=price)
+        pressing_micro_resistance = price >= micro_resistance * 0.9975
+        first_leg_velocity = bool(
+            change3 >= settings.first_leg_min_change_3s_pct
+            or change5 >= settings.first_leg_min_change_5s_pct
+            or change15 >= settings.first_leg_min_change_15s_pct
+        )
+        first_leg_participation = bool(
+            vol15 >= settings.first_leg_min_vol_ratio
+            and dollar15 >= settings.first_leg_min_dollar_15s
+            and trades15 >= settings.first_leg_min_trades_15s
+        )
+        first_leg_watch = bool(
+            full_warmup and orderly_base and near_base and ema_up
+            and (pressing_micro_resistance or reclaim_structure)
+            and vol15 >= max(1.5, settings.first_leg_min_vol_ratio * 0.6)
+        )
+        # The final bearish/quality gates are applied in _maybe_emit, where the
+        # short-horizon context and confirmation timer are available.
+        first_leg_release = bool(first_leg_watch and first_leg_velocity and first_leg_participation)
+        if reversal_drawdown_pct >= settings.reversal_min_drawdown_pct and reclaim_structure:
+            leg_context = "RECLAIM_RELEASE"
+        elif s.continuation_pullback_low is not None:
+            leg_context = "PULLBACK_RELEASE"
+        elif breakout and breakout_window == "5m":
+            leg_context = "HOD_REBREAK"
+        elif compressed:
+            leg_context = "BASE_RELEASE"
+        elif orderly_base:
+            leg_context = "CONSOLIDATION_RELEASE"
+        else:
+            leg_context = "BASE_RELEASE"
+
+        ross_checks = (
+            self.min_price <= price <= self.max_price,
+            gap_pct is None or gap_pct >= 2.0,
+            vol15 >= 2.0,
+            dollar30 >= 5000,
+            trades30 >= 12,
+            quality_label == "CLEAN",
+            bool(quiet_break or first_leg_release or breakout or staircase),
+            bool(ema_up or ema_bull),
+        )
+        ross_score = round(sum(ross_checks) / len(ross_checks) * 100)
+        ross_match = bool(ross_score >= 75 and quality_label == "CLEAN")
+
+        # Evidence score, not a probability. LULD applies only during the
+        # regular session; the exchange feed remains authoritative for an
+        # actual Limit State or pause.
+        regular_session = (local_now.hour, local_now.minute) >= (9, 30) and local_now.hour < 16
+        halt_pressure_score = 0
+        if regular_session and quality_label == "CLEAN":
+            halt_pressure_score = min(100, round(
+                min(max(change5, 0) / 2.0, 1.0) * 24
+                + min(max(change15, 0) / 4.0, 1.0) * 20
+                + min(vol15 / 8.0, 1.0) * 20
+                + min(trades15 / 35.0, 1.0) * 16
+                + min(dollar15 / 35000.0, 1.0) * 12
+                + (8 if price_accelerating else 0)
+            ))
+
+        return {
+            "full_warmup": full_warmup,
+            "price": price,
+            "baseline_volume": baseline,
+            "vol15": vol15,
+            "vol30": vol30,
+            "volume15": current_vol,
+            "volume30": current_vol + prev_vol,
+            "trades15": trades15,
+            "trades30": trades30,
+            "dollar15": dollar15,
+            "dollar30": dollar30,
+            "active_buckets30": active_buckets30,
+            "active_bucket_ratio": active_bucket_ratio,
+            "directional_efficiency": directional_efficiency,
+            "direction_reversals": direction_reversals,
+            "max_gap_pct": max_gap_pct,
+            "median_wick_ratio": median_wick_ratio,
+            "latest_trade_age": latest_trade_age,
+            "quality_label": quality_label,
+            "quality_score": quality_score,
+            "actionable_rank": actionable_rank,
+            "rejection_reasons": rejection_reasons,
+            "bullish_confirmed": bullish_confirmed,
+            "previous_close": previous_close,
+            "gap_pct": gap_pct,
+            "day_volume": day_volume,
+            "projected_session_volume": projected_session_volume,
+            "volume_rate_per_minute": volume_rate_per_minute,
+            "float_shares": None,
+            "float_turnover": None,
+            "candidate_profile": candidate_profile,
+            "base_range_pct": base_range_pct,
+            "base_extension_pct": base_extension_pct,
+            "higher_low_ratio": higher_low_ratio,
+            "micro_resistance": micro_resistance,
+            "first_leg_watch": first_leg_watch,
+            "first_leg_release": first_leg_release,
+            "leg_context": leg_context,
+            "ross_match": ross_match,
+            "ross_score": ross_score,
+            "base_low": base_low,
+            "base_high": base_high,
+            "halt_pressure_score": halt_pressure_score,
+            "reversal_prior_peak": reversal_prior_peak,
+            "reversal_low": reversal_low,
+            "reversal_drawdown_pct": reversal_drawdown_pct,
+            "reversal_bounce_pct": reversal_bounce_pct,
+            "reversal_low_age_seconds": reversal_low_age_seconds,
+            "ema9_reclaimed": ema9_reclaimed,
+            "ema21_reclaimed": ema21_reclaimed,
+            "reclaim_structure": reclaim_structure,
+            "change3": change3,
+            "change5": change5,
+            "change10": change10,
+            "change15": change15,
+            "change30": change30,
+            "change60": change60,
+            "prior15_change": prior15_change,
+            "accel15_pp": accel15_pp,
+            "price_accelerating": price_accelerating,
+            "ema9": e9,
+            "ema21": e21,
+            "ema9_slope": e9 - prior_e9 if e9 is not None and prior_e9 is not None else None,
+            "ema9_slope_pct": e9_slope_pct,
+            "ema_gap_pct": e9_gap_pct,
+            "ema_up": ema_up,
+            "ema_bull": ema_bull,
+            "ema_bear": ema_bear,
+            "vwap": vwap,
+            "vwap_gap_pct": vwap_gap_pct,
+            "above_vwap": above_vwap,
+            "near_vwap": near_vwap,
+            "quiet_break": quiet_break,
+            "extension": extension,
+            "staircase": staircase,
+            "stair_change": stair_change,
+            "stair_up_ratio": stair_up_ratio,
+            "stair_higher_low_ratio": stair_higher_low_ratio,
+            "stair_dollar": stair_dollar,
+            "stair_trades": stair_trades,
+            "surge": surge,
+            "surge_velocity": surge_velocity,
+            "breakout": breakout,
+            "breakout_level": breakout_level,
+            "breakout_window": breakout_window,
+            "breakout_penetration_pct": breakout_penetration_pct,
+            "resistance_levels": resistance_levels,
+            "score": score,
+            "evidence": evidence,
+        }
+
+    async def _maybe_emit(self, s: SymbolState, m: dict, ts: float, fast: bool = False):
+        if not (self.min_price <= m["price"] <= self.max_price):
+            return
+        reversal_extension_exception = bool(
+            m.get("reversal_drawdown_pct", 0) >= settings.reversal_min_drawdown_pct
+            and m.get("reversal_bounce_pct", 0) <= 12.0
+        )
+        halt_pressure_qualifies = bool(m.get("halt_pressure_score", 0) >= 82 and m.get("quality_label") == "CLEAN")
+        if m["extension"] > settings.max_early_extension_pct and not reversal_extension_exception:
+            return
+
+        relative_activity = m["vol15"] >= settings.vol_ratio_trigger or m["vol30"] >= settings.vol_ratio_trigger
+        fast_single_bucket = (
+            m["vol15"] >= settings.fast_single_bucket_vol_ratio
+            and m["change15"] >= settings.fast_single_bucket_change_15s_pct
+            and m["dollar15"] >= settings.fast_single_bucket_dollar_volume
+            and m["trades15"] >= settings.fast_single_bucket_trades
+        )
+        regular_participation = (
+            m["dollar30"] >= settings.min_30s_dollar_volume
+            and m["trades30"] >= settings.min_30s_trades
+            and (not settings.require_two_active_buckets or m["active_buckets30"] >= 2)
+        )
+
+        sudden_impulse = (
+            m["change15"] >= settings.early_min_change_15s_pct
+            or m["change30"] >= settings.early_min_change_30s_pct
+            or (m["quiet_break"] and m["extension"] >= settings.early_min_extension_pct)
+        )
+        bearish_short = m["change15"] < -0.15 and m["change30"] < -0.20 and not m["staircase"]
+        deeply_below_vwap = bool(m["vwap_gap_pct"] is not None and m["vwap_gap_pct"] < -settings.early_max_below_vwap_pct)
+        structural_failure = (
+            deeply_below_vwap and m["ema_bear"] and not m["quiet_break"]
+            and not m["price_accelerating"] and not m["staircase"]
+        )
+        structure_ok = m["ema_up"] or m["ema_bull"] or m["quiet_break"] or m["price_accelerating"] or m["staircase"]
+        quality_actionable = m["quality_label"] == "CLEAN" and m["bullish_confirmed"]
+
+        first_leg_candidate = bool(
+            m.get("first_leg_watch") and not bearish_short and not structural_failure
+            and m["direction_reversals"] <= settings.quality_max_direction_reversals
+            and m["median_wick_ratio"] <= settings.quality_max_wick_ratio
+        )
+        if first_leg_candidate:
+            if not s.first_leg_candidate_at:
+                s.first_leg_candidate_at = ts
+                s.first_leg_context = str(m.get("leg_context") or "BASE_RELEASE")
+                watch = Finding(
+                    ticker=s.symbol, stage="FIRST_LEG_WATCH", detected_at=ts, price=m["price"],
+                    score=min(10, int(m["score"])), vol_ratio_15s=m["vol15"], vol_ratio_30s=m["vol30"],
+                    change_60s_pct=m["change60"], extension_pct=m["base_extension_pct"],
+                    ema9=m["ema9"], ema21=m["ema21"], ema9_slope=m["ema9_slope"], vwap=m["vwap"],
+                    above_vwap=m["above_vwap"], quiet_break=m["quiet_break"],
+                    evidence=list(m["evidence"]) + [f"{s.first_leg_context.lower().replace('_', ' ')} developing", f"base range {m['base_range_pct']:.2f}%"],
+                    change_3s_pct=m["change3"], change_5s_pct=m["change5"], change_10s_pct=m["change10"],
+                    change_15s_pct=m["change15"], change_30s_pct=m["change30"], accel_15s_pp=m["accel15_pp"],
+                    dollar_volume_15s=m["dollar15"], dollar_volume_30s=m["dollar30"], trades_15s=m["trades15"], trades_30s=m["trades30"],
+                    breakout_level=m["micro_resistance"], breakout_window="micro", signals=["FIRST_LEG_WATCH"],
+                    quality_label=m["quality_label"], quality_score=m["quality_score"], actionable_rank="C",
+                    rejection_reasons=m["rejection_reasons"], directional_efficiency=m["directional_efficiency"],
+                    active_bucket_ratio=m["active_bucket_ratio"], direction_reversals=m["direction_reversals"],
+                    previous_close=m["previous_close"], gap_pct=m["gap_pct"], day_volume=m["day_volume"],
+                    projected_session_volume=m["projected_session_volume"], volume_rate_per_minute=m["volume_rate_per_minute"],
+                    candidate_profile=dict(m["candidate_profile"]), episode_id=s.episode_id,
+                    leg_context=s.first_leg_context, ross_match=m["ross_match"], ross_score=m["ross_score"],
+                )
+                snap = self.snapshot(s.symbol)
+                buckets, current = snap if snap else ([], None)
+                await self.dispatcher.emit(watch, buckets, current)
+        else:
+            s.first_leg_candidate_at = 0.0
+            s.first_leg_context = None
+
+        first_leg_qualifies = bool(
+            first_leg_candidate and m.get("first_leg_release") and quality_actionable
+            and ts - s.first_leg_candidate_at >= settings.first_leg_confirmation_seconds
+            and ts - s.last_stage_alert_at.get("FIRST_LEG", 0.0) >= settings.first_leg_cooldown_seconds
+        )
+
+        reversal_context = bool(
+            m["reversal_drawdown_pct"] >= settings.reversal_min_drawdown_pct
+            and m["reversal_low_age_seconds"] <= settings.reversal_max_low_age_seconds
+        )
+        reversal_participation = bool(
+            (m["vol15"] >= settings.reversal_min_vol_ratio or m["vol30"] >= settings.reversal_min_vol_ratio)
+            and m["dollar30"] >= settings.reversal_min_dollar_30s
+            and m["trades30"] >= settings.reversal_min_trades_30s
+        )
+        reversal_fresh_participation = bool(
+            m["vol15"] >= settings.reversal_min_vol_ratio_15s
+            and m["dollar15"] >= settings.reversal_min_dollar_15s
+            and m["trades15"] >= settings.reversal_min_trades_15s
+        )
+        reversal_watch_qualifies = bool(
+            reversal_context and reversal_participation
+            and m["reversal_bounce_pct"] >= settings.reversal_watch_min_bounce_pct
+            and (m["change5"] > 0 or m["change15"] > 0 or m["price_accelerating"])
+            and not bearish_short
+        )
+        reclaim_qualifies = bool(
+            reversal_context and reversal_participation and reversal_fresh_participation and quality_actionable
+            and m["reversal_bounce_pct"] >= settings.reversal_reclaim_min_bounce_pct
+            and m["reclaim_structure"]
+            and (m["ema9_reclaimed"] or m["ema21_reclaimed"] or m["above_vwap"] or m["ema_bull"])
+            and ts - s.last_reversal_episode_at >= settings.reversal_episode_cooldown_seconds
+        )
+
+        if s.reversal_phase != "IDLE" and ts - s.reversal_started_at > settings.reversal_max_low_age_seconds * 2:
+            s.reversal_phase = "IDLE"
+            s.reversal_low = None
+            s.reversal_peak = None
+            s.reversal_pullback_low = None
+
+        if s.reversal_phase in {"RECLAIM", "PULLBACK"}:
+            s.reversal_peak = max(float(s.reversal_peak or m["price"]), m["price"])
+            pullback_depth = max(0.0, -pct_change(float(s.reversal_peak), m["price"]))
+            structural_hold = bool(
+                (m["ema21"] is None or m["price"] >= m["ema21"] * 0.9975)
+                and (m["vwap"] is None or m["price"] >= m["vwap"] * 0.9975)
+            )
+            if settings.reversal_pullback_min_pct <= pullback_depth <= settings.reversal_pullback_max_pct and structural_hold:
+                s.reversal_phase = "PULLBACK"
+                s.reversal_pullback_low = min(float(s.reversal_pullback_low or m["price"]), m["price"])
+
+        reversal_rearm_qualifies = bool(
+            s.reversal_phase == "PULLBACK" and quality_actionable and reversal_participation
+            and s.reversal_pullback_low is not None
+            and pct_change(s.reversal_pullback_low, m["price"]) >= settings.reversal_rearm_min_bounce_pct
+            and (m["change5"] >= settings.reversal_rearm_min_bounce_pct or m["change15"] >= settings.early_min_change_15s_pct)
+            and m["ema9"] is not None and m["price"] >= m["ema9"]
+        )
+
+        # Preserve early awareness without surfacing noisy activity as an alert.
+        # A WATCH finding is persisted/SSE-visible but is silent by default and
+        # does not advance the ticker's actionable episode rank.
+        if not quality_actionable:
+            watchable = relative_activity and (regular_participation or fast_single_bucket) and (sudden_impulse or m["score"] >= settings.early_score)
+            reversal_watch = reversal_watch_qualifies and s.reversal_phase == "IDLE" and ts - s.last_watch_at >= settings.quality_watch_cooldown_seconds
+            activity_watch = watchable and s.last_stage_rank == 0 and ts - s.last_watch_at >= settings.quality_watch_cooldown_seconds
+            if reversal_watch or activity_watch:
+                watch_stage = "REVERSAL_WATCH" if reversal_watch else "ACTIVITY_WATCH"
+                watch_evidence = list(m["evidence"])
+                if reversal_watch:
+                    watch_evidence.extend([
+                        f"prior selloff -{m['reversal_drawdown_pct']:.2f}% from ${m['reversal_prior_peak']:.4f}",
+                        f"local-low bounce +{m['reversal_bounce_pct']:.2f}% from ${m['reversal_low']:.4f}",
+                        "reversal developing; structural reclaim not confirmed",
+                    ])
+                watch = Finding(
+                    ticker=s.symbol, stage=watch_stage, detected_at=ts, price=m["price"], score=min(10, int(m["score"])),
+                    vol_ratio_15s=m["vol15"], vol_ratio_30s=m["vol30"], change_60s_pct=m["change60"], extension_pct=m["extension"],
+                    ema9=m["ema9"], ema21=m["ema21"], ema9_slope=m["ema9_slope"], vwap=m["vwap"], above_vwap=m["above_vwap"],
+                    quiet_break=m["quiet_break"], evidence=watch_evidence, change_3s_pct=m["change3"], change_5s_pct=m["change5"],
+                    change_10s_pct=m["change10"], change_15s_pct=m["change15"], change_30s_pct=m["change30"], accel_15s_pp=m["accel15_pp"],
+                    dollar_volume_15s=m["dollar15"], dollar_volume_30s=m["dollar30"], trades_15s=m["trades15"], trades_30s=m["trades30"],
+                    breakout_level=m["breakout_level"], breakout_window=m["breakout_window"], signals=[watch_stage],
+                    quality_label=m["quality_label"], quality_score=m["quality_score"], actionable_rank="C",
+                    rejection_reasons=m["rejection_reasons"], directional_efficiency=m["directional_efficiency"],
+                    active_bucket_ratio=m["active_bucket_ratio"], direction_reversals=m["direction_reversals"],
+                    previous_close=m["previous_close"], gap_pct=m["gap_pct"], day_volume=m["day_volume"],
+                    projected_session_volume=m["projected_session_volume"], volume_rate_per_minute=m["volume_rate_per_minute"],
+                    float_shares=m["float_shares"], float_turnover=m["float_turnover"], candidate_profile=dict(m["candidate_profile"]),
+                    episode_id=s.episode_id, reversal_phase="WATCH" if reversal_watch else None,
+                    reversal_low=m["reversal_low"] if reversal_watch else None,
+                    reversal_drawdown_pct=m["reversal_drawdown_pct"] if reversal_watch else None,
+                )
+                s.last_watch_at = ts
+                if reversal_watch:
+                    s.reversal_phase = "WATCH"
+                    s.reversal_low = m["reversal_low"]
+                    s.reversal_peak = m["price"]
+                    s.reversal_started_at = ts
+                snap = self.snapshot(s.symbol)
+                buckets, current = snap if snap else ([], None)
+                await self.dispatcher.emit(watch, buckets, current)
+            return
+
+        early_qualifies = bool(
+            m["full_warmup"]
+            and m["score"] >= settings.early_score
+            and (relative_activity or fast_single_bucket or m["staircase"])
+            and (regular_participation or fast_single_bucket or m["staircase"])
+            and (sudden_impulse or m["staircase"])
+            and not bearish_short
+            and not structural_failure
+            and structure_ok
+            and quality_actionable
+        )
+        staircase_qualifies = bool(early_qualifies and m["staircase"])
+        fresh_velocity = max(m["change3"], m["change5"], m["change15"], m["change30"])
+        surge_structure_ok = bool(
+            m["ema_bull"]
+            or (
+                m["above_vwap"]
+                and m["dollar15"] >= settings.surge_weak_structure_min_dollar_15s
+                and m["trades15"] >= settings.surge_weak_structure_min_trades_15s
+            )
+        )
+        surge_qualifies = bool(m["surge"] and quality_actionable and surge_structure_ok)
+        breakout_qualifies = bool(
+            m["breakout"] and quality_actionable
+            and fresh_velocity >= settings.breakout_min_fresh_velocity_pct
+        )
+
+        ignition_participation = m["dollar30"] >= settings.ignition_min_30s_dollar_volume and m["trades30"] >= settings.ignition_min_30s_trades
+        ignition_impulse = (
+            m["change15"] >= settings.ignition_min_change_15s_pct
+            or m["change30"] >= settings.ignition_min_change_30s_pct
+            or (m["quiet_break"] and m["extension"] >= settings.ignition_min_extension_pct)
+        )
+        ignition_structure = m["above_vwap"] and (
+            m["ema_bull"] or (m["ema_up"] and (m["quiet_break"] or m["price_accelerating"] or m["staircase"] or m["breakout"]))
+        )
+        ignition_qualifies = bool(
+            m["full_warmup"] and m["score"] >= settings.ignition_score
+            and ignition_participation and ignition_impulse and ignition_structure
+            and fresh_velocity >= settings.ignition_min_fresh_velocity_pct
+            and quality_actionable
+        )
+
+        if s.continuation_started_at and s.continuation_peak is not None:
+            s.continuation_peak = max(s.continuation_peak, m["price"])
+            continuation_depth = max(0.0, -pct_change(s.continuation_peak, m["price"]))
+            if settings.reversal_pullback_min_pct <= continuation_depth <= settings.reversal_pullback_max_pct:
+                s.continuation_pullback_low = min(float(s.continuation_pullback_low or m["price"]), m["price"])
+
+        rearm_qualifies = False
+        if breakout_qualifies and s.last_stage_rank >= 3 and s.last_breakout_level:
+            level_improvement = pct_change(s.last_breakout_level, float(m["breakout_level"] or 0.0))
+            rearm_qualifies = (
+                level_improvement >= settings.rearm_min_level_improvement_pct
+                and ts - s.last_alert_at >= settings.rearm_min_seconds
+                and s.continuation_pullback_low is not None
+                and pct_change(s.continuation_pullback_low, m["price"]) >= settings.reversal_rearm_min_bounce_pct
+            )
+
+        if not any((first_leg_qualifies, early_qualifies, surge_qualifies, breakout_qualifies, ignition_qualifies, rearm_qualifies, reclaim_qualifies, reversal_rearm_qualifies)):
+            return
+
+        signals: list[str] = []
+        if first_leg_qualifies:
+            signals.extend(["FIRST_LEG", str(s.first_leg_context or m["leg_context"])])
+        if early_qualifies:
+            signals.append("EARLY")
+        if m["staircase"]:
+            signals.append("STAIRCASE")
+        if surge_qualifies:
+            signals.append("SURGE")
+        if breakout_qualifies:
+            signals.append("BREAKOUT")
+        if ignition_qualifies:
+            signals.append("IGNITION")
+        reclaim_stage = "VWAP_RECLAIM" if m["above_vwap"] else "EMA_RECLAIM"
+        if reclaim_qualifies:
+            signals.extend(["RECLAIM", reclaim_stage])
+
+        if reversal_rearm_qualifies:
+            stage, rank = "REARM", 5
+            signals.extend(["RECLAIM", "FIRST_PULLBACK", "REARM"])
+        elif reclaim_qualifies:
+            stage, rank = reclaim_stage, 3
+        elif rearm_qualifies:
+            stage, rank = "REARM", max(5, s.last_stage_rank)
+            signals.append("REARM")
+        elif halt_pressure_qualifies:
+            stage, rank = "HALT_PRESSURE", 7
+            signals.extend(["HALT_WATCH", "HALT_PRESSURE"])
+        elif ignition_qualifies:
+            stage, rank = "IGNITION", 5
+        elif breakout_qualifies:
+            stage, rank = "BREAKOUT", 4
+        elif surge_qualifies:
+            stage, rank = "SURGE", 3
+        elif first_leg_qualifies:
+            stage, rank = "FIRST_LEG", 1
+        elif staircase_qualifies and not sudden_impulse:
+            stage, rank = "STAIRCASE", 2
+        elif early_qualifies:
+            stage, rank = "EARLY", 2
+        else:
+            return
+
+        if stage in {"EMA_RECLAIM", "VWAP_RECLAIM"}:
+            s.episode_id += 1
+            s.last_stage_rank = 0
+            s.last_stage_alert_at.clear()
+        if stage != "REARM" and rank <= s.last_stage_rank:
+            return
+        if ts - s.last_stage_alert_at.get(stage, 0.0) < settings.signal_stage_cooldown_seconds:
+            return
+
+        # Fast evaluations may publish the purpose-built event-driven signals. The
+        # slower EARLY/STaircase path still requires the established fast gate.
+        if fast and stage in {"EARLY", "STAIRCASE"} and not (
+            (m["vol15"] >= settings.fast_vol_ratio_trigger and (m["change15"] >= settings.fast_price_15s_pct or m["change30"] >= settings.fast_price_30s_pct))
+            or fast_single_bucket or m["staircase"]
+        ):
+            return
+
+        catalyst = self.store.recent_catalyst(s.symbol)
+        if catalyst and "CATALYST" not in signals:
+            signals.append("CATALYST")
+        signals = list(dict.fromkeys(signals))
+
+        f = Finding(
+            ticker=s.symbol,
+            stage=stage,
+            detected_at=ts,
+            price=m["price"],
+            score=min(10, int(m["score"])),
+            vol_ratio_15s=m["vol15"],
+            vol_ratio_30s=m["vol30"],
+            change_60s_pct=m["change60"],
+            extension_pct=m["extension"],
+            ema9=m["ema9"],
+            ema21=m["ema21"],
+            ema9_slope=m["ema9_slope"],
+            vwap=m["vwap"],
+            above_vwap=m["above_vwap"],
+            quiet_break=m["quiet_break"],
+            evidence=list(m["evidence"]),
+            change_3s_pct=m["change3"],
+            change_5s_pct=m["change5"],
+            change_10s_pct=m["change10"],
+            change_15s_pct=m["change15"],
+            change_30s_pct=m["change30"],
+            accel_15s_pp=m["accel15_pp"],
+            dollar_volume_15s=m["dollar15"],
+            dollar_volume_30s=m["dollar30"],
+            trades_15s=m["trades15"],
+            trades_30s=m["trades30"],
+            breakout_level=m["breakout_level"],
+            breakout_window=m["breakout_window"],
+            signals=signals,
+            quality_label=m["quality_label"],
+            quality_score=m["quality_score"],
+            actionable_rank=m["actionable_rank"],
+            rejection_reasons=m["rejection_reasons"],
+            directional_efficiency=m["directional_efficiency"],
+            active_bucket_ratio=m["active_bucket_ratio"],
+            direction_reversals=m["direction_reversals"],
+            previous_close=m["previous_close"],
+            gap_pct=m["gap_pct"],
+            day_volume=m["day_volume"],
+            projected_session_volume=m["projected_session_volume"],
+            volume_rate_per_minute=m["volume_rate_per_minute"],
+            float_shares=m["float_shares"],
+            float_turnover=m["float_turnover"],
+            candidate_profile=dict(m["candidate_profile"]),
+            episode_id=s.episode_id,
+            reversal_phase="REARM" if reversal_rearm_qualifies else "RECLAIM" if reclaim_qualifies else s.reversal_phase if s.reversal_phase != "IDLE" else None,
+            reversal_low=s.reversal_low or (m["reversal_low"] if reclaim_qualifies else None),
+            reversal_drawdown_pct=m["reversal_drawdown_pct"] if (reclaim_qualifies or reversal_rearm_qualifies) else None,
+            leg_context=str(s.first_leg_context or m["leg_context"]) if first_leg_qualifies else None,
+            ross_match=m["ross_match"],
+            ross_score=m["ross_score"],
+            detection_timeframe_seconds=settings.bucket_seconds,
+            formation_start_at=(ts - settings.first_leg_base_buckets * settings.bucket_seconds),
+            formation_end_at=ts,
+            formation_low=m.get("base_low"),
+            formation_high=m.get("base_high"),
+            trigger_level=m.get("breakout_level") or m.get("micro_resistance"),
+            invalidation_level=m.get("base_low"),
+            halt_pressure_score=int(m.get("halt_pressure_score") or 0),
+            urgency=("NOW" if stage in {"FIRST_LEG","HALT_PRESSURE"} else "EXTENDED" if m["extension"] >= 8 else "CONFIRMED" if stage in {"IGNITION","BREAKOUT","SURGE"} else "WATCH"),
+            engine_version=settings.app_version,
+        )
+        if first_leg_qualifies:
+            f.evidence.extend([
+                f"{f.leg_context.lower().replace('_', ' ')} confirmed",
+                f"base range {m['base_range_pct']:.2f}% · {m['higher_low_ratio']:.0%} higher lows",
+                f"pressing ${m['micro_resistance']:.4f} micro resistance",
+                f"fresh participation ${m['dollar15']:,.0f} / {m['trades15']} trades",
+            ])
+        if reclaim_qualifies:
+            f.evidence.extend([
+                f"fresh reversal after -{m['reversal_drawdown_pct']:.2f}% selloff",
+                f"reclaimed structure +{m['reversal_bounce_pct']:.2f}% above ${m['reversal_low']:.4f} low",
+                ("VWAP reclaimed with fresh participation" if m["above_vwap"] else "EMA9/EMA21 reclaimed; VWAP remains overhead"),
+            ])
+        elif reversal_rearm_qualifies:
+            f.evidence.extend([
+                f"first pullback held above reclaimed structure at ${s.reversal_pullback_low:.4f}",
+                "demand re-accelerating after controlled pullback",
+            ])
+        elif rearm_qualifies:
+            f.evidence.extend([
+                f"documented pullback held at ${s.continuation_pullback_low:.4f}",
+                f"continuation resumed after {int(ts - s.last_alert_at)}s",
+            ])
+        if catalyst:
+            f.catalyst_headline, f.catalyst_category, f.catalyst_score, f.catalyst_url, _ = catalyst
+            f.candidate_profile["catalyst"] = min(100, int((f.catalyst_score or 0) * 20))
+            if first_leg_qualifies:
+                f.leg_context = "CATALYST_RELEASE"
+
+        s.last_stage_rank = max(s.last_stage_rank, rank)
+        s.last_alert_at = ts
+        s.last_stage_alert_at[stage] = ts
+        if breakout_qualifies and m["breakout_level"]:
+            s.last_breakout_level = float(m["breakout_level"])
+        if stage in {"BREAKOUT", "IGNITION"}:
+            s.continuation_peak = m["price"]
+            s.continuation_pullback_low = None
+            s.continuation_started_at = ts
+        if reclaim_qualifies:
+            s.reversal_phase = "RECLAIM"
+            s.reversal_low = m["reversal_low"]
+            s.reversal_peak = m["price"]
+            s.reversal_pullback_low = None
+            s.reversal_started_at = ts
+            s.last_reversal_episode_at = ts
+        elif reversal_rearm_qualifies:
+            s.reversal_phase = "REARM"
+        if rearm_qualifies:
+            s.continuation_peak = m["price"]
+            s.continuation_pullback_low = None
+            s.continuation_started_at = ts
+
+        snap = self.snapshot(s.symbol)
+        buckets, current = snap if snap else ([], None)
+        await self.dispatcher.emit(f, buckets, current)
+
+        log.info(
+            "%s %s $%.4f score=%d signals=%s 3s=%+.2f%% 5s=%+.2f%% 15s=%+.2f%% 30s=%+.2f%% "
+            "vol15=%.1fx breakout=%s stair=%s ext=%+.2f%% $30s=%.0f trades30=%d",
+            stage, s.symbol, f.price, f.score, ",".join(signals), m["change3"], m["change5"], m["change15"],
+            m["change30"], m["vol15"], m["breakout_window"], m["staircase"], f.extension_pct,
+            m["dollar30"], m["trades30"],
+        )
+
+    async def _handle_trade(self, msg: dict, subscribed: set[str]):
+        symbol = str(msg.get("S", "")).upper()
+        if not symbol:
+            return
+        if "*" not in subscribed and symbol not in subscribed:
+            return
+        try:
+            price = float(msg.get("p", 0)); size = float(msg.get("s", 0))
+        except Exception:
+            return
+        if price <= 0:
+            return
+        # Keep guard-band symbols warm even while just outside the alert price range.
+        # _maybe_emit() enforces MIN_PRICE/MAX_PRICE when deciding whether to alert.
+        raw_ts = msg.get("t")
+        try:
+            ts = datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00")).timestamp()
+        except Exception:
+            ts = time.time()
+        session_date = trading_session_key(ts)
+        s = self.states.get(symbol)
+        if s is None:
+            s = self.states[symbol] = SymbolState(symbol, settings.bucket_seconds, settings.keep_buckets)
+        s.update_trade(ts, price, size, session_date)
+        self._update_outcomes(symbol, ts, price)
+
+        now_ms = ts * 1000
+        if now_ms - s.last_fast_eval_at * 1000 >= settings.fast_path_min_interval_ms:
+            s.last_fast_eval_at = ts
+            m = self._metrics(s, ts)
+            if m:
+                await self._maybe_emit(s, m, ts, fast=True)
+        if ts - s.last_eval_at >= settings.eval_seconds:
+            s.last_eval_at = ts
+            m = self._metrics(s, ts)
+            if m:
+                await self._maybe_emit(s, m, ts, fast=False)
+
+    async def _stream(self, uri: str, label: str, overnight: bool = False):
+        if not settings.alpaca_key or not settings.alpaca_secret:
+            raise RuntimeError("ALPACA_API_KEY/ALPACA_API_SECRET are required")
+        await self._universe_ready.wait()
+        backoff = 2
+        while True:
+            try:
+                async with websockets.connect(uri, ping_interval=20, ping_timeout=20, close_timeout=5, max_size=None, max_queue=4096) as ws:
+                    subscribed = self.overnight_subscribed if overnight else self.subscribed
+                    if overnight:
+                        self.overnight_ws = ws
+                    else:
+                        self.ws = ws
+                    subscribed.clear()
+                    await ws.send(json.dumps({"action": "auth", "key": settings.alpaca_key, "secret": settings.alpaca_secret}))
+                    raw = await asyncio.wait_for(ws.recv(), timeout=10)
+                    log.info("Alpaca %s auth: %s", label, str(raw)[:250])
+                    await self._reconcile(ws, subscribed, label)
+                    if not overnight:
+                        await ws.send(json.dumps({"action": "subscribe", "statuses": ["*"]}))
+                    backoff = 2
+                    async for raw in ws:
+                        try:
+                            messages = orjson.loads(raw)
+                        except Exception:
+                            continue
+                        if isinstance(messages, dict):
+                            messages = [messages]
+                        for msg in messages:
+                            if not isinstance(msg, dict):
+                                continue
+                            if msg.get("T") == "t":
+                                await self._handle_trade(msg, subscribed)
+                            elif msg.get("T") == "s" and not overnight:
+                                await self._handle_status(msg)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                if overnight:
+                    self.overnight_ws = None
+                    self.overnight_subscribed.clear()
+                else:
+                    self.ws = None
+                    self.subscribed.clear()
+                log.exception("Alpaca %s stream disconnected; retry in %ss", label, backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(60, backoff * 2)
+
+    async def stream_loop(self):
+        await self._stream(settings.alpaca_market_ws, "SIP", overnight=False)
+
+    async def overnight_stream_loop(self):
+        await self._stream(settings.alpaca_overnight_ws, settings.alpaca_overnight_feed.upper(), overnight=True)

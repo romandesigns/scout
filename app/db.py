@@ -1,0 +1,723 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from .models import Finding
+from .preferences import normalize_notification_preferences
+
+
+FINDING_COLUMNS: list[tuple[str, str]] = [
+    ("change_3s_pct", "REAL"),
+    ("change_5s_pct", "REAL"),
+    ("change_10s_pct", "REAL"),
+    ("change_15s_pct", "REAL"),
+    ("change_30s_pct", "REAL"),
+    ("accel_15s_pp", "REAL"),
+    ("dollar_volume_15s", "REAL"),
+    ("dollar_volume_30s", "REAL"),
+    ("trades_15s", "INTEGER"),
+    ("trades_30s", "INTEGER"),
+    ("breakout_level", "REAL"),
+    ("breakout_window", "TEXT"),
+    ("signals_json", "TEXT"),
+    ("quality_label", "TEXT"),
+    ("quality_score", "INTEGER"),
+    ("actionable_rank", "TEXT"),
+    ("rejection_reasons_json", "TEXT"),
+    ("directional_efficiency", "REAL"),
+    ("active_bucket_ratio", "REAL"),
+    ("direction_reversals", "INTEGER"),
+    ("previous_close", "REAL"),
+    ("gap_pct", "REAL"),
+    ("day_volume", "REAL"),
+    ("projected_session_volume", "REAL"),
+    ("volume_rate_per_minute", "REAL"),
+    ("float_shares", "REAL"),
+    ("float_turnover", "REAL"),
+    ("candidate_profile_json", "TEXT"),
+    ("episode_id", "INTEGER"),
+    ("reversal_phase", "TEXT"),
+    ("reversal_low", "REAL"),
+    ("reversal_drawdown_pct", "REAL"),
+    ("leg_context", "TEXT"),
+    ("ross_match", "INTEGER"),
+    ("ross_score", "INTEGER"),
+    ("detection_timeframe_seconds", "INTEGER"),
+    ("formation_start_at", "INTEGER"),
+    ("formation_end_at", "INTEGER"),
+    ("formation_low", "REAL"),
+    ("formation_high", "REAL"),
+    ("trigger_level", "REAL"),
+    ("invalidation_level", "REAL"),
+    ("halt_pressure_score", "INTEGER"),
+    ("urgency", "TEXT"),
+    ("engine_version", "TEXT"),
+]
+
+
+class Store:
+    def __init__(self, path: Path):
+        self.path = path
+        self.lock = threading.Lock()
+        self.db = sqlite3.connect(path, check_same_thread=False)
+        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.execute("PRAGMA synchronous=NORMAL")
+        self._init()
+
+    def _ensure_columns(self, table: str, columns: list[tuple[str, str]]) -> None:
+        existing = {str(row[1]) for row in self.db.execute(f"PRAGMA table_info({table})").fetchall()}
+        for name, sql_type in columns:
+            if name not in existing:
+                self.db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}")
+
+    def _init(self) -> None:
+        with self.lock:
+            self.db.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS seen (
+                    key TEXT PRIMARY KEY,
+                    source TEXT NOT NULL,
+                    seen_at INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS catalysts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL,
+                    headline TEXT NOT NULL,
+                    category TEXT,
+                    score INTEGER,
+                    url TEXT,
+                    source TEXT,
+                    published_at INTEGER NOT NULL,
+                    UNIQUE(ticker, headline)
+                );
+                CREATE INDEX IF NOT EXISTS ix_catalysts_ticker_time ON catalysts(ticker,published_at DESC);
+                CREATE TABLE IF NOT EXISTS findings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL,
+                    stage TEXT NOT NULL,
+                    detected_at INTEGER NOT NULL,
+                    price REAL NOT NULL,
+                    score INTEGER NOT NULL,
+                    vol_ratio_15s REAL,
+                    vol_ratio_30s REAL,
+                    change_60s_pct REAL,
+                    extension_pct REAL,
+                    ema9 REAL,
+                    ema21 REAL,
+                    ema9_slope REAL,
+                    vwap REAL,
+                    above_vwap INTEGER,
+                    quiet_break INTEGER,
+                    evidence_json TEXT,
+                    catalyst_headline TEXT,
+                    catalyst_category TEXT,
+                    catalyst_score INTEGER,
+                    catalyst_url TEXT,
+                    chart_path TEXT
+                );
+                CREATE INDEX IF NOT EXISTS ix_findings_time ON findings(detected_at DESC);
+                CREATE INDEX IF NOT EXISTS ix_findings_ticker_time ON findings(ticker,detected_at DESC);
+                CREATE TABLE IF NOT EXISTS outcomes (
+                    finding_id INTEGER PRIMARY KEY,
+                    max_1m_pct REAL,
+                    max_5m_pct REAL,
+                    max_15m_pct REAL,
+                    max_session_pct REAL,
+                    time_to_peak_seconds REAL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS notification_preferences (
+                    key TEXT PRIMARY KEY,
+                    value_json TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS scanner_settings (
+                    key TEXT PRIMARY KEY,
+                    value_json TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS market_status_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL,
+                    status_code TEXT,
+                    status_message TEXT,
+                    reason_code TEXT,
+                    reason_message TEXT,
+                    event_at INTEGER NOT NULL,
+                    is_halted INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS ix_market_status_time ON market_status_events(event_at DESC);
+                CREATE INDEX IF NOT EXISTS ix_market_status_ticker_time ON market_status_events(ticker,event_at DESC);
+                CREATE TABLE IF NOT EXISTS opportunity_attention (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    episode_key TEXT NOT NULL UNIQUE,
+                    ticker TEXT NOT NULL,
+                    first_finding_id INTEGER NOT NULL,
+                    latest_finding_id INTEGER NOT NULL,
+                    stage_priority INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'unread',
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS ix_attention_status_time ON opportunity_attention(status,updated_at DESC);
+                CREATE TABLE IF NOT EXISTS notification_delivery_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    finding_id INTEGER NOT NULL,
+                    channel TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    event_at INTEGER NOT NULL,
+                    detail TEXT,
+                    provider_id TEXT
+                );
+                CREATE INDEX IF NOT EXISTS ix_delivery_finding_time ON notification_delivery_events(finding_id,event_at);
+                CREATE TABLE IF NOT EXISTS finding_reviews (
+                    finding_id INTEGER PRIMARY KEY,
+                    automatic_grade INTEGER,
+                    automatic_label TEXT,
+                    user_grade INTEGER,
+                    user_agrees INTEGER,
+                    reason_tags_json TEXT,
+                    notes TEXT,
+                    reviewed_at INTEGER
+                );
+                CREATE TABLE IF NOT EXISTS web_push_subscriptions (
+                    endpoint TEXT PRIMARY KEY,
+                    p256dh TEXT NOT NULL,
+                    auth TEXT NOT NULL,
+                    user_agent TEXT,
+                    created_at INTEGER NOT NULL,
+                    last_seen_at INTEGER NOT NULL
+                );
+                """
+            )
+            self._ensure_columns("findings", FINDING_COLUMNS)
+            self.db.commit()
+
+    def upsert_web_push_subscription(self, endpoint: str, p256dh: str, auth: str, user_agent: str = "") -> dict[str, Any]:
+        endpoint, p256dh, auth = endpoint.strip(), p256dh.strip(), auth.strip()
+        if not endpoint.startswith("https://") or not p256dh or not auth:
+            raise ValueError("invalid Web Push subscription")
+        now = int(time.time())
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO web_push_subscriptions(endpoint,p256dh,auth,user_agent,created_at,last_seen_at) VALUES(?,?,?,?,?,?) "
+                "ON CONFLICT(endpoint) DO UPDATE SET p256dh=excluded.p256dh,auth=excluded.auth,user_agent=excluded.user_agent,last_seen_at=excluded.last_seen_at",
+                (endpoint[:4000], p256dh[:1000], auth[:1000], user_agent[:500], now, now),
+            )
+            self.db.commit()
+        return {"endpoint": endpoint, "created_at": now}
+
+    def list_web_push_subscriptions(self) -> list[dict[str, str]]:
+        with self.lock:
+            rows = self.db.execute("SELECT endpoint,p256dh,auth,user_agent FROM web_push_subscriptions ORDER BY last_seen_at DESC").fetchall()
+        return [dict(zip(["endpoint", "p256dh", "auth", "user_agent"], row)) for row in rows]
+
+    def delete_web_push_subscription(self, endpoint: str) -> bool:
+        with self.lock:
+            cursor = self.db.execute("DELETE FROM web_push_subscriptions WHERE endpoint=?", (endpoint.strip(),))
+            self.db.commit()
+        return cursor.rowcount > 0
+
+    def web_push_subscription_count(self) -> int:
+        with self.lock:
+            return int(self.db.execute("SELECT COUNT(*) FROM web_push_subscriptions").fetchone()[0])
+
+    def seen(self, key: str) -> bool:
+        with self.lock:
+            return self.db.execute("SELECT 1 FROM seen WHERE key=?", (key,)).fetchone() is not None
+
+    def mark_seen(self, key: str, source: str) -> None:
+        with self.lock:
+            self.db.execute("INSERT OR IGNORE INTO seen(key,source,seen_at) VALUES(?,?,?)", (key, source, int(time.time())))
+            self.db.commit()
+
+    def save_catalyst(self, ticker: str, headline: str, category: str, score: int, url: str, source: str, published_at: int | None = None) -> None:
+        with self.lock:
+            self.db.execute(
+                "INSERT OR IGNORE INTO catalysts(ticker,headline,category,score,url,source,published_at) VALUES(?,?,?,?,?,?,?)",
+                (ticker.upper(), headline[:1000], category[:200], int(score), url[:2000], source[:100], int(published_at or time.time())),
+            )
+            self.db.commit()
+
+    def get_scanner_settings(self) -> dict[str, float]:
+        defaults = {"min_price": 0.15, "max_price": 10.0}
+        with self.lock:
+            row = self.db.execute("SELECT value_json FROM scanner_settings WHERE key='range'").fetchone()
+        if not row:
+            return defaults
+        try:
+            value = json.loads(row[0])
+            minimum = max(0.01, float(value.get("min_price", defaults["min_price"])))
+            maximum = min(1000.0, float(value.get("max_price", defaults["max_price"])))
+            return {"min_price": minimum, "max_price": maximum} if minimum < maximum else defaults
+        except Exception:
+            return defaults
+
+    def set_scanner_settings(self, minimum: float, maximum: float) -> dict[str, float]:
+        minimum = max(0.01, round(float(minimum), 4))
+        maximum = min(1000.0, round(float(maximum), 4))
+        if minimum >= maximum:
+            raise ValueError("minimum price must be below maximum price")
+        value = {"min_price": minimum, "max_price": maximum}
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO scanner_settings(key,value_json,updated_at) VALUES('range',?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at",
+                (json.dumps(value), int(time.time())),
+            )
+            self.db.commit()
+        return value
+
+    def recent_catalyst(self, ticker: str, max_age_minutes: int = 360):
+        cutoff = int(time.time()) - max_age_minutes * 60
+        with self.lock:
+            return self.db.execute(
+                "SELECT headline,category,score,url,published_at FROM catalysts WHERE ticker=? AND published_at>=? ORDER BY published_at DESC LIMIT 1",
+                (ticker.upper(), cutoff),
+            ).fetchone()
+
+    def save_finding(self, f: Finding) -> int:
+        with self.lock:
+            cur = self.db.execute(
+                """
+                INSERT INTO findings(
+                    ticker,stage,detected_at,price,score,vol_ratio_15s,vol_ratio_30s,change_60s_pct,extension_pct,
+                    ema9,ema21,ema9_slope,vwap,above_vwap,quiet_break,evidence_json,catalyst_headline,catalyst_category,
+                    catalyst_score,catalyst_url,chart_path,change_3s_pct,change_5s_pct,change_10s_pct,change_15s_pct,
+                    change_30s_pct,accel_15s_pp,dollar_volume_15s,dollar_volume_30s,trades_15s,trades_30s,
+                    breakout_level,breakout_window,signals_json,quality_label,quality_score,actionable_rank,
+                    rejection_reasons_json,directional_efficiency,active_bucket_ratio,direction_reversals,
+                    previous_close,gap_pct,day_volume,projected_session_volume,volume_rate_per_minute,float_shares,float_turnover,candidate_profile_json,
+                    episode_id,reversal_phase,reversal_low,reversal_drawdown_pct,leg_context,ross_match,ross_score,
+                    detection_timeframe_seconds,formation_start_at,formation_end_at,formation_low,formation_high,trigger_level,
+                    invalidation_level,halt_pressure_score,urgency,engine_version
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    f.ticker, f.stage, int(f.detected_at), f.price, f.score, f.vol_ratio_15s, f.vol_ratio_30s,
+                    f.change_60s_pct, f.extension_pct, f.ema9, f.ema21, f.ema9_slope, f.vwap,
+                    int(f.above_vwap), int(f.quiet_break), json.dumps(f.evidence), f.catalyst_headline,
+                    f.catalyst_category, f.catalyst_score, f.catalyst_url, f.chart_path,
+                    f.change_3s_pct, f.change_5s_pct, f.change_10s_pct, f.change_15s_pct, f.change_30s_pct,
+                    f.accel_15s_pp, f.dollar_volume_15s, f.dollar_volume_30s, f.trades_15s, f.trades_30s,
+                    f.breakout_level, f.breakout_window, json.dumps(f.signals or []), f.quality_label, f.quality_score,
+                    f.actionable_rank, json.dumps(f.rejection_reasons or []), f.directional_efficiency,
+                    f.active_bucket_ratio, f.direction_reversals,
+                    f.previous_close, f.gap_pct, f.day_volume, f.projected_session_volume, f.volume_rate_per_minute,
+                    f.float_shares, f.float_turnover, json.dumps(f.candidate_profile or {}),
+                    f.episode_id, f.reversal_phase, f.reversal_low, f.reversal_drawdown_pct,
+                    f.leg_context, int(f.ross_match), f.ross_score,
+                    f.detection_timeframe_seconds, int(f.formation_start_at) if f.formation_start_at else None,
+                    int(f.formation_end_at) if f.formation_end_at else None, f.formation_low, f.formation_high,
+                    f.trigger_level, f.invalidation_level, f.halt_pressure_score, f.urgency, f.engine_version,
+                ),
+            )
+            self.db.commit()
+            finding_id = int(cur.lastrowid)
+            self._upsert_attention_locked(finding_id, f)
+            self.db.commit()
+            return finding_id
+
+    @staticmethod
+    def _attention_priority(stage: str) -> int:
+        return {
+            "FIRST_LEG": 100, "CATALYST": 95, "CATALYST_WATCH": 95, "CATALYST_ACTIVE": 110, "HALT": 95,
+            "EMA_RECLAIM": 85, "VWAP_RECLAIM": 85, "REARM": 85,
+            "IGNITION": 80, "BREAKOUT": 75, "SURGE": 70, "EARLY": 60,
+        }.get(stage, 0)
+
+    def _upsert_attention_locked(self, finding_id: int, f: Finding) -> None:
+        priority = self._attention_priority(f.stage)
+        if priority <= 0 or (f.stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"} and f.quality_label != "CLEAN"):
+            return
+        day = datetime.fromtimestamp(f.detected_at).strftime("%Y%m%d")
+        episode_key = f"{f.ticker.upper()}:{day}:{int(f.episode_id or 0)}"
+        now = int(time.time())
+        row = self.db.execute(
+            "SELECT id,stage_priority,status FROM opportunity_attention WHERE episode_key=?",
+            (episode_key,),
+        ).fetchone()
+        if row:
+            status = "unread" if priority > int(row[1]) and row[2] != "watching" else row[2]
+            self.db.execute(
+                "UPDATE opportunity_attention SET latest_finding_id=?,stage_priority=?,status=?,updated_at=? WHERE id=?",
+                (finding_id, max(priority, int(row[1])), status, now, int(row[0])),
+            )
+        else:
+            self.db.execute(
+                "INSERT INTO opportunity_attention(episode_key,ticker,first_finding_id,latest_finding_id,stage_priority,status,created_at,updated_at) VALUES(?,?,?,?,?,'unread',?,?)",
+                (episode_key, f.ticker.upper(), finding_id, finding_id, priority, now, now),
+            )
+
+    def list_attention(self, limit: int = 100, status: str | None = None) -> list[dict[str, Any]]:
+        limit = max(1, min(300, int(limit)))
+        allowed = {"unread", "opened", "watching", "acknowledged", "dismissed", "expired"}
+        where = "WHERE a.status=?" if status in allowed else ""
+        params: list[Any] = [status] if status in allowed else []
+        params.append(limit)
+        sql = f"""
+            SELECT a.id,a.episode_key,a.ticker,a.first_finding_id,a.latest_finding_id,a.stage_priority,a.status,a.created_at,a.updated_at
+            FROM opportunity_attention a {where}
+            ORDER BY CASE a.status WHEN 'unread' THEN 0 WHEN 'watching' THEN 1 WHEN 'opened' THEN 2 ELSE 3 END,
+                     a.stage_priority DESC,a.updated_at DESC LIMIT ?
+        """
+        with self.lock:
+            rows = self.db.execute(sql, params).fetchall()
+        items = []
+        for row in rows:
+            finding = self.get_finding(int(row[4]))
+            if finding:
+                items.append({
+                    "id": row[0], "episode_key": row[1], "ticker": row[2],
+                    "first_finding_id": row[3], "latest_finding_id": row[4],
+                    "priority": row[5], "status": row[6], "created_at": row[7], "updated_at": row[8],
+                    "finding": finding,
+                })
+        return items
+
+    def update_attention(self, attention_id: int, status: str) -> dict[str, Any] | None:
+        allowed = {"unread", "opened", "watching", "acknowledged", "dismissed", "expired"}
+        if status not in allowed:
+            raise ValueError("invalid attention status")
+        with self.lock:
+            self.db.execute(
+                "UPDATE opportunity_attention SET status=?,updated_at=? WHERE id=?",
+                (status, int(time.time()), int(attention_id)),
+            )
+            self.db.commit()
+        return next((row for row in self.list_attention(300) if row["id"] == int(attention_id)), None)
+
+    def update_chart_path(self, finding_id: int, chart_path: str) -> None:
+        with self.lock:
+            self.db.execute("UPDATE findings SET chart_path=? WHERE id=?", (chart_path, finding_id))
+            self.db.commit()
+
+    def record_delivery(self, finding_id: int, channel: str, status: str, detail: str | None = None, provider_id: str | None = None) -> int:
+        with self.lock:
+            cur = self.db.execute(
+                "INSERT INTO notification_delivery_events(finding_id,channel,status,event_at,detail,provider_id) VALUES(?,?,?,?,?,?)",
+                (int(finding_id), channel[:32], status[:32], int(time.time()), (detail or "")[:1000], (provider_id or "")[:200]),
+            )
+            self.db.commit()
+            return int(cur.lastrowid)
+
+    def finding_delivery(self, finding_id: int) -> list[dict[str, Any]]:
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT id,finding_id,channel,status,event_at,detail,provider_id FROM notification_delivery_events WHERE finding_id=? ORDER BY event_at,id",
+                (int(finding_id),),
+            ).fetchall()
+        keys = ["id","finding_id","channel","status","event_at","detail","provider_id"]
+        return [dict(zip(keys, row)) for row in rows]
+
+    @staticmethod
+    def _automatic_grade(finding: dict[str, Any], outcome: dict[str, Any] | None) -> tuple[int, str, list[str]]:
+        if not outcome or outcome.get("max_5m_pct") is None:
+            return 0, "PROVISIONAL", ["Outcome is still maturing"]
+        favorable = max(float(outcome.get("max_5m_pct") or 0), float(outcome.get("max_15m_pct") or 0))
+        extension = float(finding.get("extension_pct") or 0)
+        reasons: list[str] = []
+        if extension >= 8:
+            reasons.append("Detected after vertical extension")
+        if favorable >= 12 and extension <= 4:
+            return 5, "EXCEPTIONAL", ["Early structure with strong follow-through"]
+        if favorable >= 6 and extension <= 7:
+            return 4, "STRONG", ["Timely detection with useful continuation"]
+        if favorable >= 2:
+            return 3, "VALID", ["Positive follow-through, but timing or strength was limited"]
+        if favorable > 0:
+            return 2, "POOR", reasons or ["Limited favorable movement after detection"]
+        return 1, "FALSE SIGNAL", reasons or ["No favorable follow-through"]
+
+    def finding_verification(self, finding_id: int) -> dict[str, Any] | None:
+        finding = self.get_finding(finding_id)
+        if not finding:
+            return None
+        with self.lock:
+            outcome_row = self.db.execute(
+                "SELECT max_1m_pct,max_5m_pct,max_15m_pct,max_session_pct,time_to_peak_seconds,updated_at FROM outcomes WHERE finding_id=?",
+                (int(finding_id),),
+            ).fetchone()
+            review_row = self.db.execute(
+                "SELECT automatic_grade,automatic_label,user_grade,user_agrees,reason_tags_json,notes,reviewed_at FROM finding_reviews WHERE finding_id=?",
+                (int(finding_id),),
+            ).fetchone()
+        outcome = dict(zip(["max_1m_pct","max_5m_pct","max_15m_pct","max_session_pct","time_to_peak_seconds","updated_at"], outcome_row)) if outcome_row else None
+        grade, label, reasons = self._automatic_grade(finding, outcome)
+        review = None
+        if review_row:
+            review = dict(zip(["automatic_grade","automatic_label","user_grade","user_agrees","reason_tags_json","notes","reviewed_at"], review_row))
+            try: review["reason_tags"] = json.loads(review.pop("reason_tags_json") or "[]")
+            except Exception: review["reason_tags"] = []
+        return {"finding": finding, "outcome": outcome, "automatic_grade": grade, "automatic_label": label, "grade_reasons": reasons, "delivery": self.finding_delivery(finding_id), "review": review, "legacy_delivery_audit": not bool(self.finding_delivery(finding_id))}
+
+    def save_finding_review(self, finding_id: int, user_grade: int | None, user_agrees: bool | None, reason_tags: list[str], notes: str) -> dict[str, Any] | None:
+        verification = self.finding_verification(finding_id)
+        if not verification:
+            return None
+        grade = verification["automatic_grade"]
+        label = verification["automatic_label"]
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO finding_reviews(finding_id,automatic_grade,automatic_label,user_grade,user_agrees,reason_tags_json,notes,reviewed_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(finding_id) DO UPDATE SET automatic_grade=excluded.automatic_grade,automatic_label=excluded.automatic_label,user_grade=excluded.user_grade,user_agrees=excluded.user_agrees,reason_tags_json=excluded.reason_tags_json,notes=excluded.notes,reviewed_at=excluded.reviewed_at",
+                (int(finding_id), grade, label, user_grade, None if user_agrees is None else int(user_agrees), json.dumps(reason_tags), notes[:4000], int(time.time())),
+            )
+            self.db.commit()
+        return self.finding_verification(finding_id)
+
+    def last_findings(self, limit: int = 10) -> list[tuple[Any, ...]]:
+        with self.lock:
+            return self.db.execute(
+                "SELECT id,ticker,stage,detected_at,price,score,vol_ratio_15s,vol_ratio_30s,change_60s_pct,extension_pct,chart_path FROM findings ORDER BY detected_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+
+    def _decode_finding(self, row: tuple[Any, ...], keys: list[str]) -> dict[str, Any]:
+        item = dict(zip(keys, row))
+        try:
+            item["evidence"] = json.loads(item.pop("evidence_json") or "[]")
+        except Exception:
+            item["evidence"] = []
+            item.pop("evidence_json", None)
+        try:
+            item["signals"] = json.loads(item.pop("signals_json") or "[]")
+        except Exception:
+            item["signals"] = []
+            item.pop("signals_json", None)
+        try:
+            item["rejection_reasons"] = json.loads(item.pop("rejection_reasons_json") or "[]")
+        except Exception:
+            item["rejection_reasons"] = []
+            item.pop("rejection_reasons_json", None)
+        try:
+            item["candidate_profile"] = json.loads(item.pop("candidate_profile_json") or "{}")
+        except Exception:
+            item["candidate_profile"] = {}
+            item.pop("candidate_profile_json", None)
+        item["above_vwap"] = bool(item.get("above_vwap"))
+        item["quiet_break"] = bool(item.get("quiet_break"))
+        item["ross_match"] = bool(item.get("ross_match"))
+        item["chart_url"] = f"/charts/{Path(item['chart_path']).name}" if item.get("chart_path") else None
+        return item
+
+    def list_findings(self, limit: int = 100, ticker: str | None = None, stage: str | None = None) -> list[dict[str, Any]]:
+        limit = max(1, min(500, int(limit)))
+        where = []
+        params: list[Any] = []
+        if ticker:
+            where.append("ticker=?")
+            params.append(ticker.upper())
+        if stage:
+            where.append("stage=?")
+            params.append(stage.upper())
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        keys = [
+            "id","ticker","stage","detected_at","price","score","vol_ratio_15s","vol_ratio_30s","change_60s_pct",
+            "extension_pct","ema9","ema21","ema9_slope","vwap","above_vwap","quiet_break","evidence_json",
+            "catalyst_headline","catalyst_category","catalyst_score","catalyst_url","chart_path",
+            "change_3s_pct","change_5s_pct","change_10s_pct","change_15s_pct","change_30s_pct","accel_15s_pp",
+            "dollar_volume_15s","dollar_volume_30s","trades_15s","trades_30s","breakout_level","breakout_window","signals_json",
+            "quality_label","quality_score","actionable_rank","rejection_reasons_json","directional_efficiency","active_bucket_ratio","direction_reversals",
+            "previous_close","gap_pct","day_volume","projected_session_volume","volume_rate_per_minute","float_shares","float_turnover","candidate_profile_json",
+            "episode_id","reversal_phase","reversal_low","reversal_drawdown_pct","leg_context","ross_match","ross_score",
+            "detection_timeframe_seconds","formation_start_at","formation_end_at","formation_low","formation_high","trigger_level","invalidation_level","halt_pressure_score","urgency","engine_version",
+        ]
+        sql = f"SELECT {','.join(keys)} FROM findings {clause} ORDER BY detected_at DESC LIMIT ?"
+        params.append(limit)
+        with self.lock:
+            rows = self.db.execute(sql, params).fetchall()
+        return [self._decode_finding(row, keys) for row in rows]
+
+    def get_finding(self, finding_id: int) -> dict[str, Any] | None:
+        keys = [
+            "id","ticker","stage","detected_at","price","score","vol_ratio_15s","vol_ratio_30s","change_60s_pct",
+            "extension_pct","ema9","ema21","ema9_slope","vwap","above_vwap","quiet_break","evidence_json",
+            "catalyst_headline","catalyst_category","catalyst_score","catalyst_url","chart_path",
+            "change_3s_pct","change_5s_pct","change_10s_pct","change_15s_pct","change_30s_pct","accel_15s_pp",
+            "dollar_volume_15s","dollar_volume_30s","trades_15s","trades_30s","breakout_level","breakout_window","signals_json",
+            "quality_label","quality_score","actionable_rank","rejection_reasons_json","directional_efficiency","active_bucket_ratio","direction_reversals",
+            "previous_close","gap_pct","day_volume","projected_session_volume","volume_rate_per_minute","float_shares","float_turnover","candidate_profile_json",
+            "episode_id","reversal_phase","reversal_low","reversal_drawdown_pct","leg_context","ross_match","ross_score",
+            "detection_timeframe_seconds","formation_start_at","formation_end_at","formation_low","formation_high","trigger_level","invalidation_level","halt_pressure_score","urgency","engine_version",
+        ]
+        with self.lock:
+            row = self.db.execute(f"SELECT {','.join(keys)} FROM findings WHERE id=?", (int(finding_id),)).fetchone()
+        return self._decode_finding(row, keys) if row else None
+
+    def list_episodes(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Return one current lifecycle row per ticker, newest episode first."""
+        rows = self.list_findings(500)
+        episodes: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in rows:
+            ticker = str(row.get("ticker", "")).upper()
+            if not ticker or ticker in seen:
+                continue
+            seen.add(ticker)
+            episodes.append(row)
+            if len(episodes) >= max(1, min(500, int(limit))):
+                break
+        return episodes
+
+    def latest_findings_by_ticker(self, tickers: list[str]) -> dict[str, dict[str, Any]]:
+        if not tickers:
+            return {}
+        symbols = [x.upper() for x in tickers]
+        marks = ",".join("?" for _ in symbols)
+        sql = f"""
+            SELECT f.id,f.ticker,f.stage,f.detected_at,f.price,f.score,f.signals_json
+            FROM findings f
+            JOIN (
+                SELECT ticker, MAX(detected_at) AS max_time
+                FROM findings
+                WHERE ticker IN ({marks})
+                GROUP BY ticker
+            ) latest ON latest.ticker=f.ticker AND latest.max_time=f.detected_at
+        """
+        with self.lock:
+            rows = self.db.execute(sql, symbols).fetchall()
+        out: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            try:
+                signals = json.loads(row[6] or "[]")
+            except Exception:
+                signals = []
+            out[row[1]] = {"id": row[0], "ticker": row[1], "stage": row[2], "detected_at": row[3], "price": row[4], "score": row[5], "signals": signals}
+        return out
+
+    def list_catalysts(self, limit: int = 100, ticker: str | None = None) -> list[dict[str, Any]]:
+        limit = max(1, min(500, int(limit)))
+        params: list[Any] = []
+        where = ""
+        if ticker:
+            where = "WHERE ticker=?"
+            params.append(ticker.upper())
+        params.append(limit)
+        with self.lock:
+            rows = self.db.execute(
+                f"SELECT id,ticker,headline,category,score,url,source,published_at FROM catalysts {where} ORDER BY published_at DESC LIMIT ?",
+                params,
+            ).fetchall()
+        keys = ["id","ticker","headline","category","score","url","source","published_at"]
+        return [dict(zip(keys, row)) for row in rows]
+
+    def get_notification_preferences(self) -> dict[str, Any]:
+        with self.lock:
+            row = self.db.execute("SELECT value_json FROM notification_preferences WHERE key='global'").fetchone()
+        if not row:
+            return normalize_notification_preferences(None)
+        try:
+            return normalize_notification_preferences(json.loads(row[0]))
+        except Exception:
+            return normalize_notification_preferences(None)
+
+    def set_notification_preferences(self, value: dict[str, Any]) -> dict[str, Any]:
+        normalized = normalize_notification_preferences(value)
+        encoded = json.dumps(normalized, separators=(",", ":"))
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO notification_preferences(key,value_json,updated_at) VALUES('global',?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at",
+                (encoded, int(time.time())),
+            )
+            self.db.commit()
+        return normalized
+
+    def save_market_status(self, ticker: str, status_code: str, status_message: str, reason_code: str, reason_message: str, event_at: int, is_halted: bool) -> int:
+        with self.lock:
+            cur = self.db.execute(
+                "INSERT INTO market_status_events(ticker,status_code,status_message,reason_code,reason_message,event_at,is_halted) VALUES(?,?,?,?,?,?,?)",
+                (ticker.upper(), status_code[:32], status_message[:200], reason_code[:32], reason_message[:500], int(event_at), int(is_halted)),
+            )
+            self.db.commit()
+            return int(cur.lastrowid)
+
+    def recent_market_status_events(self, limit: int = 100, ticker: str | None = None) -> list[dict[str, Any]]:
+        limit = max(1, min(500, int(limit)))
+        params: list[Any] = []
+        where = ""
+        if ticker:
+            where = "WHERE ticker=?"
+            params.append(ticker.upper())
+        params.append(limit)
+        with self.lock:
+            rows = self.db.execute(
+                f"SELECT id,ticker,status_code,status_message,reason_code,reason_message,event_at,is_halted FROM market_status_events {where} ORDER BY event_at DESC LIMIT ?",
+                params,
+            ).fetchall()
+        keys = ["id","ticker","status_code","status_message","reason_code","reason_message","event_at","is_halted"]
+        out = []
+        for row in rows:
+            item = dict(zip(keys, row))
+            item["is_halted"] = bool(item["is_halted"])
+            out.append(item)
+        return out
+
+    def upsert_outcome(
+        self,
+        finding_id: int,
+        max_1m_pct: float | None,
+        max_5m_pct: float | None,
+        max_15m_pct: float | None,
+        max_session_pct: float | None,
+        time_to_peak_seconds: float | None,
+    ) -> None:
+        with self.lock:
+            self.db.execute(
+                """
+                INSERT INTO outcomes(finding_id,max_1m_pct,max_5m_pct,max_15m_pct,max_session_pct,time_to_peak_seconds,updated_at)
+                VALUES(?,?,?,?,?,?,?)
+                ON CONFLICT(finding_id) DO UPDATE SET
+                    max_1m_pct=excluded.max_1m_pct,
+                    max_5m_pct=excluded.max_5m_pct,
+                    max_15m_pct=excluded.max_15m_pct,
+                    max_session_pct=excluded.max_session_pct,
+                    time_to_peak_seconds=excluded.time_to_peak_seconds,
+                    updated_at=excluded.updated_at
+                """,
+                (int(finding_id), max_1m_pct, max_5m_pct, max_15m_pct, max_session_pct, time_to_peak_seconds, int(time.time())),
+            )
+            self.db.commit()
+
+    def list_validation(self, limit: int = 100) -> list[dict[str, Any]]:
+        limit = max(1, min(500, int(limit)))
+        with self.lock:
+            rows = self.db.execute(
+                """
+                SELECT f.id,f.ticker,f.stage,f.detected_at,f.price,f.extension_pct,f.score,f.signals_json,
+                       o.max_1m_pct,o.max_5m_pct,o.max_15m_pct,o.max_session_pct,o.time_to_peak_seconds,o.updated_at
+                FROM findings f
+                LEFT JOIN outcomes o ON o.finding_id=f.id
+                ORDER BY f.detected_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        keys = [
+            "id","ticker","stage","detected_at","price","move_at_detection_pct","score","signals_json",
+            "max_1m_pct","max_5m_pct","max_15m_pct","max_session_pct","time_to_peak_seconds","updated_at",
+        ]
+        out=[]
+        now = time.time()
+        for row in rows:
+            item=dict(zip(keys,row))
+            try:
+                item["signals"] = json.loads(item.pop("signals_json") or "[]")
+            except Exception:
+                item["signals"] = []
+                item.pop("signals_json",None)
+            age = max(0.0, now - float(item["detected_at"]))
+            for field, maturity in (("max_1m_pct", 60), ("max_5m_pct", 300), ("max_15m_pct", 900)):
+                if age < maturity:
+                    item[field] = None
+                elif item.get(field) is not None:
+                    item[field] = max(0.0, float(item[field]))
+            if item.get("max_session_pct") is not None:
+                item["max_session_pct"] = max(0.0, float(item["max_session_pct"]))
+            out.append(item)
+        return out

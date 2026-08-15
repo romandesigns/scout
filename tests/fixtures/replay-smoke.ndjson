@@ -1,0 +1,10 @@
+{"schema":"scout.market-event.v1","event_type":"trade","symbol":"TEST","source_ts":1786728600.0,"received_ts":1786728600.0,"sequence":1,"feed":"fixture","payload":{"price":3.0,"size":100.0}}
+{"schema":"scout.market-event.v1","event_type":"trade","symbol":"TEST","source_ts":1786728615.0,"received_ts":1786728615.0,"sequence":2,"feed":"fixture","payload":{"price":3.01,"size":100.0}}
+{"schema":"scout.market-event.v1","event_type":"trade","symbol":"TEST","source_ts":1786728630.0,"received_ts":1786728630.0,"sequence":3,"feed":"fixture","payload":{"price":3.02,"size":120.0}}
+{"schema":"scout.market-event.v1","event_type":"trade","symbol":"TEST","source_ts":1786728645.0,"received_ts":1786728645.0,"sequence":4,"feed":"fixture","payload":{"price":3.03,"size":130.0}}
+{"schema":"scout.market-event.v1","event_type":"trade","symbol":"TEST","source_ts":1786728660.0,"received_ts":1786728660.0,"sequence":5,"feed":"fixture","payload":{"price":3.04,"size":140.0}}
+{"schema":"scout.market-event.v1","event_type":"trade","symbol":"TEST","source_ts":1786728675.0,"received_ts":1786728675.0,"sequence":6,"feed":"fixture","payload":{"price":3.05,"size":150.0}}
+{"schema":"scout.market-event.v1","event_type":"trade","symbol":"TEST","source_ts":1786728690.0,"received_ts":1786728690.0,"sequence":7,"feed":"fixture","payload":{"price":3.06,"size":160.0}}
+{"schema":"scout.market-event.v1","event_type":"trade","symbol":"TEST","source_ts":1786728705.0,"received_ts":1786728705.0,"sequence":8,"feed":"fixture","payload":{"price":3.08,"size":300.0}}
+{"schema":"scout.market-event.v1","event_type":"trade","symbol":"TEST","source_ts":1786728720.0,"received_ts":1786728720.0,"sequence":9,"feed":"fixture","payload":{"price":3.12,"size":1000.0}}
+{"schema":"scout.market-event.v1","event_type":"trade","symbol":"TEST","source_ts":1786728735.0,"received_ts":1786728735.0,"sequence":10,"feed":"fixture","payload":{"price":3.18,"size":1500.0}}

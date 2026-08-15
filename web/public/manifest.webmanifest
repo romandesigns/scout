@@ -1,0 +1,29 @@
+{
+  "id": "/",
+  "name": "StockHunter Scout",
+  "short_name": "Scout",
+  "description": "Live bullish momentum detection and opportunity attention workstation.",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#07090c",
+  "theme_color": "#080c11",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    {"src":"/icons/scout-192.png","sizes":"256x256","type":"image/png","purpose":"any maskable"},
+    {"src":"/icons/scout-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ],
+  "shortcuts": [
+    {"name":"Needs Attention","short_name":"Attention","url":"/?view=alerts","icons":[{"src":"/icons/scout-192.png","sizes":"256x256"}]},
+    {"name":"Radar","short_name":"Radar","url":"/?view=radar"},
+    {"name":"Ross Criteria","short_name":"Ross","url":"/?view=ross"},
+    {"name":"Settings","short_name":"Settings","url":"/?view=settings"}
+  ],
+  "share_target": {
+    "action": "/?share=1",
+    "method": "GET",
+    "params": {"title":"title","text":"text","url":"url"}
+  }
+}

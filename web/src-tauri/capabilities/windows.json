@@ -1,0 +1,15 @@
+{
+  "identifier": "windows-native",
+  "description": "Windows-only Scout startup permissions",
+  "windows": [
+    "main"
+  ],
+  "platforms": [
+    "windows"
+  ],
+  "permissions": [
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
+  ]
+}
