@@ -32,6 +32,11 @@ import {
   IconTrendingUp,
   IconX,
 } from "@tabler/icons-react";
+import {
+  MdBolt, MdCheckCircle, MdDiamond, MdLocalFireDepartment, MdNewReleases,
+  MdOutlinePauseCircleFilled, MdOutlineReplay, MdPlayCircleFilled,
+  MdStairs, MdTrackChanges, MdTrendingUp, MdVisibility,
+} from "react-icons/md";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -272,6 +277,9 @@ function pct(v?: number | null, digits=2) {
 }
 
 function tone(stage: string) {
+  if (stage === "CONFIRMED") return "blue";
+  if (stage === "NOW") return "green";
+  if (["EXTENDED","RISK"].includes(stage)) return "red";
   if (stage === "FIRST_LEG") return "green";
   if (stage === "FIRST_LEG_WATCH") return "blue";
   if (["IGNITION","SURGE","RECLAIM","EMA_RECLAIM","VWAP_RECLAIM","REARM"].includes(stage)) return "green";
@@ -289,6 +297,52 @@ function stageGlyph(stage: string) {
   if (["BREAKOUT","REVERSAL_WATCH","RECLAIM","EMA_RECLAIM","VWAP_RECLAIM","REARM"].includes(stage)) return <IconTrendingUp size={11}/>;
   if (stage === "HALT") return <IconPlayerPauseFilled size={10}/>;
   return <IconTargetArrow size={11}/>;
+}
+
+const EVENT_HELP:Record<string,string>={
+  CONFIRMED:"Confirmed — evidence and structure passed Scout's confirmation gates",
+  WATCH:"Watch — developing setup that needs more confirmation",
+  NOW:"Act now — highest-priority fresh event",
+  EXTENDED:"Extended — price has moved materially beyond the detection area",
+  RISK:"Risk — conditions require additional caution",
+  EARLY:"Early — initial bullish activity before full ignition",
+  IGNITION:"Ignition — bullish price and participation expansion",
+  SURGE:"Surge — rapid short-window price acceleration",
+  BREAKOUT:"Breakout — price cleared established resistance",
+  REARM:"Re-arm — a qualified continuation opportunity after pullback",
+  STAIRCASE:"Staircase — orderly higher-step progression",
+  EMA_RECLAIM:"EMA reclaim — price recovered the exponential moving average",
+  VWAP_RECLAIM:"VWAP reclaim — price recovered session VWAP",
+  RECLAIM:"Reclaim — price recovered a key structural level",
+  FIRST_LEG:"First leg — confirmed initial expansion from a base",
+  FIRST_LEG_WATCH:"First-leg watch — base is developing before release",
+  CATALYST:"Catalyst — fresh potentially bullish news",
+  CATALYST_WATCH:"Catalyst watch — news exists but market reaction is unconfirmed",
+  CATALYST_ACTIVE:"Active catalyst — news and market reaction are aligned",
+  HALT:"Halt — exchange trading pause is active",
+  HALT_PRESSURE:"Halt pressure — acceleration resembles pre-halt conditions; not a prediction",
+  RESUME:"Resume — trading resumed after a halt",
+  REVERSAL_WATCH:"Reversal watch — recovery is developing after a selloff",
+};
+
+function eventIcon(stage:string){
+  if(stage==="CONFIRMED")return <MdCheckCircle/>;
+  if(stage==="NOW"||stage==="FIRST_LEG")return <MdNewReleases/>;
+  if(stage==="WATCH"||stage.endsWith("_WATCH"))return <MdVisibility/>;
+  if(stage==="IGNITION")return <MdLocalFireDepartment/>;
+  if(stage==="SURGE"||stage==="HALT_PRESSURE")return <MdBolt/>;
+  if(stage==="EARLY")return <MdTrackChanges/>;
+  if(stage==="STAIRCASE")return <MdStairs/>;
+  if(stage==="REARM")return <MdOutlineReplay/>;
+  if(stage==="HALT")return <MdOutlinePauseCircleFilled/>;
+  if(stage==="RESUME")return <MdPlayCircleFilled/>;
+  if(stage.includes("CATALYST"))return <MdDiamond/>;
+  return <MdTrendingUp/>;
+}
+
+function EventIcon({event}: {event:string}){
+  const label=EVENT_HELP[event]||event.replaceAll("_"," ").toLowerCase();
+  return <span className="event-icon" data-tone={tone(event)} data-tooltip={label} title={label} aria-label={label} role="img" tabIndex={0}>{eventIcon(event)}</span>;
 }
 
 function eventGlyph(type:TimelineItem["type"], payload:TimelineItem["payload"]) {
@@ -321,10 +375,10 @@ function FindingRow({ finding, selected, onSelect }: { finding: Finding; selecte
     <div className="flex items-center justify-between gap-2">
       <div className="flex min-w-0 items-center gap-1.5">
         <span className="ticker-symbol">{finding.ticker}</span>
-        <Badge data-tone={urgency==="NOW"?"green":urgency==="EXTENDED"||urgency==="RISK"?"red":urgency==="CONFIRMED"?"blue":"orange"}>{urgency}</Badge>
-        {signals.map(signal => <Badge key={signal} data-tone={tone(signal)}>{stageGlyph(signal)}{signal}</Badge>)}
+        <EventIcon event={urgency}/>
+        {signals.map(signal => <EventIcon key={signal} event={signal}/>)}
         <Badge data-tone={qualityTone}>{finding.actionable_rank || "C"} · {quality}</Badge>
-        {finding.catalyst_headline && !signals.includes("CATALYST") && <IconDiamondFilled size={10} className="text-[var(--cyan)]"/>}
+        {finding.catalyst_headline && !signals.includes("CATALYST") && <EventIcon event="CATALYST"/>}
         {finding.ross_match && <Badge data-tone="green">ROSS {finding.ross_score ?? ""}</Badge>}
       </div>
       <span className="scout-muted metric text-[10px]">{age(finding.detected_at)}</span>

@@ -235,6 +235,78 @@ class MarketWatcher:
             ],
             "metrics": metrics or {},
             "halt": self.halts.get(ticker),
+            "source": "live",
+            "as_of": time.time(),
+        }
+
+    def historical_snapshot_sync(self, ticker: str, center_ts: float, bucket_seconds: int = 15) -> dict:
+        """Load detection-centered candles when live memory cannot cover an event.
+
+        Alpaca historical trades preserve Scout's native 15-second candles. If a
+        very active symbol exceeds the trade page, minute bars remain a reliable
+        closed-session fallback instead of returning an empty chart.
+        """
+        ticker = ticker.upper()
+        bucket_seconds = max(15, min(300, int(bucket_seconds)))
+        start = datetime.fromtimestamp(center_ts - 20 * 60, timezone.utc)
+        end = datetime.fromtimestamp(center_ts + 20 * 60, timezone.utc)
+        iso = lambda value: value.isoformat().replace("+00:00", "Z")
+        params = {
+            "start": iso(start), "end": iso(end), "feed": settings.alpaca_feed,
+            "limit": 10000, "sort": "asc",
+        }
+        response = requests.get(
+            f"{settings.alpaca_data_base}/v2/stocks/{ticker}/trades",
+            params=params, headers=_headers(), timeout=25,
+        )
+        response.raise_for_status()
+        trades = response.json().get("trades", [])
+        grouped: dict[int, Bucket] = {}
+        for trade in trades:
+            try:
+                ts = datetime.fromisoformat(str(trade["t"]).replace("Z", "+00:00")).timestamp()
+                price, size = float(trade["p"]), float(trade.get("s") or 0)
+            except (KeyError, TypeError, ValueError):
+                continue
+            start_ts = int(ts // bucket_seconds) * bucket_seconds
+            row = grouped.get(start_ts)
+            if row is None:
+                grouped[start_ts] = Bucket(start_ts, price, price, price, price, size, 1)
+            else:
+                row.high = max(row.high, price)
+                row.low = min(row.low, price)
+                row.close = price
+                row.volume += max(0, size)
+                row.trades += 1
+
+        source = "historical-trades"
+        rows = sorted(grouped.values(), key=lambda row: row.start_ts)
+        if len(rows) < 2:
+            bar_response = requests.get(
+                f"{settings.alpaca_data_base}/v2/stocks/{ticker}/bars",
+                params={**params, "timeframe": "1Min"}, headers=_headers(), timeout=25,
+            )
+            bar_response.raise_for_status()
+            rows = []
+            for bar in bar_response.json().get("bars", []):
+                try:
+                    ts = datetime.fromisoformat(str(bar["t"]).replace("Z", "+00:00")).timestamp()
+                    rows.append(Bucket(ts, float(bar["o"]), float(bar["h"]), float(bar["l"]), float(bar["c"]), float(bar.get("v") or 0), int(bar.get("n") or 0)))
+                except (KeyError, TypeError, ValueError):
+                    continue
+            source = "historical-bars"
+        if not rows:
+            raise LookupError(f"no historical market data around {ticker} detection")
+        return {
+            "ticker": ticker,
+            "session_date": trading_session_key(center_ts),
+            "session_first_price": rows[0].open,
+            "buckets": [
+                {"start_ts": row.start_ts, "open": row.open, "high": row.high, "low": row.low,
+                 "close": row.close, "volume": row.volume, "trades": row.trades}
+                for row in rows
+            ],
+            "metrics": {}, "halt": self.halts.get(ticker), "source": source, "as_of": time.time(),
         }
 
     def diagnostics(self, ticker: str) -> dict:

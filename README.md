@@ -1,6 +1,6 @@
-# StockHunter Scout V6.0.0 — Replay Spine
+# StockHunter Scout V6.1.0 — Durable Charts + Icon Language
 
-Version 6.0.0 adds a deterministic, notification-isolated historical replay foundation. See [REPLAY-SPINE.md](REPLAY-SPINE.md) for the offline smoke test and Alpaca dataset workflow.
+Version 6.1.0 adds detection-centered historical chart recovery, interactive Alpaca-style candles, an icon-led Radar language, and native-shell cache safety. See [V6.1-IMPLEMENTATION.md](V6.1-IMPLEMENTATION.md). The deterministic replay foundation remains documented in [REPLAY-SPINE.md](REPLAY-SPINE.md).
 
 V5.9 keeps the catalyst engine listening continuously and delivers background Web Push notifications to the installed Android PWA. News begins as `CATALYST_WATCH` and becomes `CATALYST_ACTIVE` only when clean market-reaction evidence confirms participation. VAPID keys are generated automatically during the coordinated VPS deployment; ntfy remains an optional fallback.
 

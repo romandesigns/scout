@@ -199,9 +199,26 @@ class ScoutApi:
 
     async def snapshot(self, request: web.Request) -> web.Response:
         ticker = str(request.match_info.get("ticker", "")).upper()
+        detected_at_raw = request.query.get("detected_at")
+        try:
+            detected_at = float(detected_at_raw) if detected_at_raw else None
+            bucket_seconds = _int(request.query.get("bucket_seconds"), 15, 15, 300)
+        except (TypeError, ValueError):
+            raise web.HTTPBadRequest(text="invalid chart window")
         payload = self.market.snapshot_payload(ticker)
+        live_rows = payload.get("buckets", []) if payload else []
+        live_covers_detection = bool(
+            detected_at and live_rows
+            and float(live_rows[0]["start_ts"]) - bucket_seconds <= detected_at <= float(live_rows[-1]["start_ts"]) + bucket_seconds
+        )
+        if detected_at and not live_covers_detection:
+            try:
+                payload = await asyncio.to_thread(self.market.historical_snapshot_sync, ticker, detected_at, bucket_seconds)
+            except Exception as exc:
+                if not payload:
+                    raise web.HTTPBadGateway(text=f"historical chart unavailable: {exc}")
         if not payload:
-            raise web.HTTPNotFound(text="symbol is not warm in Scout's live state cache")
+            raise web.HTTPNotFound(text="symbol has no live or historical chart data")
         findings, catalysts, statuses = await asyncio.gather(
             asyncio.to_thread(self.store.list_findings, 30, ticker, None),
             asyncio.to_thread(self.store.list_catalysts, 20, ticker),
