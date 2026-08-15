@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { API_BASE, API_CONFIGURED, getMarketSnapshot } from "@/lib/api";
 import type { Bucket, Finding, MarketSnapshot } from "@/lib/types";
 
@@ -107,7 +107,7 @@ export function LiveChart({ finding, frozen = false, active = true, pollOffsetMs
     let disposed = false;
     async function load() {
       try {
-        const next = await getMarketSnapshot(finding!.ticker);
+        const next = await getMarketSnapshot(finding!.ticker, finding!.detected_at, timeframeSeconds);
         if (!disposed) {
           setSnapshot(next);
           setError("");
@@ -118,9 +118,10 @@ export function LiveChart({ finding, frozen = false, active = true, pollOffsetMs
       }
     }
     const initial = window.setTimeout(load, pollOffsetMs);
-    const timer = window.setInterval(() => { if (!document.hidden) void load(); }, active ? 3000 : 9000);
-    return () => { disposed = true; window.clearTimeout(initial); window.clearInterval(timer); };
-  }, [finding?.ticker, onSnapshot, active, pollOffsetMs, refreshNonce]);
+    const followsLiveEdge = Date.now() / 1000 - finding.detected_at < 30 * 60;
+    const timer = followsLiveEdge ? window.setInterval(() => { if (!document.hidden) void load(); }, active ? 3000 : 9000) : null;
+    return () => { disposed = true; window.clearTimeout(initial); if(timer!=null)window.clearInterval(timer); };
+  }, [finding?.ticker, finding?.detected_at, timeframeSeconds, onSnapshot, active, pollOffsetMs, refreshNonce]);
 
   if (!finding) return <div className="chart-empty">Select a ticker</div>;
   if (frozen && finding.chart_url && API_CONFIGURED) {
@@ -132,7 +133,15 @@ export function LiveChart({ finding, frozen = false, active = true, pollOffsetMs
 }
 
 function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnnotations, annotations }: { snapshot: MarketSnapshot; selectedFinding: Finding; error?: string; timeframeSeconds:15|30|60|300; showAnnotations:boolean; annotations:ChartAnnotations }) {
-  const rows = useMemo(() => aggregateBuckets(snapshot.buckets, timeframeSeconds).slice(-80), [snapshot.buckets,timeframeSeconds]);
+  const allRows = useMemo(() => aggregateBuckets(snapshot.buckets, timeframeSeconds), [snapshot.buckets,timeframeSeconds]);
+  const [visibleCount,setVisibleCount]=useState(80);
+  const [rightOffset,setRightOffset]=useState(0);
+  const [hoverIndex,setHoverIndex]=useState<number|null>(null);
+  const drag=useRef<{x:number;offset:number}|null>(null);
+  const safeCount=Math.max(12,Math.min(160,visibleCount,allRows.length));
+  const safeOffset=Math.max(0,Math.min(rightOffset,Math.max(0,allRows.length-safeCount)));
+  const end=Math.max(safeCount,allRows.length-safeOffset);
+  const rows=allRows.slice(Math.max(0,end-safeCount),end);
   const layout = useMemo(() => {
     const width = 1000;
     const height = 520;
@@ -174,9 +183,22 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
   const priceTicks = Array.from({ length: 5 }, (_, i) => layout.max - ((layout.max - layout.min) * i) / 4);
   const timeTicks = Array.from({ length: 5 }, (_, i) => firstTs + ((lastTs - firstTs) * i) / 4);
   const etTime = (ts: number) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", second: "2-digit" }).format(ts * 1000);
+  const hovered=hoverIndex==null?null:rows[hoverIndex];
+  const pointerIndex=(event:React.PointerEvent<SVGSVGElement>)=>{
+    const box=event.currentTarget.getBoundingClientRect();
+    const x=((event.clientX-box.left)/box.width)*layout.width;
+    const ratio=Math.max(0,Math.min(1,(x-layout.left)/(layout.width-layout.left-layout.right)));
+    return Math.max(0,Math.min(rows.length-1,Math.round(ratio*(rows.length-1))));
+  };
 
   return <div className="chart-stage">
-    <svg viewBox={`0 0 ${layout.width} ${layout.height}`} preserveAspectRatio="none" className="chart-svg" role="img" aria-label={`${snapshot.ticker} live ${timeframeSeconds}-second chart`}>
+    <svg viewBox={`0 0 ${layout.width} ${layout.height}`} preserveAspectRatio="none" className="chart-svg chart-interactive" role="img" aria-label={`${snapshot.ticker} ${timeframeSeconds}-second candlestick chart. Use the mouse wheel to zoom and drag to pan.`}
+      onWheel={event=>{event.preventDefault();setVisibleCount(value=>Math.max(12,Math.min(160,value+(event.deltaY>0?8:-8))));}}
+      onPointerDown={event=>{event.currentTarget.setPointerCapture(event.pointerId);drag.current={x:event.clientX,offset:safeOffset};}}
+      onPointerMove={event=>{setHoverIndex(pointerIndex(event));if(drag.current){const box=event.currentTarget.getBoundingClientRect();const candlePx=box.width/Math.max(1,safeCount);setRightOffset(Math.max(0,Math.round(drag.current.offset+(event.clientX-drag.current.x)/candlePx)));}}}
+      onPointerUp={event=>{event.currentTarget.releasePointerCapture(event.pointerId);drag.current=null;}}
+      onPointerLeave={()=>{setHoverIndex(null);drag.current=null;}}
+      onDoubleClick={()=>{setVisibleCount(80);setRightOffset(0);}}>
       <g className="chart-grid-lines">
         {priceTicks.map((p) => <line key={p} x1={layout.left} x2={layout.width-layout.right} y1={layout.y(p)} y2={layout.y(p)}/>) }
         {timeTicks.slice(1,-1).map((ts) => <line key={ts} x1={layout.x(ts)} x2={layout.x(ts)} y1={layout.top} y2={layout.bottom}/>) }
@@ -234,10 +256,21 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
       {priceTicks.map((p) => <text key={`t-${p}`} x={layout.width-layout.right+8} y={layout.y(p)+3} className="chart-axis-label">{p < 1 ? p.toFixed(4) : p.toFixed(2)}</text>)}
       {timeTicks.map((ts, i) => <text key={`time-${i}`} x={layout.x(ts)} y="510" textAnchor={i===0?"start":i===timeTicks.length-1?"end":"middle"} className="chart-time-label">{etTime(ts)}</text>)}
       <text x={layout.width-layout.right+7} y="510" className="chart-timezone-label">ET</text>
+      {hovered&&<g className="chart-crosshair">
+        <line x1={layout.x(hovered.start_ts)} x2={layout.x(hovered.start_ts)} y1={layout.top} y2={layout.bottom}/>
+        <line x1={layout.left} x2={layout.width-layout.right} y1={layout.y(hovered.close)} y2={layout.y(hovered.close)}/>
+      </g>}
     </svg>
     <div className="chart-overlay-top">
       <span>EMA9</span><i className="legend-ema9"/><span>EMA21</span><i className="legend-ema21"/><span>VWAP</span><i className="legend-vwap"/>
+      <span className="chart-source">{snapshot.source?.replaceAll("-"," ")||"live"}</span>
     </div>
+    {hovered&&<div className="candle-tooltip">
+      <b>{etTime(hovered.start_ts)} ET</b>
+      <span>O <strong>{hovered.open.toFixed(4)}</strong></span><span>H <strong>{hovered.high.toFixed(4)}</strong></span>
+      <span>L <strong>{hovered.low.toFixed(4)}</strong></span><span>C <strong>{hovered.close.toFixed(4)}</strong></span>
+      <span>V <strong>{hovered.volume.toLocaleString()}</strong></span><span>T <strong>{hovered.trades.toLocaleString()}</strong></span>
+    </div>}
     {error && <div className="chart-connection-note">{error}</div>}
   </div>;
 }

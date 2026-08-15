@@ -139,3 +139,19 @@ html[data-scout-markers="off"] .chart-event-marker{display:none}
 }
 .push-enrollment{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:8px 0;padding:12px;background:var(--panel-2);border-radius:8px}
 .push-enrollment>div{display:grid;gap:3px}.push-enrollment small{color:var(--muted);font-size:10px}
+
+/* 6.1 icon language + workstation-grade interactive candles */
+.event-icon{position:relative;display:inline-flex;flex:0 0 auto;width:22px;height:22px;align-items:center;justify-content:center;border-radius:5px;background:var(--panel-2);color:var(--muted);font-size:14px;outline:none}
+.event-icon[data-tone="blue"]{background:var(--blue-soft);color:var(--blue)}
+.event-icon[data-tone="green"]{background:var(--green-soft);color:var(--green)}
+.event-icon[data-tone="orange"]{background:var(--orange-soft);color:var(--orange)}
+.event-icon[data-tone="red"]{background:var(--red-soft);color:var(--red)}
+.event-icon:hover,.event-icon:focus-visible{filter:brightness(1.18);box-shadow:0 0 0 1px currentColor}
+.event-icon::after{content:attr(data-tooltip);position:fixed;z-index:220;max-width:260px;transform:translate(0,31px);border-radius:6px;background:#151d27;color:var(--text);padding:6px 8px;box-shadow:0 12px 32px rgba(0,0,0,.55),inset 0 0 0 1px var(--line-strong);font-size:9px;font-weight:500;line-height:1.35;letter-spacing:0;white-space:normal;pointer-events:none;opacity:0;transition:opacity .12s}
+.event-icon:hover::after,.event-icon:focus-visible::after{opacity:1}
+.chart-interactive{cursor:crosshair;touch-action:none;user-select:none}
+.chart-interactive:active{cursor:grabbing}
+.chart-crosshair line{stroke:rgba(217,228,240,.42);stroke-width:1;stroke-dasharray:3 3;vector-effect:non-scaling-stroke;pointer-events:none}
+.candle-tooltip{position:absolute;z-index:12;right:74px;top:8px;display:grid;grid-template-columns:repeat(3,auto);gap:3px 9px;border-radius:6px;background:rgba(16,23,32,.94);padding:7px 9px;box-shadow:0 10px 28px rgba(0,0,0,.42),inset 0 0 0 1px var(--line-strong);color:var(--muted);font-size:9px;pointer-events:none}
+.candle-tooltip b{grid-column:1/-1;color:var(--text)}.candle-tooltip span{display:flex;gap:4px}.candle-tooltip strong{color:var(--text);font-variant-numeric:tabular-nums}
+.chart-source{margin-left:4px;border-radius:4px;background:var(--panel-2);padding:2px 5px;color:var(--muted-2);text-transform:uppercase;letter-spacing:.06em}

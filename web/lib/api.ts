@@ -64,8 +64,11 @@ export async function getHalts(): Promise<{ active: Halt[]; recent: Halt[] }> {
   return getJson("/api/market/halts");
 }
 
-export async function getMarketSnapshot(ticker: string): Promise<MarketSnapshot> {
-  return getJson<MarketSnapshot>(`/api/market/snapshot/${encodeURIComponent(ticker)}`);
+export async function getMarketSnapshot(ticker: string, detectedAt?: number, bucketSeconds = 15): Promise<MarketSnapshot> {
+  const query = new URLSearchParams();
+  if (detectedAt) query.set("detected_at", String(detectedAt));
+  query.set("bucket_seconds", String(bucketSeconds));
+  return getJson<MarketSnapshot>(`/api/market/snapshot/${encodeURIComponent(ticker)}?${query.toString()}`);
 }
 
 export async function getDiagnostic(ticker: string): Promise<Diagnostic> {

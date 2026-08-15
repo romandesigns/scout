@@ -186,6 +186,8 @@ export type MarketSnapshot = {
   findings: Finding[];
   catalysts: Catalyst[];
   statuses: Halt[];
+  source?: "live" | "historical-trades" | "historical-bars";
+  as_of?: number;
 };
 
 export type Diagnostic = {

@@ -1,6 +1,6 @@
 [package]
 name = "stockhunter-scout"
-version = "6.0.0"
+version = "6.1.0"
 description = "StockHunter Scout native workstation"
 authors = ["StockHunter"]
 edition = "2021"

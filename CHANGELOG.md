@@ -139,3 +139,10 @@
 - Split news into `CATALYST_WATCH` before market confirmation and `CATALYST_ACTIVE` when clean price, volume, trade, and VWAP evidence confirms participation.
 - Added optional catalyst watchlists and per-source health/error timestamps for Alpaca News, SEC, and configured RSS/Atom feeds.
 - Added push and catalyst lifecycle tests and automatic production VAPID setup in the coordinated VPS deployment.
+# 6.1.0 — Durable interactive charts + icon language
+
+- Added detection-centered Alpaca historical trade fallback when the live state cache is cold after restart or outside market hours.
+- Added minute-bar fallback when a historical trade window is unavailable.
+- Added crosshair OHLCV inspection, wheel zoom, drag panning, timeframe aggregation, event markers, and reset-on-double-click behavior.
+- Added `react-icons` and converted Radar urgency/signal labels into compact, color-coded, keyboard-accessible icons with explanatory tooltips.
+- Disabled and removes legacy service workers/caches inside the Tauri shell while preserving PWA registration in browsers.
