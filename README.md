@@ -1,6 +1,6 @@
-# StockHunter Scout V6.1.0 — Durable Charts + Icon Language
+# StockHunter Scout V6.2.0 — Timeline Truth + Universal Selection
 
-Version 6.1.0 adds detection-centered historical chart recovery, interactive Alpaca-style candles, an icon-led Radar language, and native-shell cache safety. See [V6.1-IMPLEMENTATION.md](V6.1-IMPLEMENTATION.md). The deterministic replay foundation remains documented in [REPLAY-SPINE.md](REPLAY-SPINE.md).
+Version 6.2.0 makes exact engine, candle, alert, and delivery timing independently auditable; adds complete historical pagination, live navigation counts, universal panel selection, and automatic native cache migration. See [V6.2-IMPLEMENTATION.md](V6.2-IMPLEMENTATION.md).
 
 V5.9 keeps the catalyst engine listening continuously and delivers background Web Push notifications to the installed Android PWA. News begins as `CATALYST_WATCH` and becomes `CATALYST_ACTIVE` only when clean market-reaction evidence confirms participation. VAPID keys are generated automatically during the coordinated VPS deployment; ntfy remains an optional fallback.
 

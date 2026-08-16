@@ -64,10 +64,11 @@ export async function getHalts(): Promise<{ active: Halt[]; recent: Halt[] }> {
   return getJson("/api/market/halts");
 }
 
-export async function getMarketSnapshot(ticker: string, detectedAt?: number, bucketSeconds = 15): Promise<MarketSnapshot> {
+export async function getMarketSnapshot(ticker: string, detectedAt?: number, bucketSeconds = 15, findingId?:number): Promise<MarketSnapshot> {
   const query = new URLSearchParams();
   if (detectedAt) query.set("detected_at", String(detectedAt));
   query.set("bucket_seconds", String(bucketSeconds));
+  if(findingId)query.set("finding_id",String(findingId));
   return getJson<MarketSnapshot>(`/api/market/snapshot/${encodeURIComponent(ticker)}?${query.toString()}`);
 }
 

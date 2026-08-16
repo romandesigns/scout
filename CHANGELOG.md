@@ -146,3 +146,15 @@
 - Added crosshair OHLCV inspection, wheel zoom, drag panning, timeframe aggregation, event markers, and reset-on-double-click behavior.
 - Added `react-icons` and converted Radar urgency/signal labels into compact, color-coded, keyboard-accessible icons with explanatory tooltips.
 - Disabled and removes legacy service workers/caches inside the Tauri shell while preserving PWA registration in browsers.
+# 6.2.0 — Timeline truth + universal selection
+
+- Kept detection lines at the engine's exact sub-second timestamp while highlighting the candle that contained the detection.
+- Added an audit overlay showing detection time, seconds into the candle, detection price, and containing-candle range.
+- Added separate notification queue/sent markers so detection and delivery timing cannot be confused.
+- Exhausts Alpaca historical-trade pagination and reports trade/page provenance before rendering a completed formation.
+- Removed edge-clamping for event markers and expanded the chart time domain through the full final candle.
+- Added live numeric badges to every activity-rail panel icon with semantic urgency colors and accessible count labels.
+- Made Radar, Ross, catalysts, gainers, halts, validation, and opportunity-inbox items explicitly update Inspector selection.
+- Added contextual Inspector views for market entities that do not have a Scout detection, without implying that a detection occurred.
+- Extended the icon-and-tooltip event language across chart headers, Inspector, halt, validation, and attention surfaces.
+- Moved Tauri to a service-worker-free `native-v2` WebView data profile and added automatic one-time cache migration/reload.

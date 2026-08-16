@@ -10,6 +10,7 @@ export function PwaRuntime(){
   const [online,setOnline]=useState(true);
   useEffect(()=>{
     const nativeShell="__TAURI_INTERNALS__" in window||"__TAURI__" in window||window.location.hostname==="tauri.localhost";
+    const clientVersion=process.env.NEXT_PUBLIC_SCOUT_VERSION||"dev";
     setOnline(navigator.onLine);
     const onOnline=()=>setOnline(true),onOffline=()=>setOnline(false);
     const onInstall=(event:Event)=>{event.preventDefault();setInstall(event as InstallPrompt);};
@@ -17,8 +18,14 @@ export function PwaRuntime(){
     if(nativeShell&&"serviceWorker" in navigator){
       // Native releases ship their assets with the executable. Remove any
       // service worker left by pre-6.1 builds so it cannot mix release files.
-      void navigator.serviceWorker.getRegistrations().then(items=>Promise.all(items.map(item=>item.unregister())));
-      if("caches" in window)void caches.keys().then(keys=>Promise.all(keys.map(key=>caches.delete(key))));
+      const migrationKey=`stockhunter-native-assets-${clientVersion}`;
+      if(localStorage.getItem(migrationKey)!=="ready"){
+        void Promise.all([navigator.serviceWorker.getRegistrations(),"caches" in window?caches.keys():Promise.resolve([] as string[])]).then(async([workers,keys])=>{
+          await Promise.all([...workers.map(item=>item.unregister()),...keys.map(key=>caches.delete(key))]);
+          localStorage.setItem(migrationKey,"ready");
+          if(workers.length||keys.length)window.location.reload();
+        });
+      }
     }else if("serviceWorker" in navigator){void navigator.serviceWorker.register("/sw.js").then(registration=>{
       if(registration.waiting)setUpdate(registration.waiting);
       registration.addEventListener("updatefound",()=>registration.installing?.addEventListener("statechange",()=>{if(registration.waiting)setUpdate(registration.waiting);}));
