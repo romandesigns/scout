@@ -976,8 +976,12 @@ class MarketWatcher:
             "candidate_profile": candidate_profile,
             "base_range_pct": base_range_pct,
             "base_extension_pct": base_extension_pct,
+            "orderly_base": orderly_base,
+            "near_base": near_base,
             "higher_low_ratio": higher_low_ratio,
             "micro_resistance": micro_resistance,
+            "pressing_micro_resistance": pressing_micro_resistance,
+            "first_leg_participation": first_leg_participation,
             "first_leg_watch": first_leg_watch,
             "first_leg_release": first_leg_release,
             "leg_context": leg_context,
@@ -1003,6 +1007,7 @@ class MarketWatcher:
             "prior15_change": prior15_change,
             "accel15_pp": accel15_pp,
             "price_accelerating": price_accelerating,
+            "volume_accelerating": volume_accelerating,
             "ema9": e9,
             "ema21": e21,
             "ema9_slope": e9 - prior_e9 if e9 is not None and prior_e9 is not None else None,
@@ -1072,17 +1077,56 @@ class MarketWatcher:
         structure_ok = m["ema_up"] or m["ema_bull"] or m["quiet_break"] or m["price_accelerating"] or m["staircase"]
         quality_actionable = m["quality_label"] == "CLEAN" and m["bullish_confirmed"]
 
+        # V6.3 shadow recipe. These ingredients use only values available at
+        # this evaluation timestamp. They are persisted for replay calibration
+        # and are intentionally silent until lead-time and false-arm rates are
+        # measured across representative sessions.
+        recipe_checks = {
+            "compressed or orderly base": bool(m.get("orderly_base")),
+            "price remains near the base": bool(m.get("near_base")),
+            "pressing a nearby trigger": bool(m.get("pressing_micro_resistance")),
+            "EMA structure is improving": bool(m["ema_up"] or m["ema_bull"]),
+            "relative volume is waking up": bool(m["vol15"] >= max(1.5, settings.first_leg_min_vol_ratio * 0.6)),
+            "participation is broadening": bool(
+                m["dollar15"] >= settings.first_leg_min_dollar_15s * 0.5
+                and m["trades15"] >= max(2, settings.first_leg_min_trades_15s // 2)
+            ),
+            "price or volume is accelerating": bool(m["price_accelerating"] or m["volume_accelerating"] or m["change3"] > 0),
+            "path avoids bearish failure": bool(not bearish_short and not structural_failure),
+        }
+        recipe_present = [name for name, present in recipe_checks.items() if present]
+        recipe_missing = [name for name, present in recipe_checks.items() if not present]
+        recipe_score = round(len(recipe_present) / len(recipe_checks) * 10)
+        trigger_level = float(m.get("micro_resistance") or m["price"])
+        trigger_distance_pct = ((trigger_level - m["price"]) / m["price"] * 100.0) if m["price"] else None
+        base_extension = float(m.get("base_extension_pct") or 0.0)
+
+        def timeliness_label(extension: float) -> str:
+            if extension <= 0.75:
+                return "PRE_IGNITION"
+            if extension <= 2.0:
+                return "AT_IGNITION"
+            return "LATE"
+
         first_leg_candidate = bool(
             m.get("first_leg_watch") and not bearish_short and not structural_failure
             and m["direction_reversals"] <= settings.quality_max_direction_reversals
             and m["median_wick_ratio"] <= settings.quality_max_wick_ratio
         )
+        pre_ignition_recipe_qualifies = bool(
+            first_leg_candidate
+            and recipe_score >= 7
+            and trigger_distance_pct is not None
+            and -0.35 <= trigger_distance_pct <= 0.75
+            and base_extension <= 0.75
+        )
         if first_leg_candidate:
             if not s.first_leg_candidate_at:
                 s.first_leg_candidate_at = ts
                 s.first_leg_context = str(m.get("leg_context") or "BASE_RELEASE")
+            if pre_ignition_recipe_qualifies and not s.pre_ignition_finding_id:
                 watch = Finding(
-                    ticker=s.symbol, stage="FIRST_LEG_WATCH", detected_at=ts, price=m["price"],
+                    ticker=s.symbol, stage="PRE_IGNITION", detected_at=ts, price=m["price"],
                     score=min(10, int(m["score"])), vol_ratio_15s=m["vol15"], vol_ratio_30s=m["vol30"],
                     change_60s_pct=m["change60"], extension_pct=m["base_extension_pct"],
                     ema9=m["ema9"], ema21=m["ema21"], ema9_slope=m["ema9_slope"], vwap=m["vwap"],
@@ -1091,21 +1135,30 @@ class MarketWatcher:
                     change_3s_pct=m["change3"], change_5s_pct=m["change5"], change_10s_pct=m["change10"],
                     change_15s_pct=m["change15"], change_30s_pct=m["change30"], accel_15s_pp=m["accel15_pp"],
                     dollar_volume_15s=m["dollar15"], dollar_volume_30s=m["dollar30"], trades_15s=m["trades15"], trades_30s=m["trades30"],
-                    breakout_level=m["micro_resistance"], breakout_window="micro", signals=["FIRST_LEG_WATCH"],
-                    quality_label=m["quality_label"], quality_score=m["quality_score"], actionable_rank="C",
+                    breakout_level=m["micro_resistance"], breakout_window="micro", signals=["PRE_IGNITION", "ARMED"],
+                    quality_label="DEVELOPING", quality_score=m["quality_score"], actionable_rank="C",
                     rejection_reasons=m["rejection_reasons"], directional_efficiency=m["directional_efficiency"],
                     active_bucket_ratio=m["active_bucket_ratio"], direction_reversals=m["direction_reversals"],
                     previous_close=m["previous_close"], gap_pct=m["gap_pct"], day_volume=m["day_volume"],
                     projected_session_volume=m["projected_session_volume"], volume_rate_per_minute=m["volume_rate_per_minute"],
                     candidate_profile=dict(m["candidate_profile"]), episode_id=s.episode_id,
                     leg_context=s.first_leg_context, ross_match=m["ross_match"], ross_score=m["ross_score"],
+                    detection_timeframe_seconds=settings.bucket_seconds,
+                    formation_start_at=(ts - settings.first_leg_base_buckets * settings.bucket_seconds),
+                    formation_end_at=ts, formation_low=m.get("base_low"), formation_high=m.get("base_high"),
+                    trigger_level=trigger_level, invalidation_level=m.get("base_low"), urgency="WATCH",
+                    engine_version=settings.app_version, lifecycle_phase="ARMED", shadow_mode=True,
+                    recipe_score=recipe_score, recipe_present=recipe_present, recipe_missing=recipe_missing,
+                    trigger_distance_pct=trigger_distance_pct, base_extension_at_detection_pct=base_extension,
+                    timeliness_label=timeliness_label(base_extension),
                 )
                 snap = self.snapshot(s.symbol)
                 buckets, current = snap if snap else ([], None)
-                await self.dispatcher.emit(watch, buckets, current)
+                s.pre_ignition_finding_id = await self.dispatcher.emit(watch, buckets, current)
         else:
             s.first_leg_candidate_at = 0.0
             s.first_leg_context = None
+            s.pre_ignition_finding_id = None
 
         first_leg_qualifies = bool(
             first_leg_candidate and m.get("first_leg_release") and quality_actionable
@@ -1400,6 +1453,10 @@ class MarketWatcher:
             halt_pressure_score=int(m.get("halt_pressure_score") or 0),
             urgency=("NOW" if stage in {"FIRST_LEG","HALT_PRESSURE"} else "EXTENDED" if m["extension"] >= 8 else "CONFIRMED" if stage in {"IGNITION","BREAKOUT","SURGE"} else "WATCH"),
             engine_version=settings.app_version,
+            lifecycle_phase=("REARM" if stage == "REARM" else "CONFIRMED" if stage in {"IGNITION","BREAKOUT","SURGE"} else "IGNITING"),
+            shadow_mode=False, recipe_score=recipe_score, recipe_present=recipe_present, recipe_missing=recipe_missing,
+            trigger_distance_pct=trigger_distance_pct, base_extension_at_detection_pct=base_extension,
+            timeliness_label=timeliness_label(base_extension), precursor_finding_id=s.pre_ignition_finding_id,
         )
         if first_leg_qualifies:
             f.evidence.extend([

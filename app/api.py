@@ -65,7 +65,7 @@ class ScoutApi:
             "states": len(self.market.states),
             "halts": len(self.market.current_halts()),
             "dashboard": settings.web_out_dir.exists(),
-            "engines": ["FIRST_LEG", "EARLY", "SURGE", "BREAKOUT", "STAIRCASE", "IGNITION", "REVERSAL_WATCH", "EMA_RECLAIM", "VWAP_RECLAIM", "REARM", "HALT_PRESSURE", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT"],
+            "engines": ["PRE_IGNITION_SHADOW", "FIRST_LEG", "EARLY", "SURGE", "BREAKOUT", "STAIRCASE", "IGNITION", "REVERSAL_WATCH", "EMA_RECLAIM", "VWAP_RECLAIM", "REARM", "HALT_PRESSURE", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT"],
         })
 
     async def status(self, request: web.Request) -> web.Response:

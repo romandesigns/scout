@@ -82,6 +82,7 @@ function demoSnapshot(finding?: Finding): MarketSnapshot {
 }
 
 function markerTone(stage: string) {
+  if (stage === "PRE_IGNITION" || stage === "ARMED") return "var(--orange)";
   if (stage === "SURGE" || stage === "IGNITION") return "var(--green)";
   if (stage === "BREAKOUT" || stage === "EARLY") return "var(--blue)";
   if (stage === "HALT") return "var(--red)";
@@ -211,7 +212,7 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
         {priceTicks.map((p) => <line key={p} x1={layout.left} x2={layout.width-layout.right} y1={layout.y(p)} y2={layout.y(p)}/>) }
         {timeTicks.slice(1,-1).map((ts) => <line key={ts} x1={layout.x(ts)} x2={layout.x(ts)} y1={layout.top} y2={layout.bottom}/>) }
       </g>
-      {showAnnotations&&annotations.detection!==false&&detectionCandle&&<rect className="detection-candle-highlight" x={layout.x(detectionCandle.start_ts)-layout.bodyW*.72} y={layout.top} width={layout.bodyW*1.44} height={layout.priceBottom-layout.top}/>} 
+      {showAnnotations&&annotations.detection!==false&&detectionCandle&&<rect className="detection-candle-highlight" x={layout.x(detectionCandle.start_ts)-layout.bodyW*.72} y={layout.top} width={layout.bodyW*1.44} height={layout.priceBottom-layout.top}/>}
       <g>
         {rows.map((b, i) => {
           const cx = layout.x(b.start_ts);
@@ -249,11 +250,11 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
       {showAnnotations && annotations.detection !== false && findingMarkers.map((f, idx) => {
         const x = markerX(f.detected_at);
         const fused = Array.from(new Set([f.stage, ...(f.signals || [])].filter(Boolean)));
-        const primary = fused.find((signal) => ["REARM", "VWAP_RECLAIM", "EMA_RECLAIM", "RECLAIM", "IGNITION", "BREAKOUT", "SURGE", "STAIRCASE", "EARLY", "REVERSAL_WATCH"].includes(signal)) || f.stage;
+        const primary = fused.find((signal) => ["PRE_IGNITION", "ARMED", "REARM", "VWAP_RECLAIM", "EMA_RECLAIM", "RECLAIM", "IGNITION", "BREAKOUT", "SURGE", "STAIRCASE", "EARLY", "REVERSAL_WATCH"].includes(signal)) || f.stage;
         const color = markerTone(primary);
-        const label = fused.filter((signal) => signal !== "CATALYST").slice(0, 2).join("·") || f.stage;
+        const label = `${f.shadow_mode?"SHADOW · ":""}${fused.filter((signal) => signal !== "CATALYST").slice(0, 2).join("·") || f.stage}`;
         const selected=f.id===selectedFinding.id;
-        return <g key={`f-${f.id}`} className="chart-event-marker"><line x1={x} x2={x} y1={layout.top} y2={layout.priceBottom} stroke={color} strokeDasharray={selected?"1 0":"3 3"} opacity={selected?".95":".55"}/><circle cx={x} cy={layout.y(f.price)} r={selected?"5":"3.5"} fill={color}/><text x={x+5} y={48 + (idx%4)*12} className="chart-event-label" fill={color}>{selected?"DETECTED · ":""}{label}</text>{selected&&<title>{`${exactEtTime(f.detected_at)} · ${f.price.toFixed(4)} · ${detectionOffset?.toFixed(3)??"—"}s into ${timeframeSeconds}s candle`}</title>}</g>;
+        return <g key={`f-${f.id}`} className="chart-event-marker"><line x1={x} x2={x} y1={layout.top} y2={layout.priceBottom} stroke={color} strokeDasharray={selected?"1 0":"3 3"} opacity={selected?".95":".55"}/><circle cx={x} cy={layout.y(f.price)} r={selected?"5":"3.5"} fill={color}/><text x={x+5} y={48 + (idx%4)*12} className="chart-event-label" fill={color}>{selected?"DETECTED · ":""}{label}</text><title>{`${exactEtTime(f.detected_at)} · ${f.price.toFixed(4)} · ${f.timeliness_label||"ungraded"}${f.recipe_score!=null?` · recipe ${f.recipe_score}/10`:""}${selected?` · ${detectionOffset?.toFixed(3)??"—"}s into ${timeframeSeconds}s candle`:""}`}</title></g>;
       })}
       {deliveryMarkers.map((event,idx)=>{const x=markerX(event.event_at);const sent=event.status==="sent"||event.status==="delivered";return <g key={`delivery-${event.id}`} className="chart-delivery-marker"><line x1={x} x2={x} y1={layout.top} y2={layout.priceBottom} stroke={sent?"var(--green)":"var(--orange)"} strokeDasharray="1 4" opacity=".75"/><text x={x+4} y={112+(idx%3)*12} className="chart-event-label" fill={sent?"var(--green)":"var(--orange)"}>{sent?"ALERT":"QUEUE"}</text><title>{`${event.channel} ${event.status} · ${exactEtTime(event.event_at)}`}</title></g>})}
       {statusMarkers.map((s, idx) => {

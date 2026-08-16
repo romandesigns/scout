@@ -95,6 +95,15 @@ class Finding:
     halt_pressure_score: int = 0
     urgency: str = "WATCH"
     engine_version: str | None = None
+    lifecycle_phase: str | None = None
+    shadow_mode: bool = False
+    recipe_score: int = 0
+    recipe_present: list[str] = field(default_factory=list)
+    recipe_missing: list[str] = field(default_factory=list)
+    trigger_distance_pct: float | None = None
+    base_extension_at_detection_pct: float | None = None
+    timeliness_label: str | None = None
+    precursor_finding_id: int | None = None
 
 
 @dataclass
@@ -128,6 +137,7 @@ class SymbolState:
     continuation_started_at: float = 0.0
     first_leg_candidate_at: float = 0.0
     first_leg_context: str | None = None
+    pre_ignition_finding_id: int | None = None
 
     def _roll(self, ts: float, price: float) -> None:
         bucket_start = ts - (ts % self.bucket_seconds)
