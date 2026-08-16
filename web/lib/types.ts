@@ -282,6 +282,7 @@ export type ScoutStatus = {
       run_id:string; status:string; dataset:string; processed_events:number;
       findings_count:number; schema_version:string; scout_version:string;
       completed_at:number; benchmark?:{events_per_second:number;peak_memory_bytes:number};
+      calibration?:{precursors:number;successful_precursors:number;false_arms:number;false_arm_rate:number|null;median_lead_seconds:number|null;expansion_episodes:number;missed_expansions:number};
     };
   };
 };

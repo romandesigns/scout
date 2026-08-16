@@ -1,5 +1,14 @@
 # Changelog
 
+## 6.4.0 — Historical Replay Calibration
+
+- Builds bounded multi-session datasets from Alpaca historical bars and trades.
+- Replays exact trades through both the live Python oracle and the new Rust rolling-market candidate core with notifications hard-disabled.
+- Adds explicit Python/Rust precursor parity reporting and prevents production cutover unless ticker, timestamp, and recipe evidence agree.
+- Measures precursor lead time, false-arm rate, missed objective expansions, 15-minute favorable excursion, and per-ingredient success.
+- Adds a calibration-ready application badge and compact summary to replay status.
+- Preserves the existing environment contract and does not enable pre-ignition notifications.
+
 ## 6.3.0 — Pre-Ignition Intelligence shadow
 
 - Adds a silent `PRE_IGNITION`/`ARMED` lifecycle event before confirmed release when the timestamp-safe recipe converges near a trigger.

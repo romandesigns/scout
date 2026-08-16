@@ -25,7 +25,7 @@ def _f(name: str, default: float, minimum: float | None = None) -> float:
 @dataclass(frozen=True)
 class Settings:
     app_name: str = os.getenv("APP_NAME", "StockHunter Scout")
-    app_version: str = os.getenv("APP_VERSION", "6.3.0")
+    app_version: str = os.getenv("APP_VERSION", "6.4.0")
     env: str = os.getenv("APP_ENV", "production")
     timezone: str = os.getenv("APP_TIMEZONE", "America/New_York")
 

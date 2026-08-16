@@ -33,6 +33,9 @@ if (-not (git check-ignore --no-index .env 2>$null)) {
     throw '.env is not protected by .gitignore.'
 }
 
+cargo test --manifest-path .\rust\market-replay\Cargo.toml
+if ($LASTEXITCODE -ne 0) { throw 'Rust market replay tests failed.' }
+
 Push-Location .\web
 try {
     bun install

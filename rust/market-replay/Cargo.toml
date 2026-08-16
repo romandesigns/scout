@@ -1,0 +1,9 @@
+[package]
+name = "scout-market-replay"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic Rust market replay core for StockHunter Scout"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
