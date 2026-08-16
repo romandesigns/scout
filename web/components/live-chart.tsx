@@ -23,6 +23,8 @@ function vwapSeries(rows: Bucket[]) {
   });
 }
 
+function moneyPrice(value:number){return value<1?`$${value.toFixed(4)}`:`$${value.toFixed(2)}`;}
+
 function aggregateBuckets(rows: Bucket[], seconds: number): Bucket[] {
   if (seconds <= 15) return rows;
   const groups = new Map<number, Bucket>();
@@ -107,7 +109,7 @@ export function LiveChart({ finding, frozen = false, active = true, pollOffsetMs
     let disposed = false;
     async function load() {
       try {
-        const next = await getMarketSnapshot(finding!.ticker, finding!.detected_at, timeframeSeconds);
+        const next = await getMarketSnapshot(finding!.ticker, finding!.detected_at, timeframeSeconds, finding!.id);
         if (!disposed) {
           setSnapshot(next);
           setError("");
@@ -160,13 +162,14 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
     max += pad;
     const firstTs = rows[0]?.start_ts ?? 0;
     const lastTs = rows.at(-1)?.start_ts ?? firstTs + 15;
-    const timeSpan = Math.max(15, lastTs - firstTs);
+    const domainEnd = lastTs + timeframeSeconds;
+    const timeSpan = Math.max(15, domainEnd - firstTs);
     const x = (ts: number) => left + ((ts - firstTs) / timeSpan) * (width - left - right);
     const bodyW = Math.max(2.5, Math.min(18, ((width - left - right) * timeframeSeconds / timeSpan) * 0.58));
     const y = (price: number) => top + ((max - price) / Math.max(max - min, 1e-9)) * (priceBottom - top);
     const maxVol = Math.max(1, ...rows.map((b) => b.volume));
     const vy = (vol: number) => bottom - (vol / maxVol) * (bottom - volumeTop);
-    return { width, height, left, right, top, priceBottom, volumeTop, bottom, min, max, firstTs, lastTs, timeSpan, bodyW, x, y, vy };
+    return { width, height, left, right, top, priceBottom, volumeTop, bottom, min, max, firstTs, lastTs, domainEnd, timeSpan, bodyW, x, y, vy };
   }, [rows,timeframeSeconds]);
 
   const ema9 = useMemo(() => emaSeries(rows.map((b) => b.close), 9), [rows]);
@@ -175,14 +178,19 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
   const path = (values: number[]) => values.map((v, i) => `${i ? "L" : "M"}${layout.x(rows[i].start_ts).toFixed(1)},${layout.y(v).toFixed(1)}`).join(" ");
   const firstTs = rows[0]?.start_ts ?? 0;
   const lastTs = rows.at(-1)?.start_ts ?? firstTs;
-  const markerX = (ts: number) => layout.x(Math.max(firstTs, Math.min(lastTs, ts)));
-  const findingMarkers = snapshot.findings.filter((f) => f.detected_at >= firstTs - timeframeSeconds && f.detected_at <= lastTs + timeframeSeconds*2).slice().reverse();
+  const markerX = (ts: number) => layout.x(ts);
+  const inWindow=(ts:number)=>ts>=firstTs&&ts<layout.domainEnd;
+  const findingMarkers = snapshot.findings.filter((f) => inWindow(f.detected_at)).slice().reverse();
   const catalystMarkers = snapshot.catalysts.filter((c) => c.published_at >= firstTs - 15 && c.published_at <= lastTs + 30).slice(-6);
   const statusMarkers = snapshot.statuses.filter((s) => s.event_at >= firstTs - 15 && s.event_at <= lastTs + 30).slice(-4);
   const current = rows.at(-1)?.close ?? selectedFinding.price;
   const priceTicks = Array.from({ length: 5 }, (_, i) => layout.max - ((layout.max - layout.min) * i) / 4);
-  const timeTicks = Array.from({ length: 5 }, (_, i) => firstTs + ((lastTs - firstTs) * i) / 4);
+  const timeTicks = Array.from({ length: 5 }, (_, i) => firstTs + ((layout.domainEnd - firstTs) * i) / 4);
   const etTime = (ts: number) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", second: "2-digit" }).format(ts * 1000);
+  const exactEtTime=(ts:number)=>`${new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit",second:"2-digit",fractionalSecondDigits:3}).format(ts*1000)} ET`;
+  const detectionCandle=rows.find(row=>selectedFinding.detected_at>=row.start_ts&&selectedFinding.detected_at<row.start_ts+timeframeSeconds);
+  const detectionOffset=detectionCandle?selectedFinding.detected_at-detectionCandle.start_ts:null;
+  const deliveryMarkers=(snapshot.delivery||[]).filter(item=>inWindow(item.event_at));
   const hovered=hoverIndex==null?null:rows[hoverIndex];
   const pointerIndex=(event:React.PointerEvent<SVGSVGElement>)=>{
     const box=event.currentTarget.getBoundingClientRect();
@@ -203,6 +211,7 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
         {priceTicks.map((p) => <line key={p} x1={layout.left} x2={layout.width-layout.right} y1={layout.y(p)} y2={layout.y(p)}/>) }
         {timeTicks.slice(1,-1).map((ts) => <line key={ts} x1={layout.x(ts)} x2={layout.x(ts)} y1={layout.top} y2={layout.bottom}/>) }
       </g>
+      {showAnnotations&&annotations.detection!==false&&detectionCandle&&<rect className="detection-candle-highlight" x={layout.x(detectionCandle.start_ts)-layout.bodyW*.72} y={layout.top} width={layout.bodyW*1.44} height={layout.priceBottom-layout.top}/>} 
       <g>
         {rows.map((b, i) => {
           const cx = layout.x(b.start_ts);
@@ -243,8 +252,10 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
         const primary = fused.find((signal) => ["REARM", "VWAP_RECLAIM", "EMA_RECLAIM", "RECLAIM", "IGNITION", "BREAKOUT", "SURGE", "STAIRCASE", "EARLY", "REVERSAL_WATCH"].includes(signal)) || f.stage;
         const color = markerTone(primary);
         const label = fused.filter((signal) => signal !== "CATALYST").slice(0, 2).join("·") || f.stage;
-        return <g key={`f-${f.id}`} className="chart-event-marker"><line x1={x} x2={x} y1={layout.top} y2={layout.priceBottom} stroke={color} strokeDasharray="3 3" opacity=".68"/><circle cx={x} cy={layout.y(f.price)} r="4" fill={color}/><text x={x+5} y={48 + (idx%4)*12} className="chart-event-label" fill={color}>{label}</text></g>;
+        const selected=f.id===selectedFinding.id;
+        return <g key={`f-${f.id}`} className="chart-event-marker"><line x1={x} x2={x} y1={layout.top} y2={layout.priceBottom} stroke={color} strokeDasharray={selected?"1 0":"3 3"} opacity={selected?".95":".55"}/><circle cx={x} cy={layout.y(f.price)} r={selected?"5":"3.5"} fill={color}/><text x={x+5} y={48 + (idx%4)*12} className="chart-event-label" fill={color}>{selected?"DETECTED · ":""}{label}</text>{selected&&<title>{`${exactEtTime(f.detected_at)} · ${f.price.toFixed(4)} · ${detectionOffset?.toFixed(3)??"—"}s into ${timeframeSeconds}s candle`}</title>}</g>;
       })}
+      {deliveryMarkers.map((event,idx)=>{const x=markerX(event.event_at);const sent=event.status==="sent"||event.status==="delivered";return <g key={`delivery-${event.id}`} className="chart-delivery-marker"><line x1={x} x2={x} y1={layout.top} y2={layout.priceBottom} stroke={sent?"var(--green)":"var(--orange)"} strokeDasharray="1 4" opacity=".75"/><text x={x+4} y={112+(idx%3)*12} className="chart-event-label" fill={sent?"var(--green)":"var(--orange)"}>{sent?"ALERT":"QUEUE"}</text><title>{`${event.channel} ${event.status} · ${exactEtTime(event.event_at)}`}</title></g>})}
       {statusMarkers.map((s, idx) => {
         const x = markerX(s.event_at);
         return <g key={`s-${s.id ?? idx}`} className="chart-event-marker"><line x1={x} x2={x} y1={layout.top} y2={layout.priceBottom} stroke={s.is_halted ? "var(--red)" : "var(--green)"} strokeDasharray="2 3"/><text x={x+4} y={92 + (idx%2)*12} className="chart-event-label" fill={s.is_halted ? "var(--red)" : "var(--green)"}>{s.is_halted ? "HALT" : "RESUME"}</text></g>;
@@ -264,6 +275,7 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
     <div className="chart-overlay-top">
       <span>EMA9</span><i className="legend-ema9"/><span>EMA21</span><i className="legend-ema21"/><span>VWAP</span><i className="legend-vwap"/>
       <span className="chart-source">{snapshot.source?.replaceAll("-"," ")||"live"}</span>
+      {snapshot.source?.startsWith("historical")&&<span className="chart-source">{snapshot.historical_complete===false?"INCOMPLETE":`${snapshot.historical_trade_count??0} trades · ${snapshot.historical_pages??1}p`}</span>}
     </div>
     {hovered&&<div className="candle-tooltip">
       <b>{etTime(hovered.start_ts)} ET</b>
@@ -271,6 +283,7 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
       <span>L <strong>{hovered.low.toFixed(4)}</strong></span><span>C <strong>{hovered.close.toFixed(4)}</strong></span>
       <span>V <strong>{hovered.volume.toLocaleString()}</strong></span><span>T <strong>{hovered.trades.toLocaleString()}</strong></span>
     </div>}
+    {detectionCandle&&<div className="detection-audit"><b>Detected {exactEtTime(selectedFinding.detected_at)}</b><span>{detectionOffset?.toFixed(3)}s into candle</span><span>{moneyPrice(selectedFinding.price)} detection</span><span>{moneyPrice(detectionCandle.low)}–{moneyPrice(detectionCandle.high)} candle</span></div>}
     {error && <div className="chart-connection-note">{error}</div>}
   </div>;
 }

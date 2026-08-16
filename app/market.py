@@ -255,12 +255,24 @@ class MarketWatcher:
             "start": iso(start), "end": iso(end), "feed": settings.alpaca_feed,
             "limit": 10000, "sort": "asc",
         }
-        response = requests.get(
-            f"{settings.alpaca_data_base}/v2/stocks/{ticker}/trades",
-            params=params, headers=_headers(), timeout=25,
-        )
-        response.raise_for_status()
-        trades = response.json().get("trades", [])
+        trades: list[dict] = []
+        next_page_token: str | None = None
+        page_count = 0
+        while True:
+            request_params = dict(params)
+            if next_page_token:
+                request_params["page_token"] = next_page_token
+            response = requests.get(
+                f"{settings.alpaca_data_base}/v2/stocks/{ticker}/trades",
+                params=request_params, headers=_headers(), timeout=25,
+            )
+            response.raise_for_status()
+            page = response.json()
+            trades.extend(page.get("trades", []))
+            page_count += 1
+            next_page_token = page.get("next_page_token")
+            if not next_page_token:
+                break
         grouped: dict[int, Bucket] = {}
         for trade in trades:
             try:
@@ -307,6 +319,8 @@ class MarketWatcher:
                 for row in rows
             ],
             "metrics": {}, "halt": self.halts.get(ticker), "source": source, "as_of": time.time(),
+            "historical_complete": not bool(next_page_token), "historical_pages": page_count,
+            "historical_trade_count": len(trades),
         }
 
     def diagnostics(self, ticker: str) -> dict:

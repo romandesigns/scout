@@ -200,9 +200,11 @@ class ScoutApi:
     async def snapshot(self, request: web.Request) -> web.Response:
         ticker = str(request.match_info.get("ticker", "")).upper()
         detected_at_raw = request.query.get("detected_at")
+        finding_id_raw = request.query.get("finding_id")
         try:
             detected_at = float(detected_at_raw) if detected_at_raw else None
             bucket_seconds = _int(request.query.get("bucket_seconds"), 15, 15, 300)
+            finding_id = int(finding_id_raw) if finding_id_raw else None
         except (TypeError, ValueError):
             raise web.HTTPBadRequest(text="invalid chart window")
         payload = self.market.snapshot_payload(ticker)
@@ -219,14 +221,16 @@ class ScoutApi:
                     raise web.HTTPBadGateway(text=f"historical chart unavailable: {exc}")
         if not payload:
             raise web.HTTPNotFound(text="symbol has no live or historical chart data")
-        findings, catalysts, statuses = await asyncio.gather(
+        findings, catalysts, statuses, delivery = await asyncio.gather(
             asyncio.to_thread(self.store.list_findings, 30, ticker, None),
             asyncio.to_thread(self.store.list_catalysts, 20, ticker),
             asyncio.to_thread(self.store.recent_market_status_events, 20, ticker),
+            asyncio.to_thread(self.store.finding_delivery, finding_id) if finding_id else asyncio.sleep(0, result=[]),
         )
         payload["findings"] = findings
         payload["catalysts"] = catalysts
         payload["statuses"] = statuses
+        payload["delivery"] = delivery
         return web.json_response(payload)
 
     async def diagnostics(self, request: web.Request) -> web.Response:

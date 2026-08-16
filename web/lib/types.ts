@@ -66,6 +66,9 @@ export type Finding = {
   halt_pressure_score?: number;
   urgency?: "NOW" | "WATCH" | "CONFIRMED" | "EXTENDED" | "RISK";
   engine_version?: string | null;
+  selection_context?: "finding"|"catalyst"|"gainer"|"halt"|"validation";
+  selection_title?: string;
+  selection_detail?: string;
 };
 
 export type DeliveryEvent = { id:number; finding_id:number; channel:string; status:string; event_at:number; detail?:string|null; provider_id?:string|null };
@@ -188,6 +191,10 @@ export type MarketSnapshot = {
   statuses: Halt[];
   source?: "live" | "historical-trades" | "historical-bars";
   as_of?: number;
+  historical_complete?: boolean;
+  historical_pages?: number;
+  historical_trade_count?: number;
+  delivery?: DeliveryEvent[];
 };
 
 export type Diagnostic = {
