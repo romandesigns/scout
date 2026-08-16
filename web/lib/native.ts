@@ -2,7 +2,7 @@ import type { Finding, NotificationPreferences } from "./types";
 
 const CRITICAL = new Set(["FIRST_LEG", "SURGE", "IGNITION", "HALT_PRESSURE", "CATALYST_ACTIVE", "HALT"]);
 const nativePending = new Map<string, { finding: Finding; prefs: NotificationPreferences; timer: ReturnType<typeof setTimeout> }>();
-const stagePriority: Record<string,number> = { ACTIVITY_WATCH:0, REVERSAL_WATCH:0, FIRST_LEG_WATCH:0, EARLY:2, STAIRCASE:2, FIRST_LEG:3, EMA_RECLAIM:3, SURGE:4, VWAP_RECLAIM:4, BREAKOUT:5, REARM:6, IGNITION:7, CATALYST_WATCH:8, CATALYST_ACTIVE:10, RESUME:9, HALT:10 };
+const stagePriority: Record<string,number> = { ACTIVITY_WATCH:0, REVERSAL_WATCH:0, FIRST_LEG_WATCH:0, PRE_IGNITION:0, EARLY:2, STAIRCASE:2, FIRST_LEG:3, EMA_RECLAIM:3, SURGE:4, VWAP_RECLAIM:4, BREAKOUT:5, REARM:6, IGNITION:7, CATALYST_WATCH:8, CATALYST_ACTIVE:10, RESUME:9, HALT:10 };
 
 function isCritical(finding: Finding) {
   return Array.from(new Set([finding.stage, ...(finding.signals || [])])).some((signal) => CRITICAL.has(signal));

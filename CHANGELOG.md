@@ -1,5 +1,14 @@
 # Changelog
 
+## 6.3.0 — Pre-Ignition Intelligence shadow
+
+- Adds a silent `PRE_IGNITION`/`ARMED` lifecycle event before confirmed release when the timestamp-safe recipe converges near a trigger.
+- Persists the exact present and missing recipe ingredients, recipe evidence score, trigger distance, base extension, timeliness label, and precursor relationship.
+- Keeps pre-ignition candidates in shadow mode: they appear in developing views and charts but cannot enter notification delivery queues.
+- Links later ignition/first-leg findings to the precursor observed before them without moving or inventing chart markers.
+- Adds orange shadow markers, marker tooltips, and an Inspector pre-ignition audit section.
+- Adds a repeatable PowerShell 7 release-preparation command and introduces no new environment variables.
+
 ## 5.4.1 — Universe snapshot hotfix
 
 - Fixed Alpaca multi-symbol snapshot parsing when the response is keyed directly by ticker.

@@ -34,7 +34,7 @@ class Dispatcher:
     @staticmethod
     def _stage_priority(stage: str) -> int:
         return {
-            "ACTIVITY_WATCH": 0, "REVERSAL_WATCH": 0, "FIRST_LEG_WATCH": 0,
+            "ACTIVITY_WATCH": 0, "REVERSAL_WATCH": 0, "FIRST_LEG_WATCH": 0, "PRE_IGNITION": 0,
             "FIRST_LEG": 3, "EARLY": 2, "STAIRCASE": 2, "EMA_RECLAIM": 3,
             "SURGE": 3, "VWAP_RECLAIM": 3, "BREAKOUT": 4,
             "REARM": 5, "IGNITION": 6, "CATALYST": 7, "CATALYST_WATCH": 7, "CATALYST_ACTIVE": 9,

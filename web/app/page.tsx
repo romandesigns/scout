@@ -231,7 +231,7 @@ const defaultPrefs: NotificationPreferences = {
     windows: { enabled: true, sound: true, toast: true, priority: "high" },
     email: { enabled: true },
   },
-  signals: { ACTIVITY_WATCH:"silent", REVERSAL_WATCH:"silent", FIRST_LEG_WATCH:"silent", FIRST_LEG:"notify", RECLAIM:"notify", EMA_RECLAIM:"notify", VWAP_RECLAIM:"notify", FIRST_PULLBACK:"silent", EARLY:"notify", SURGE:"notify", BREAKOUT:"notify", STAIRCASE:"notify", IGNITION:"notify", CATALYST_WATCH:"notify", CATALYST_ACTIVE:"notify", HALT:"notify", RESUME:"notify", REARM:"notify" },
+  signals: { ACTIVITY_WATCH:"silent", REVERSAL_WATCH:"silent", FIRST_LEG_WATCH:"silent", PRE_IGNITION:"silent", FIRST_LEG:"notify", RECLAIM:"notify", EMA_RECLAIM:"notify", VWAP_RECLAIM:"notify", FIRST_PULLBACK:"silent", EARLY:"notify", SURGE:"notify", BREAKOUT:"notify", STAIRCASE:"notify", IGNITION:"notify", CATALYST_WATCH:"notify", CATALYST_ACTIVE:"notify", HALT:"notify", RESUME:"notify", REARM:"notify" },
   sessions: { overnight:true, premarket:true, regular:true, afterhours:true },
   quiet_hours: { enabled:false, start:"22:00", end:"06:00", allow_critical:true },
   minimum_score: 0,
@@ -320,6 +320,7 @@ const EVENT_HELP:Record<string,string>={
   RECLAIM:"Reclaim — price recovered a key structural level",
   FIRST_LEG:"First leg — confirmed initial expansion from a base",
   FIRST_LEG_WATCH:"First-leg watch — base is developing before release",
+  PRE_IGNITION:"Pre-ignition shadow — recipe is armed before release; notifications remain silent during calibration",
   CATALYST:"Catalyst — fresh potentially bullish news",
   CATALYST_WATCH:"Catalyst watch — news exists but market reaction is unconfirmed",
   CATALYST_ACTIVE:"Active catalyst — news and market reaction are aligned",
@@ -333,6 +334,7 @@ function eventIcon(stage:string){
   if(stage==="CONFIRMED")return <MdCheckCircle/>;
   if(stage==="NOW"||stage==="FIRST_LEG")return <MdNewReleases/>;
   if(stage==="WATCH"||stage.endsWith("_WATCH"))return <MdVisibility/>;
+  if(stage==="PRE_IGNITION"||stage==="ARMED")return <MdTrackChanges/>;
   if(stage==="IGNITION")return <MdLocalFireDepartment/>;
   if(stage==="SURGE"||stage==="HALT_PRESSURE")return <MdBolt/>;
   if(stage==="EARLY")return <MdTrackChanges/>;
@@ -451,7 +453,7 @@ function MarketPulse({ findings, gainers, halts, selectedId, onSelect }: { findi
     <PanelTitle icon={<IconActivity size={14}/>} title="RADAR" actions={<IconButton label="Radar filters"><IconAdjustmentsFilled size={14}/></IconButton>}/>
     <div className="radar-scope">{(["actionable","developing","all"] as const).map(value=><button key={value} data-active={scope===value||undefined} onClick={()=>setScope(value)}>{value}</button>)}</div>
     <div className="min-h-0 flex-1 overflow-y-auto">
-      {visibleFindings.length ? visibleFindings.map(f => <FindingRow key={f.ticker} finding={f} selected={selectedId===f.id} onSelect={()=>onSelect(f)}/>) : <EmptyPane text={scope==="actionable"?"No clean actionable setups":"No candidates in this view"}/>} 
+      {visibleFindings.length ? visibleFindings.map(f => <FindingRow key={f.ticker} finding={f} selected={selectedId===f.id} onSelect={()=>onSelect(f)}/>) : <EmptyPane text={scope==="actionable"?"No clean actionable setups":"No candidates in this view"}/>}
     </div>
   </div>;
 }
@@ -653,6 +655,7 @@ function Inspector({ finding, onNotifications }: { finding?:Finding; onNotificat
     {tab==="verification"&&<><InspectorSection title="DETECTION VERDICT"><KV k="Detected" v="YES"/><KV k="Timestamp" v={new Date(finding.detected_at*1000).toLocaleString([], {timeZone:"America/New_York",hour12:true})+" ET"}/><KV k="Price / signal" v={`${money(finding.price)} · ${finding.stage}`}/><KV k="Engine" v={finding.engine_version||"Legacy"}/><div className="verification-grade"><span>{verification?.automatic_grade?"★".repeat(verification.automatic_grade)+"☆".repeat(5-verification.automatic_grade):"Outcome pending"}</span><b>{verification?.automatic_label||"PROVISIONAL"}</b></div>{verification?.grade_reasons?.map(reason=><div className="evidence-item" key={reason}><span className="evidence-dot"/>{reason}</div>)}</InspectorSection><InspectorSection title="OUTCOME COMPARISON"><div className="comparison-grid"><div><b>AT DETECTION</b><span>{money(finding.price)}</span><small>{finding.stage} · {finding.detection_timeframe_seconds||15}s</small></div><div><b>AFTERWARD</b><span>{pct(verification?.outcome?.max_15m_pct)}</span><small>15-minute maximum</small></div></div><KV k="+1 minute" v={pct(verification?.outcome?.max_1m_pct)}/><KV k="+5 minutes" v={pct(verification?.outcome?.max_5m_pct)}/><KV k="+15 minutes" v={pct(verification?.outcome?.max_15m_pct)}/><KV k="Session maximum" v={pct(verification?.outcome?.max_session_pct)}/></InspectorSection><InspectorSection title="DELIVERY VERDICT">{verification?.legacy_delivery_audit?<div className="notice-box">Legacy record — delivery auditing unavailable</div>:verification?.delivery.map(event=><div className="delivery-event" key={event.id}><span>{clock(event.event_at)}</span><b>{event.channel}</b><Badge data-tone={event.status.includes("failed")?"red":event.status==="provider_accepted"?"green":"blue"}>{event.status.replaceAll("_"," ")}</Badge></div>)}</InspectorSection><InspectorSection title="YOUR EVALUATION"><div className="star-picker">{[1,2,3,4,5].map(star=><Button key={star} variant="ghost" data-active={reviewGrade>=star||undefined} onClick={()=>setReviewGrade(star)}>★</Button>)}</div><Button className="w-full" onClick={()=>void saveFindingReview(finding.id,{user_grade:reviewGrade,user_agrees:reviewGrade===verification?.automatic_grade}).then(setVerification)}>Save evaluation</Button></InspectorSection></>}
     {tab==="history"&&<InspectorSection title="EVENT HISTORY"><KV k="Episode" v={`#${finding.episode_id??0}`}/><KV k="Selected event" v={`${finding.stage} · ${clock(finding.detected_at)}`}/><div className="notice-box">Historical events remain tied to this ticker and episode; selecting one restores its original chart context.</div></InspectorSection>}
     {tab==="overview"&&<>
+    {(finding.recipe_score!=null||finding.lifecycle_phase)&&<InspectorSection title="PRE-IGNITION AUDIT"><KV k="Lifecycle" v={`${finding.lifecycle_phase||"UNCLASSIFIED"}${finding.shadow_mode?" · SHADOW":""}`}/><KV k="Recipe" v={`${finding.recipe_score??0}/10`}/><KV k="Timeliness" v={(finding.timeliness_label||"PENDING").replaceAll("_"," ")}/><KV k="Trigger distance" v={finding.trigger_distance_pct==null?"—":`${finding.trigger_distance_pct>=0?"":"+"}${Math.abs(finding.trigger_distance_pct).toFixed(2)}% ${finding.trigger_distance_pct>=0?"below":"through"}`}/><KV k="Base extension" v={finding.base_extension_at_detection_pct==null?"—":pct(finding.base_extension_at_detection_pct)}/>{finding.recipe_present?.map(item=><div className="evidence-item" key={`present-${item}`}><span className="evidence-dot"/>{item}</div>)}{finding.recipe_missing?.map(item=><div className="quality-rejection" key={`missing-${item}`}>Missing · {item}</div>)}{finding.shadow_mode&&<div className="notice-box">Shadow calibration only. This event is persisted and plotted but cannot send a notification.</div>}</InspectorSection>}
     {finding.leg_context&&<InspectorSection title="FIRST LEG"><KV k="Release context" v={finding.leg_context.replaceAll("_"," ")}/><KV k="Detection price" v={money(finding.price)}/><KV k="Detected at" v={clock(finding.detected_at)}/><KV k="Alert age" v={age(finding.detected_at)}/></InspectorSection>}
     {finding.halt_pressure_score?<InspectorSection title="UPWARD HALT PRESSURE"><KV k="Evidence score" v={`${finding.halt_pressure_score}/100`}/><KV k="Status" v={finding.halt_pressure_score>=82?"IMMEDIATE REVIEW":finding.halt_pressure_score>=65?"WATCH":"NORMAL"}/><div className="notice-box">Evidence score only; the exchange feed confirms actual Limit States and halts.</div></InspectorSection>:null}
     {finding.ross_match&&<InspectorSection title="ROSS CRITERIA"><KV k="Match" v="PASS"/><KV k="Criteria score" v={`${finding.ross_score??0}/100`}/></InspectorSection>}
@@ -697,10 +700,10 @@ function BottomDock({ tab, setTab, catalysts, findings, selected, status, valida
   return <div className="flex h-full min-h-0 flex-col">
     <div className="dock-tabbar"><div className="flex min-w-0 items-center">{tabs.map(x=><button key={x.id} data-active={tab===x.id || undefined} onClick={()=>setTab(x.id)} className="dock-tab">{x.label}</button>)}</div><div className="ml-auto flex items-center"><IconButton label={maximized?"Restore panel":"Maximize panel"} onClick={onMaximize}>{maximized?<IconMinimize size={13}/>:<IconMaximize size={13}/>}</IconButton><IconButton label="Collapse panel" onClick={onCollapse}><IconChevronDown size={13}/></IconButton></div></div>
     <div className="min-h-0 flex-1 overflow-y-auto">
-      {tab==="catalysts" && <CatalystList catalysts={catalysts} findings={findings} onSelect={onSelect}/>} 
+      {tab==="catalysts" && <CatalystList catalysts={catalysts} findings={findings} onSelect={onSelect}/>}
       {tab==="evidence" && <div className="dock-content">{selected ? selected.evidence.map(e=><div className="dock-line" key={e}><span className="event-time">{age(selected.detected_at)}</span><span className="text-[var(--blue)]">●</span><b>{selected.ticker}</b><span>{e}</span></div>) : <EmptyPane text="Select a finding"/>}</div>}
       {tab==="validation" && (validation.length ? <ValidationTable rows={validation} findings={findings} onSelect={onSelect}/> : <EmptyPane text="Validation outcomes will populate automatically"/>)}
-      {tab==="events" && <TimelineList timeline={timeline} selectedTicker={selected?.ticker} findings={findings} onSelect={onSelect}/>} 
+      {tab==="events" && <TimelineList timeline={timeline} selectedTicker={selected?.ticker} findings={findings} onSelect={onSelect}/>}
     </div>
   </div>;
 }
@@ -730,7 +733,7 @@ function NotificationSheet({ open, prefs, status, onClose, onChange, onSave, onT
   useEffect(()=>{if(open)void webPushState().then(setPushState).catch(error=>setPushState({supported:false,configured:false,permission:"default",subscribed:false,message:error instanceof Error?error.message:"Unable to inspect Web Push"}));},[open]);
   async function togglePush(){setPushBusy(true);try{setPushState(await (pushState?.subscribed?disableWebPush():enableWebPush()));}catch(error){setPushState(current=>({...current!,message:error instanceof Error?error.message:"Unable to update Web Push"}));}finally{setPushBusy(false);}}
   if(!open)return null;
-  const signals=["ACTIVITY_WATCH","REVERSAL_WATCH","FIRST_LEG_WATCH","FIRST_LEG","RECLAIM","EMA_RECLAIM","VWAP_RECLAIM","FIRST_PULLBACK","EARLY","SURGE","BREAKOUT","STAIRCASE","IGNITION","HALT_WATCH","HALT_PRESSURE","CATALYST_WATCH","CATALYST_ACTIVE","HALT","RESUME","REARM"];
+  const signals=["ACTIVITY_WATCH","REVERSAL_WATCH","FIRST_LEG_WATCH","PRE_IGNITION","FIRST_LEG","RECLAIM","EMA_RECLAIM","VWAP_RECLAIM","FIRST_PULLBACK","EARLY","SURGE","BREAKOUT","STAIRCASE","IGNITION","HALT_WATCH","HALT_PRESSURE","CATALYST_WATCH","CATALYST_ACTIVE","HALT","RESUME","REARM"];
   const sessions=["overnight","premarket","regular","afterhours"];
   function setPlatform(platform:"windows"|"android"|"email",enabled:boolean){onChange({...prefs,platforms:{...prefs.platforms,[platform]:{...prefs.platforms[platform],enabled}} as NotificationPreferences["platforms"]});}
   return <div className="sheet-backdrop" onMouseDown={e=>{if(e.currentTarget===e.target)onClose();}}><aside className="notification-sheet">

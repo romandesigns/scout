@@ -158,7 +158,28 @@ class MarketQualityTests(unittest.TestCase):
             quality_label="CLEAN", quality_score=90,
         )
         self.assertFalse(_allowed(Finding(stage="FIRST_LEG_WATCH", **base), DEFAULT_NOTIFICATION_PREFERENCES, "android"))
+        self.assertFalse(_allowed(Finding(stage="PRE_IGNITION", shadow_mode=True, **base), DEFAULT_NOTIFICATION_PREFERENCES, "android"))
         self.assertTrue(_allowed(Finding(stage="FIRST_LEG", **base), DEFAULT_NOTIFICATION_PREFERENCES, "android"))
+
+    def test_pre_ignition_recipe_round_trips_as_shadow_evidence(self):
+        store = Store(Path(self.tmp.name) / "pre-ignition.db")
+        finding = Finding(
+            ticker="TEST", stage="PRE_IGNITION", detected_at=1_800_000_000, price=2.01, score=7,
+            vol_ratio_15s=2.2, vol_ratio_30s=1.8, change_60s_pct=.2, extension_pct=.35,
+            ema9=2.00, ema21=1.99, ema9_slope=.01, vwap=1.99, above_vwap=True,
+            quiet_break=False, evidence=["base pressure building"], quality_label="DEVELOPING",
+            lifecycle_phase="ARMED", shadow_mode=True, recipe_score=8,
+            recipe_present=["compressed or orderly base", "pressing a nearby trigger"],
+            recipe_missing=["participation is broadening"], trigger_distance_pct=.18,
+            base_extension_at_detection_pct=.35, timeliness_label="PRE_IGNITION",
+        )
+        finding_id = store.save_finding(finding)
+        row = store.get_finding(finding_id)
+        self.assertTrue(row["shadow_mode"])
+        self.assertEqual("ARMED", row["lifecycle_phase"])
+        self.assertEqual(8, row["recipe_score"])
+        self.assertIn("pressing a nearby trigger", row["recipe_present"])
+        self.assertEqual("PRE_IGNITION", row["timeliness_label"])
 
     def test_attention_inbox_groups_episode_and_preserves_user_status(self):
         store = Store(Path(self.tmp.name) / "attention.db")

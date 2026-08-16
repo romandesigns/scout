@@ -58,6 +58,15 @@ FINDING_COLUMNS: list[tuple[str, str]] = [
     ("halt_pressure_score", "INTEGER"),
     ("urgency", "TEXT"),
     ("engine_version", "TEXT"),
+    ("lifecycle_phase", "TEXT"),
+    ("shadow_mode", "INTEGER"),
+    ("recipe_score", "INTEGER"),
+    ("recipe_present_json", "TEXT"),
+    ("recipe_missing_json", "TEXT"),
+    ("trigger_distance_pct", "REAL"),
+    ("base_extension_at_detection_pct", "REAL"),
+    ("timeliness_label", "TEXT"),
+    ("precursor_finding_id", "INTEGER"),
 ]
 
 
@@ -295,8 +304,9 @@ class Store:
                     previous_close,gap_pct,day_volume,projected_session_volume,volume_rate_per_minute,float_shares,float_turnover,candidate_profile_json,
                     episode_id,reversal_phase,reversal_low,reversal_drawdown_pct,leg_context,ross_match,ross_score,
                     detection_timeframe_seconds,formation_start_at,formation_end_at,formation_low,formation_high,trigger_level,
-                    invalidation_level,halt_pressure_score,urgency,engine_version
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    invalidation_level,halt_pressure_score,urgency,engine_version,lifecycle_phase,shadow_mode,recipe_score,
+                    recipe_present_json,recipe_missing_json,trigger_distance_pct,base_extension_at_detection_pct,timeliness_label,precursor_finding_id
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     f.ticker, f.stage, int(f.detected_at), f.price, f.score, f.vol_ratio_15s, f.vol_ratio_30s,
@@ -315,6 +325,9 @@ class Store:
                     f.detection_timeframe_seconds, int(f.formation_start_at) if f.formation_start_at else None,
                     int(f.formation_end_at) if f.formation_end_at else None, f.formation_low, f.formation_high,
                     f.trigger_level, f.invalidation_level, f.halt_pressure_score, f.urgency, f.engine_version,
+                    f.lifecycle_phase, int(f.shadow_mode), f.recipe_score, json.dumps(f.recipe_present or []),
+                    json.dumps(f.recipe_missing or []), f.trigger_distance_pct, f.base_extension_at_detection_pct,
+                    f.timeliness_label, f.precursor_finding_id,
                 ),
             )
             self.db.commit()
@@ -499,9 +512,16 @@ class Store:
         except Exception:
             item["candidate_profile"] = {}
             item.pop("candidate_profile_json", None)
+        for source, target in (("recipe_present_json", "recipe_present"), ("recipe_missing_json", "recipe_missing")):
+            try:
+                item[target] = json.loads(item.pop(source) or "[]")
+            except Exception:
+                item[target] = []
+                item.pop(source, None)
         item["above_vwap"] = bool(item.get("above_vwap"))
         item["quiet_break"] = bool(item.get("quiet_break"))
         item["ross_match"] = bool(item.get("ross_match"))
+        item["shadow_mode"] = bool(item.get("shadow_mode"))
         item["chart_url"] = f"/charts/{Path(item['chart_path']).name}" if item.get("chart_path") else None
         return item
 
@@ -526,6 +546,7 @@ class Store:
             "previous_close","gap_pct","day_volume","projected_session_volume","volume_rate_per_minute","float_shares","float_turnover","candidate_profile_json",
             "episode_id","reversal_phase","reversal_low","reversal_drawdown_pct","leg_context","ross_match","ross_score",
             "detection_timeframe_seconds","formation_start_at","formation_end_at","formation_low","formation_high","trigger_level","invalidation_level","halt_pressure_score","urgency","engine_version",
+            "lifecycle_phase","shadow_mode","recipe_score","recipe_present_json","recipe_missing_json","trigger_distance_pct","base_extension_at_detection_pct","timeliness_label","precursor_finding_id",
         ]
         sql = f"SELECT {','.join(keys)} FROM findings {clause} ORDER BY detected_at DESC LIMIT ?"
         params.append(limit)
@@ -544,6 +565,7 @@ class Store:
             "previous_close","gap_pct","day_volume","projected_session_volume","volume_rate_per_minute","float_shares","float_turnover","candidate_profile_json",
             "episode_id","reversal_phase","reversal_low","reversal_drawdown_pct","leg_context","ross_match","ross_score",
             "detection_timeframe_seconds","formation_start_at","formation_end_at","formation_low","formation_high","trigger_level","invalidation_level","halt_pressure_score","urgency","engine_version",
+            "lifecycle_phase","shadow_mode","recipe_score","recipe_present_json","recipe_missing_json","trigger_distance_pct","base_extension_at_detection_pct","timeliness_label","precursor_finding_id",
         ]
         with self.lock:
             row = self.db.execute(f"SELECT {','.join(keys)} FROM findings WHERE id=?", (int(finding_id),)).fetchone()

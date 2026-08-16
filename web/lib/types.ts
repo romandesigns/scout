@@ -66,6 +66,15 @@ export type Finding = {
   halt_pressure_score?: number;
   urgency?: "NOW" | "WATCH" | "CONFIRMED" | "EXTENDED" | "RISK";
   engine_version?: string | null;
+  lifecycle_phase?: "DEVELOPING"|"ARMED"|"IGNITING"|"CONFIRMED"|"REARM"|null;
+  shadow_mode?: boolean;
+  recipe_score?: number;
+  recipe_present?: string[];
+  recipe_missing?: string[];
+  trigger_distance_pct?: number|null;
+  base_extension_at_detection_pct?: number|null;
+  timeliness_label?: "PRE_IGNITION"|"AT_IGNITION"|"LATE"|null;
+  precursor_finding_id?: number|null;
   selection_context?: "finding"|"catalyst"|"gainer"|"halt"|"validation";
   selection_title?: string;
   selection_detail?: string;
