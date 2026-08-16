@@ -99,3 +99,6 @@ temp/
 *.swp
 *.swo
 *~
+
+# Rust market services
+rust/**/target/

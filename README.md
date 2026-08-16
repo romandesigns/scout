@@ -1,6 +1,6 @@
-# StockHunter Scout V6.3.0 — Pre-Ignition Intelligence Shadow
+# StockHunter Scout V6.4.0 — Historical Replay Calibration
 
-Version 6.3.0 begins the evidence-gathering phase required to move Scout's primary warning before major expansion. It persists a silent `PRE_IGNITION` recipe event at the exact time and price where structure, participation, acceleration, and trigger proximity converge. It does not notify until replay establishes acceptable lead time and false-arm behavior. See [V6.3-IMPLEMENTATION.md](V6.3-IMPLEMENTATION.md).
+Version 6.4.0 runs Alpaca historical trades through the same timestamp-ordered detector used live, then measures pre-ignition lead time, false arms, missed expansions, and ingredient contribution. Detection remains notification-isolated and free of look-ahead inputs. See [V6.4-IMPLEMENTATION.md](V6.4-IMPLEMENTATION.md).
 
 V5.9 keeps the catalyst engine listening continuously and delivers background Web Push notifications to the installed Android PWA. News begins as `CATALYST_WATCH` and becomes `CATALYST_ACTIVE` only when clean market-reaction evidence confirms participation. VAPID keys are generated automatically during the coordinated VPS deployment; ntfy remains an optional fallback.
 

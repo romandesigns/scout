@@ -7,6 +7,7 @@ import os
 import time
 import tracemalloc
 import uuid
+from collections import defaultdict, deque
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,7 +19,7 @@ from .market import MarketWatcher, trading_session_key
 from .models import Finding, SymbolState
 
 SCHEMA_VERSION = "scout.market-event.v1"
-REPLAY_ENGINE_VERSION = "1.0.0"
+REPLAY_ENGINE_VERSION = "2.0.0"
 SUPPORTED_TYPES = {"trade"}
 
 
@@ -94,6 +95,83 @@ def _finding_dict(finding: Finding) -> dict[str, Any]:
     value = asdict(finding)
     value["mode"] = "SIMULATION"
     return value
+
+
+def calibrate_pre_ignition(events: list[MarketEvent], findings: list[dict[str, Any]]) -> dict[str, Any]:
+    """Score shadow precursors after replay without feeding future data into detection."""
+    expansion_pct = 2.0
+    horizon_seconds = 15 * 60
+    prices: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    for event in events:
+        if event.event_type == "trade":
+            prices[event.symbol].append((event.source_ts, float(event.payload["price"])))
+
+    precursors = [item for item in findings if item.get("stage") == "PRE_IGNITION"]
+    outcomes: list[dict[str, Any]] = []
+    ingredient_totals: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    for finding in precursors:
+        detected_at = float(finding["detected_at"])
+        detection_price = float(finding["price"])
+        future = [
+            (ts, price) for ts, price in prices.get(str(finding["ticker"]), [])
+            if detected_at <= ts <= detected_at + horizon_seconds
+        ]
+        peak = max((price for _, price in future), default=detection_price)
+        mfe_pct = ((peak - detection_price) / detection_price * 100.0) if detection_price else 0.0
+        onset = next((ts for ts, price in future if price >= detection_price * (1 + expansion_pct / 100)), None)
+        success = onset is not None
+        for ingredient in finding.get("recipe_present") or []:
+            ingredient_totals[str(ingredient)][0] += 1
+            ingredient_totals[str(ingredient)][1] += int(success)
+        outcomes.append({
+            "finding_id": finding.get("finding_id"),
+            "ticker": finding["ticker"],
+            "detected_at": detected_at,
+            "detection_price": detection_price,
+            "recipe_score": finding.get("recipe_score"),
+            "base_extension_pct": finding.get("base_extension_at_detection_pct"),
+            "expanded": success,
+            "expansion_onset_at": onset,
+            "lead_seconds": (onset - detected_at) if onset is not None else None,
+            "max_favorable_15m_pct": round(mfe_pct, 4),
+        })
+
+    # Find objective 2% releases from a rolling five-minute low, deduplicated
+    # into episodes, then check whether Scout armed during the prior 15 minutes.
+    expansion_episodes: list[dict[str, Any]] = []
+    for symbol, rows in prices.items():
+        rolling: deque[tuple[float, float]] = deque()
+        last_episode = 0.0
+        symbol_precursors = [float(item["detected_at"]) for item in precursors if item.get("ticker") == symbol]
+        for ts, price in rows:
+            rolling.append((ts, price))
+            cutoff = ts - 300
+            while rolling and rolling[0][0] < cutoff:
+                rolling.popleft()
+            base = min((value for _, value in rolling), default=price)
+            if base and price >= base * (1 + expansion_pct / 100) and ts - last_episode >= horizon_seconds:
+                armed = any(ts - horizon_seconds <= detected <= ts for detected in symbol_precursors)
+                expansion_episodes.append({"ticker": symbol, "onset_at": ts, "base_price": base, "onset_price": price, "precursor_detected": armed})
+                last_episode = ts
+
+    successes = [item for item in outcomes if item["expanded"]]
+    leads = [float(item["lead_seconds"]) for item in successes if item["lead_seconds"] is not None]
+    return {
+        "definition": {"expansion_pct": expansion_pct, "horizon_seconds": horizon_seconds, "base_window_seconds": 300},
+        "precursors": len(outcomes),
+        "successful_precursors": len(successes),
+        "false_arms": len(outcomes) - len(successes),
+        "false_arm_rate": round((len(outcomes) - len(successes)) / len(outcomes), 4) if outcomes else None,
+        "median_lead_seconds": sorted(leads)[len(leads) // 2] if leads else None,
+        "expansion_episodes": len(expansion_episodes),
+        "missed_expansions": sum(1 for item in expansion_episodes if not item["precursor_detected"]),
+        "ingredient_success": {
+            name: {"observed": values[0], "successful": values[1], "success_rate": round(values[1] / values[0], 4)}
+            for name, values in ingredient_totals.items() if values[0]
+        },
+        "outcomes": outcomes,
+        "missed_expansion_events": [item for item in expansion_episodes if not item["precursor_detected"]],
+    }
 
 
 def load_events(path: Path) -> tuple[list[MarketEvent], dict[str, int]]:
@@ -176,6 +254,7 @@ async def run_dataset(dataset: Path, output_root: Path | None = None) -> dict[st
     wall_seconds = max(0.000001, time.perf_counter() - started_wall)
     cpu_seconds = max(0.0, time.process_time() - started_cpu)
     findings = [_finding_dict(item) for item in capture.items]
+    calibration = calibrate_pre_ignition(events, findings)
     report = {
         "run_id": run_id,
         "mode": "SIMULATION",
@@ -189,6 +268,7 @@ async def run_dataset(dataset: Path, output_root: Path | None = None) -> dict[st
         "ended_source_ts": events[-1].source_ts,
         "processed_events": processed,
         "findings_count": len(findings),
+        "calibration": calibration,
         "integrity": integrity,
         "benchmark": {
             "wall_seconds": wall_seconds,
@@ -204,6 +284,10 @@ async def run_dataset(dataset: Path, output_root: Path | None = None) -> dict[st
     report_path = run_dir / "report.json"
     report_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
     latest = {key: value for key, value in report.items() if key != "findings"}
+    latest["calibration"] = {
+        key: value for key, value in calibration.items()
+        if key not in {"outcomes", "missed_expansion_events"}
+    }
     latest["report_path"] = str(report_path)
     (output_root / "latest.json").write_text(json.dumps(latest, indent=2), encoding="utf-8")
     return report
