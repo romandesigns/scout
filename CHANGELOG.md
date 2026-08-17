@@ -1,3 +1,9 @@
+## 6.7.0
+
+- Added BOATS-verified 24H Stocks panel/category.
+- 24H stocks use Scout's full existing detection, quality, catalyst, continuation, validation, and notification pipeline.
+- Added `/api/market/24h` and session-scoped BOATS verification telemetry.
+
 ## 6.6.9
 
 - Added BREAKOUT immediate-persistence gate.

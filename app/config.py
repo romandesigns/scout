@@ -39,6 +39,8 @@ class Settings:
     alpaca_feed: str = os.getenv("ALPACA_FEED", "sip").strip().lower()
     alpaca_market_ws: str = os.getenv("ALPACA_MARKET_WS", "wss://stream.data.alpaca.markets/v2/sip")
     enable_overnight_stream: bool = _b("ENABLE_OVERNIGHT_STREAM", True)
+    twenty_four_hour_panel_enabled: bool = _b("TWENTY_FOUR_HOUR_PANEL_ENABLED", True)
+    twenty_four_hour_recent_seconds: int = _i("TWENTY_FOUR_HOUR_RECENT_SECONDS", 86400, 900)
     alpaca_overnight_feed: str = os.getenv("ALPACA_OVERNIGHT_FEED", "boats").strip().lower()
     alpaca_overnight_ws: str = os.getenv("ALPACA_OVERNIGHT_WS", "wss://stream.data.alpaca.markets/v1beta1/boats")
     alpaca_news_ws: str = os.getenv("ALPACA_NEWS_WS", "wss://stream.data.alpaca.markets/v1beta1/news")

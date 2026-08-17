@@ -71,7 +71,6 @@ import {
 } from "@/lib/api";
 import { getNativeAutostartState, installNativeDeepLinkHandler, installNativeNotificationActionHandler, sendNativeTestNotification, setNativeAutostart } from "@/lib/native";
 import { disableWebPush, enableWebPush, webPushState, type WebPushState } from "@/lib/web-push";
-import { getTwentyFourHourStocks, type TwentyFourHourStock } from "@/lib/twenty-four-hour";
 import type {
   Catalyst,
   Finding,
@@ -87,9 +86,9 @@ import type {
   FindingVerification,
 } from "@/lib/types";
 
-type ActivityView = "radar" | "24h" | "ross" | "catalysts" | "gainers" | "halts" | "validation" | "alerts" | "settings";
+type ActivityView = "radar" | "ross" | "catalysts" | "gainers" | "halts" | "validation" | "alerts" | "settings";
 type MobileView = "radar" | "charts" | "catalysts" | "alerts" | "settings";
-type MarketTab = "radar" | "24h" | "ross" | "gainers" | "halted";
+type MarketTab = "radar" | "ross" | "gainers" | "halted";
 type DockTab = "catalysts" | "evidence" | "validation" | "events";
 type GroupMode = 1 | 2 | 4;
 type ChartGroupState = { id: string; ticker?: string; pinned?: boolean };
@@ -137,7 +136,6 @@ type WorkbenchProps = {
   findings: Finding[];
   catalysts: Catalyst[];
   gainers: Gainer[];
-  twentyFourHour: TwentyFourHourStock[];
   halts: Halt[];
   validation: ValidationRow[];
   timeline: TimelineItem[];
@@ -580,20 +578,13 @@ function EmptyPane({ text }: { text:string }) {
   return <div className="empty-pane"><IconActivity size={18}/><span>{text}</span></div>;
 }
 
-
-function TwentyFourHourPanel({rows,findings,selectedId,onSelect}:{rows:TwentyFourHourStock[];findings:Finding[];selectedId?:number;onSelect:(finding:Finding)=>void}) {
-  const byTicker=new Map(findings.map(f=>[f.ticker,f]));
-  return <div className="flex h-full min-h-0 flex-col"><PanelTitle icon={<IconHistory size={14}/>} title="24H STOCKS" subtitle={`${rows.length} BOATS verified`}/><div className="notice-box mx-2 mt-2 text-[10px]">Only symbols verified by a BOATS trade in the current trading session. Every symbol remains subject to Scout&apos;s normal quality, catalyst, stage, continuation, late-risk and notification pipeline.</div><div className="min-h-0 flex-1 overflow-y-auto">{rows.length?rows.map(row=>{const finding=(row.latest_finding?.id?findings.find(f=>f.id===row.latest_finding!.id):undefined)||byTicker.get(row.ticker);const clickable=Boolean(finding);return <button key={row.ticker} className="finding-row w-full" disabled={!clickable} onClick={()=>finding&&onSelect(finding)} data-selected={finding?.id===selectedId||undefined}><div className="min-w-0 flex-1"><div className="flex items-center gap-1.5"><b>{row.ticker}</b><Badge data-tone="blue">24H</Badge><Badge data-tone={row.actionable_rank==="A"?"green":row.actionable_rank==="B"?"orange":"gray"}>{row.actionable_rank}</Badge><span className="truncate text-[9px] scout-muted">{row.stage}</span></div><div className="mt-1 flex gap-2 text-[9px] scout-muted"><span>5s {pct(row.change_5s_pct,2)}</span><span>15s {pct(row.change_15s_pct,2)}</span><span>RVOL {row.vol_ratio_15s?.toFixed(1)??"—"}×</span></div><div className="mt-1 flex gap-2 text-[9px]"><span>{row.quality_label} {row.quality_score}</span><span className="scout-muted">BOATS {age(row.last_boats_trade_at)}</span></div></div><div className="text-right"><div className="metric">{money(row.price)}</div><div className="text-[9px] scout-muted">{row.last_feed?.toUpperCase()||"—"}</div></div></button>}):<EmptyPane text="No BOATS-verified 24H stocks in the current session yet"/>}</div></div>;
-}
-
-function PrimarySidebar({ view, findings, twentyFourHour, gainers, halts, catalysts, validation, selected, onSelect, connected, onNotifications, scanner, saveScanner, scannerBusy, scannerMessage, attention, setAttentionStatus, backendVersion }: {
-  view:ActivityView; findings:Finding[]; twentyFourHour:TwentyFourHourStock[]; gainers:Gainer[]; halts:Halt[]; catalysts:Catalyst[]; validation:ValidationRow[];
+function PrimarySidebar({ view, findings, gainers, halts, catalysts, validation, selected, onSelect, connected, onNotifications, scanner, saveScanner, scannerBusy, scannerMessage, attention, setAttentionStatus, backendVersion }: {
+  view:ActivityView; findings:Finding[]; gainers:Gainer[]; halts:Halt[]; catalysts:Catalyst[]; validation:ValidationRow[];
   selected?:Finding; onSelect:(f:Finding)=>void; connected:boolean; onNotifications:()=>void;
   scanner:ScannerSettings; saveScanner:(value:ScannerSettings)=>Promise<void>; scannerBusy:boolean; scannerMessage:string;
   attention:AttentionItem[]; setAttentionStatus:(item:AttentionItem,status:AttentionStatus)=>Promise<void>; backendVersion?:string;
 }) {
   if (view === "radar") return <MarketPulse findings={findings} gainers={gainers} halts={halts} selectedId={selected?.id} onSelect={onSelect}/>;
-  if (view === "24h") return <TwentyFourHourPanel rows={twentyFourHour} findings={findings} selectedId={selected?.id} onSelect={onSelect}/>;
   if (view === "ross") { const rows=findings.filter(f=>f.ross_match).sort((a,b)=>(b.ross_score||0)-(a.ross_score||0)); return <div className="flex h-full min-h-0 flex-col"><PanelTitle icon={<IconFlame size={14}/>} title="ROSS SCREENER" subtitle={`${rows.length} matches`}/><div className="min-h-0 flex-1 overflow-y-auto">{rows.length?rows.map(f=><FindingRow key={f.ticker} finding={f} selected={selected?.id===f.id} onSelect={()=>onSelect(f)}/>):<EmptyPane text="No stocks currently meet the Ross criteria"/>}</div></div>; }
   if (view === "catalysts") return <div className="flex h-full min-h-0 flex-col"><PanelTitle icon={<IconDiamondFilled size={12}/>} title="CATALYSTS"/><CatalystList catalysts={catalysts} findings={findings} onSelect={onSelect}/></div>;
   if (view === "gainers") return <div className="flex h-full min-h-0 flex-col"><PanelTitle icon={<IconTrendingUp size={14}/>} title="TOP GAINERS"/><div className="min-h-0 flex-1 overflow-y-auto"><GainerRows gainers={gainers} findings={findings} onSelect={onSelect}/></div></div>;
@@ -757,7 +748,7 @@ function SystemStat({label,value}:{label:string;value:string}) { return <div cla
 
 function ActivityRail({ active, onActive, counts }: { active:ActivityView; onActive:(v:ActivityView)=>void; counts:Record<Exclude<ActivityView,"settings">,number> }) {
   const items: {id:Exclude<ActivityView,"settings">;label:string;icon:React.ReactNode;tone?:string}[]=[
-    {id:"radar",label:"Radar",icon:<IconBolt size={18}/>,tone:"green"},{id:"24h",label:"24H Stocks",icon:<IconHistory size={17}/>,tone:"blue"},
+    {id:"radar",label:"Radar",icon:<IconBolt size={18}/>,tone:"green"},
     {id:"ross",label:"Ross Screener",icon:<IconFlame size={17}/>},
     {id:"catalysts",label:"Catalysts",icon:<IconDiamondFilled size={15}/>},
     {id:"gainers",label:"Top gainers",icon:<IconTrendingUp size={18}/>},
@@ -851,7 +842,7 @@ function OpportunitySpotlight({items,onOpen,onStatus}:{items:AttentionItem[];onO
 }
 
 function DesktopWorkbench(props:WorkbenchProps) {
-  const { findings,twentyFourHour,gainers,halts,catalysts,validation,timeline,selected,setSelected,status,connected,openNotifications,openCommand,scanner,saveScanner,scannerBusy,scannerMessage,attention,setAttentionStatus }=props;
+  const { findings,gainers,halts,catalysts,validation,timeline,selected,setSelected,status,connected,openNotifications,openCommand,scanner,saveScanner,scannerBusy,scannerMessage,attention,setAttentionStatus }=props;
   const [activity,setActivity]=useState<ActivityView>("radar");
   const [showPrimary,setShowPrimary]=useState(true);
   const [showInspector,setShowInspector]=useState(true);
@@ -860,7 +851,7 @@ function DesktopWorkbench(props:WorkbenchProps) {
   const [dockTab,setDockTab]=useState<DockTab>("catalysts");
   const connectionLabel=connected?"LIVE":API_CONFIGURED?"OFFLINE":"DEMO";
   const feedClass=(value:boolean|null|undefined)=>value===true?"feed-ok":value===false?"feed-bad":"feed-idle";
-  const railCounts={radar:findings.filter(f=>f.quality_label==="CLEAN"&&f.stage!=="ACTIVITY_WATCH").length,"24h":twentyFourHour.length,ross:findings.filter(f=>f.ross_match).length,catalysts:catalysts.length,gainers:gainers.length,halts:halts.length,validation:validation.length,alerts:attention.filter(item=>!["dismissed","expired","acknowledged"].includes(item.status)).length};
+  const railCounts={radar:findings.filter(f=>f.quality_label==="CLEAN"&&f.stage!=="ACTIVITY_WATCH").length,ross:findings.filter(f=>f.ross_match).length,catalysts:catalysts.length,gainers:gainers.length,halts:halts.length,validation:validation.length,alerts:attention.filter(item=>!["dismissed","expired","acknowledged"].includes(item.status)).length};
 
   return <div className="desktop-workbench h-screen min-h-[680px] overflow-hidden">
     <header className="titlebar">
@@ -873,7 +864,7 @@ function DesktopWorkbench(props:WorkbenchProps) {
       <ActivityRail active={activity} onActive={setActivity} counts={railCounts}/>
       <div className="min-w-0 flex-1">
         <Group orientation="horizontal" className="h-full">
-          {showPrimary && <><Panel id="primary" defaultSize="268px" minSize="220px" maxSize="390px"><div className="surface-wrap surface-primary"><div className="workbench-surface"><PrimarySidebar view={activity} findings={findings} twentyFourHour={twentyFourHour} gainers={gainers} halts={halts} catalysts={catalysts} validation={validation} selected={selected} onSelect={setSelected} connected={connected} onNotifications={openNotifications} scanner={scanner} saveScanner={saveScanner} scannerBusy={scannerBusy} scannerMessage={scannerMessage} attention={attention} setAttentionStatus={setAttentionStatus} backendVersion={status?.version}/></div></div></Panel><Separator className="workbench-gutter workbench-gutter-v"/></>}
+          {showPrimary && <><Panel id="primary" defaultSize="268px" minSize="220px" maxSize="390px"><div className="surface-wrap surface-primary"><div className="workbench-surface"><PrimarySidebar view={activity} findings={findings} gainers={gainers} halts={halts} catalysts={catalysts} validation={validation} selected={selected} onSelect={setSelected} connected={connected} onNotifications={openNotifications} scanner={scanner} saveScanner={saveScanner} scannerBusy={scannerBusy} scannerMessage={scannerMessage} attention={attention} setAttentionStatus={setAttentionStatus} backendVersion={status?.version}/></div></div></Panel><Separator className="workbench-gutter workbench-gutter-v"/></>}
           <Panel id="main" minSize="420px"><div className="surface-wrap surface-main"><div className="workbench-surface overflow-hidden">
             {dockMax && dockOpen ? <BottomDock tab={dockTab} setTab={setDockTab} catalysts={catalysts} findings={findings} selected={selected} status={status} validation={validation} timeline={timeline} onSelect={setSelected} onCollapse={()=>{setDockOpen(false);setDockMax(false)}} onMaximize={()=>setDockMax(false)} maximized/> : <Group orientation="vertical" className="h-full"><Panel id="workspace" minSize="260px"><ChartWorkspace findings={findings} selected={selected} onSelect={setSelected}/></Panel>{dockOpen && <><Separator className="workbench-gutter workbench-gutter-h"/><Panel id="dock" defaultSize="205px" minSize="120px" maxSize="45%"><div className="h-full pt-[3px]"><div className="dock-surface"><BottomDock tab={dockTab} setTab={setDockTab} catalysts={catalysts} findings={findings} selected={selected} status={status} validation={validation} timeline={timeline} onSelect={setSelected} onCollapse={()=>setDockOpen(false)} onMaximize={()=>setDockMax(true)} maximized={false}/></div></div></Panel></>}</Group>}
           </div>{!dockOpen && <button className="dock-collapsed" onClick={()=>setDockOpen(true)}><span>Catalysts</span><span>Evidence</span><span>Validation</span><span>Events</span><IconChevronUp size={13}/></button>}</div></Panel>
@@ -886,17 +877,17 @@ function DesktopWorkbench(props:WorkbenchProps) {
 }
 
 function MobileConsole(props:WorkbenchProps) {
-  const {findings,twentyFourHour,gainers,halts,catalysts,selected,setSelected,status,connected,openNotifications,openCommand,scanner,saveScanner,scannerBusy,scannerMessage,attention,setAttentionStatus}=props;
+  const {findings,gainers,halts,catalysts,selected,setSelected,status,connected,openNotifications,openCommand,scanner,saveScanner,scannerBusy,scannerMessage,attention,setAttentionStatus}=props;
   const [view,setView]=useState<MobileView>("radar");
   const [marketTab,setMarketTab]=useState<MarketTab>("radar");
   const connectionLabel=connected?"LIVE":API_CONFIGURED?"OFFLINE":"DEMO";
   const allFeedsLive=status?.feeds.sip===true&&status?.feeds.boats!==false&&status?.feeds.news===true;
-  const marketIcons:{id:MarketTab;label:string;icon:React.ReactNode}[]=[{id:"radar",label:"Radar",icon:<IconBolt size={20}/>},{id:"24h",label:"24H Stocks",icon:<IconHistory size={19}/>},{id:"gainers",label:"Top gainers",icon:<IconTrendingUp size={20}/>},{id:"halted",label:"Halted",icon:<IconPlayerPauseFilled size={17}/>}];
+  const marketIcons:{id:MarketTab;label:string;icon:React.ReactNode}[]=[{id:"radar",label:"Radar",icon:<IconBolt size={20}/>},{id:"gainers",label:"Top gainers",icon:<IconTrendingUp size={20}/>},{id:"halted",label:"Halted",icon:<IconPlayerPauseFilled size={17}/>}];
   const nav:{id:MobileView;label:string;icon:React.ReactNode}[]=[{id:"radar",label:"Radar",icon:<IconBolt size={22}/>},{id:"charts",label:"Charts",icon:<IconChartBar size={22}/>},{id:"catalysts",label:"Catalysts",icon:<IconDiamondFilled size={18}/>},{id:"alerts",label:"Notifications",icon:<IconBellFilled size={18}/>},{id:"settings",label:"Settings",icon:<IconSettings size={21}/>}];
   return <div className="mobile-console mobile-safe min-h-screen">
     <header className="mobile-header"><div className="flex h-12 items-center justify-between px-3"><div className="flex items-center gap-2"><IconTargetArrow size={17}/><b className="tracking-[.08em]">SCOUT</b><span className="version-chip">v{CLIENT_VERSION}</span><Badge data-tone={connected?"green":"orange"}><span className="live-dot"/>{connectionLabel}</Badge>{status?.replay?.active&&<Badge data-tone="orange">SIMULATION</Badge>}{!status?.replay?.active&&status?.replay?.latest_run&&<Badge data-tone="blue">REPLAY READY</Badge>}</div><div className="flex items-center gap-1"><IconButton label="Search" onClick={openCommand}><IconSearch size={18}/></IconButton><IconButton label="Notifications" onClick={openNotifications}><IconBellFilled size={16}/></IconButton></div></div><div className="mobile-status"><span>All sessions · {status?.universe ?? "—"}</span><span className={allFeedsLive?"feed-ok":status?"feed-bad":"feed-idle"}>SIP ● BOATS ● NEWS ●</span></div></header>
     <main className="pb-20">
-      {view==="radar" && <><div className="mobile-market-tabs">{marketIcons.map(item=><button key={item.id} aria-label={item.label} data-active={marketTab===item.id || undefined} onClick={()=>setMarketTab(item.id)}>{item.icon}{item.id==="halted"&&halts.length?<span className="mobile-dot-count">{halts.length}</span>:null}</button>)}</div>{marketTab==="24h"&&<TwentyFourHourPanel rows={twentyFourHour} findings={findings} selectedId={selected?.id} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}{marketTab==="radar"&&findings.map(f=><FindingRow key={f.id} finding={f} selected={selected?.id===f.id} onSelect={()=>{setSelected(f);setView("charts");}}/>)}{marketTab==="gainers"&&<GainerRows gainers={gainers} findings={findings} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}{marketTab==="halted"&&<HaltRows halts={halts} findings={findings} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}</>}
+      {view==="radar" && <><div className="mobile-market-tabs">{marketIcons.map(item=><button key={item.id} aria-label={item.label} data-active={marketTab===item.id || undefined} onClick={()=>setMarketTab(item.id)}>{item.icon}{item.id==="halted"&&halts.length?<span className="mobile-dot-count">{halts.length}</span>:null}</button>)}</div>{marketTab==="radar"&&findings.map(f=><FindingRow key={f.id} finding={f} selected={selected?.id===f.id} onSelect={()=>{setSelected(f);setView("charts");}}/>)}{marketTab==="gainers"&&<GainerRows gainers={gainers} findings={findings} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}{marketTab==="halted"&&<HaltRows halts={halts} findings={findings} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}</>}
       {view==="charts" && <div className="mobile-chart-page">{selected?<><div className="mobile-page-title"><div><b>{selected.ticker}</b><span className="metric ml-2">{money(selected.price)}</span></div><div className="flex gap-1">{Array.from(new Set([selected.stage,...(selected.signals||[])])).slice(0,3).map(signal=><EventIcon key={signal} event={signal}/>)}</div></div><div className="mobile-live-chart"><LiveChart finding={selected} onSelectFinding={setSelected}/></div><div className="mobile-inspector"><Inspector finding={selected} onNotifications={openNotifications}/></div></>:<EmptyPane text="Select a ticker from Radar"/>}</div>}
       {view==="catalysts" && <div className="mobile-page"><PanelTitle icon={<IconDiamondFilled size={12}/>} title="CATALYSTS"/><CatalystList catalysts={catalysts} findings={findings} onSelect={finding=>{setSelected(finding);setView("charts");}}/></div>}
       {view==="alerts" && <div className="mobile-page"><AttentionInbox items={attention} onOpen={item=>{setSelected(item.finding);void setAttentionStatus(item,'opened');setView('charts');}} onStatus={(item,next)=>void setAttentionStatus(item,next)}/></div>}
@@ -911,7 +902,6 @@ export default function ScoutPage() {
   const [findings,setFindings]=useState<Finding[]>(API_CONFIGURED?[]:demoFindings);
   const [catalysts,setCatalysts]=useState<Catalyst[]>(API_CONFIGURED?[]:demoCatalysts);
   const [gainers,setGainers]=useState<Gainer[]>(API_CONFIGURED?[]:demoGainers);
-  const [twentyFourHour,setTwentyFourHour]=useState<TwentyFourHourStock[]>([]);
   const [halts,setHalts]=useState<Halt[]>(API_CONFIGURED?[]:demoHalts);
   const [validation,setValidation]=useState<ValidationRow[]>(API_CONFIGURED?[]:demoValidation);
   const [timeline,setTimeline]=useState<TimelineItem[]>(API_CONFIGURED?[]:demoTimeline);
@@ -964,9 +954,9 @@ export default function ScoutPage() {
     if(refreshInFlight.current)return refreshInFlight.current;
     const job=(async()=>{
       const results = await Promise.allSettled([
-        getStatus(),getFindings(180),getCatalysts(80),getHalts(),getScannerSettings(),getAttention(80),getTwentyFourHourStocks(200),
+        getStatus(),getFindings(180),getCatalysts(80),getHalts(),getScannerSettings(),getAttention(80),
       ]);
-      const [statusResult,findingsResult,catalystsResult,haltsResult,scannerResult,attentionResult,twentyFourHourResult]=results;
+      const [statusResult,findingsResult,catalystsResult,haltsResult,scannerResult,attentionResult]=results;
       let anySuccess=false;
       if(statusResult.status==='fulfilled'){setStatus(statusResult.value);anySuccess=true;}
       if(findingsResult.status==='fulfilled'){
@@ -977,7 +967,6 @@ export default function ScoutPage() {
       if(haltsResult.status==='fulfilled')setHalts(haltsResult.value.active);
       if(scannerResult.status==='fulfilled')setScanner(scannerResult.value);
       if(attentionResult.status==='fulfilled')setAttention(attentionResult.value);
-      if(twentyFourHourResult.status==='fulfilled')setTwentyFourHour(twentyFourHourResult.value);
       if(heavy){
         const extra=await Promise.allSettled([getGainers(30),getNotificationPreferences(),getValidation(120),getTimeline(undefined,160)]);
         const [gainersResult,prefsResult,validationResult,timelineResult]=extra;
@@ -1072,7 +1061,7 @@ export default function ScoutPage() {
   const visibleGainers=useMemo(()=>gainers.filter(g=>g.price==null||inRange(g.price)),[gainers,inRange]);
 
   const props:WorkbenchProps={
-    findings:visibleFindings,twentyFourHour,gainers:visibleGainers,halts,catalysts,validation,timeline,selected,setSelected,status,connected,
+    findings:visibleFindings,gainers:visibleGainers,halts,catalysts,validation,timeline,selected,setSelected,status,connected,
     openNotifications:()=>setNotificationOpen(true),openCommand:()=>setCommandOpen(true),
     scanner,saveScanner:applyScannerRange,scannerBusy,scannerMessage,attention,setAttentionStatus,
   };

@@ -912,6 +912,84 @@ class MarketWatcher:
         buckets, current = snap if snap else ([], None)
         return f, buckets, current
 
+    def twenty_four_hour_rows(self, limit: int = 200) -> list[dict]:
+        """Return BOATS-verified stocks through the same Scout opportunity pipeline.
+
+        This is an observability/category surface, not a second detector. BOATS
+        trades already enter _handle_trade -> _metrics -> _maybe_emit and the
+        Rust primary bridge exactly like SIP trades. The panel therefore reports
+        symbols whose 24H eligibility has been empirically verified by a BOATS
+        print during the current trading session, with their current Scout
+        quality/actionability metrics and latest finding.
+        """
+        if not settings.twenty_four_hour_panel_enabled:
+            return []
+        now = time.time()
+        current_session = trading_session_key(now)
+        recent_cutoff = now - float(settings.twenty_four_hour_recent_seconds)
+        candidates: list[tuple[SymbolState, dict]] = []
+        for state in self.states.values():
+            if state.boats_session_date != current_session or state.last_boats_trade_at <= 0:
+                continue
+            # Preserve the verified 24H identity through the regular session,
+            # but discard stale symbols after a configurable maximum age.
+            if state.last_boats_trade_at < recent_cutoff:
+                continue
+            metrics = self._metrics(state, now) if state.current else None
+            if not metrics:
+                continue
+            candidates.append((state, metrics))
+
+        tickers = [state.symbol for state, _ in candidates]
+        latest = self.store.latest_findings_by_ticker(tickers)
+        rank_weight = {"A": 3, "B": 2, "C": 1}
+        stage_weight = {
+            "HALT_PRESSURE": 12, "EARLY": 11, "FIRST_LEG": 10, "BREAKOUT": 9,
+            "SURGE": 8, "IGNITION": 7, "REARM": 6, "VWAP_RECLAIM": 5,
+            "EMA_RECLAIM": 5, "AWAKENING": 4, "PRE_IGNITION": 3,
+            "ACTIVITY_WATCH": 2, "REVERSAL_WATCH": 1,
+        }
+        rows: list[dict] = []
+        for state, metrics in candidates:
+            finding = latest.get(state.symbol)
+            # Never attach yesterday's finding to today's 24H row.
+            if finding and trading_session_key(float(finding.get("detected_at") or 0)) != current_session:
+                finding = None
+            row = {
+                "ticker": state.symbol,
+                "price": float(state.current.close) if state.current else None,
+                "last_feed": state.last_market_feed or None,
+                "last_trade_at": state.last_market_trade_at or None,
+                "last_boats_trade_at": state.last_boats_trade_at,
+                "session_date": state.session_date,
+                "verified_24h": True,
+                "stage": (finding or {}).get("stage") or "SCANNING",
+                "actionable_rank": metrics.get("actionable_rank", "C"),
+                "quality_label": metrics.get("quality_label", "DEVELOPING"),
+                "quality_score": int(metrics.get("quality_score") or 0),
+                "ross_match": bool(metrics.get("ross_match", False)),
+                "ross_score": int(metrics.get("ross_score") or 0),
+                "change_5s_pct": metrics.get("change5"),
+                "change_15s_pct": metrics.get("change15"),
+                "change_30s_pct": metrics.get("change30"),
+                "vol_ratio_15s": metrics.get("vol15"),
+                "dollar_volume_15s": metrics.get("dollar15"),
+                "trades_15s": metrics.get("trades15"),
+                "extension_pct": metrics.get("extension"),
+                "trigger_distance_pct": metrics.get("trigger_distance_pct"),
+                "rejection_reasons": list(metrics.get("rejection_reasons", [])),
+                "latest_finding": finding,
+            }
+            rows.append(row)
+
+        rows.sort(key=lambda row: (
+            rank_weight.get(str(row.get("actionable_rank") or "C"), 0),
+            stage_weight.get(str(row.get("stage") or ""), 0),
+            int(row.get("quality_score") or 0),
+            float(row.get("change_5s_pct") or 0.0),
+        ), reverse=True)
+        return rows[:max(1, min(500, int(limit)))]
+
     def top_movers_sync(self, top: int = 20) -> dict:
         top = max(1, min(50, int(top)))
         r = requests.get(
@@ -2236,6 +2314,14 @@ class MarketWatcher:
             s = self.states[symbol] = SymbolState(symbol, settings.bucket_seconds, settings.keep_buckets)
             await self._restore_state_from_store(s, ts)
         s.update_trade(ts, price, size, session_date)
+        normalized_feed = "boats" if str(feed).lower() == "boats" else "sip"
+        s.last_market_feed = normalized_feed
+        s.last_market_trade_at = ts
+        if normalized_feed == "boats":
+            # A symbol is placed in the 24H panel only after Scout has actually
+            # observed a BOATS print for it in this U.S. trading session.
+            s.last_boats_trade_at = ts
+            s.boats_session_date = session_date
         self._update_outcomes(symbol, ts, price)
         if self.rust_bridge:
             self.rust_bridge.submit_trade(symbol=symbol, ts=ts, price=price, size=size, feed=feed)

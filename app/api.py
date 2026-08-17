@@ -259,6 +259,16 @@ class ScoutApi:
         recent = await asyncio.to_thread(self.store.recent_market_status_events, 100)
         return web.json_response({"active": self.market.current_halts(), "recent": recent})
 
+    async def twenty_four_hour(self, request: web.Request) -> web.Response:
+        limit = _int(request.query.get("limit"), 200, 1, 500)
+        rows = await asyncio.to_thread(self.market.twenty_four_hour_rows, limit)
+        return web.json_response({
+            "items": rows,
+            "source": "BOATS_VERIFIED",
+            "pipeline": "shared",
+            "description": "BOATS-verified stocks processed by the full Scout detection/category pipeline",
+        })
+
     async def snapshot(self, request: web.Request) -> web.Response:
         ticker = str(request.match_info.get("ticker", "")).upper()
         detected_at_raw = request.query.get("detected_at")
@@ -495,6 +505,7 @@ def create_app(store: Store, market: MarketWatcher, events: EventHub, catalysts=
     app.router.add_get("/api/catalysts", api.catalysts)
     app.router.add_get("/api/market/gainers", api.gainers)
     app.router.add_get("/api/market/halts", api.halts)
+    app.router.add_get("/api/market/24h", api.twenty_four_hour)
     app.router.add_get("/api/market/snapshot/{ticker}", api.snapshot)
     app.router.add_get("/api/market/diagnostics/{ticker}", api.diagnostics)
     app.router.add_get("/api/validation", api.validation)

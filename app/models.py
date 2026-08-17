@@ -143,6 +143,10 @@ class SymbolState:
     first_leg_candidate_at: float = 0.0
     first_leg_context: str | None = None
     pre_ignition_finding_id: int | None = None
+    last_market_feed: str = ""
+    last_market_trade_at: float = 0.0
+    last_boats_trade_at: float = 0.0
+    boats_session_date: str = ""
 
     def _roll(self, ts: float, price: float) -> None:
         bucket_start = ts - (ts % self.bucket_seconds)
@@ -192,6 +196,8 @@ class SymbolState:
             self.continuation_started_at = 0.0
             self.first_leg_candidate_at = 0.0
             self.first_leg_context = None
+            self.last_boats_trade_at = 0.0
+            self.boats_session_date = ""
         self.session_date = session_date
         if self.session_first_price is None:
             self.session_first_price = price
