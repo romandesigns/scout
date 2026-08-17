@@ -122,6 +122,17 @@ class Settings:
     first_leg_cooldown_seconds: int = _i("FIRST_LEG_COOLDOWN_SECONDS", 180, 30)
     first_leg_notification_consolidation_seconds: float = _f("FIRST_LEG_NOTIFICATION_CONSOLIDATION_SECONDS", 3.0, 0.0)
 
+    # V6.6.1 evidence-driven early release. This path does not relax market
+    # quality: it only allows a CLEAN, bullish, structurally valid first-leg
+    # candidate to notify before the legacy full impulse/release gate catches up.
+    early_release_enabled: bool = _b("EARLY_RELEASE_ENABLED", True)
+    early_release_min_quality_score: int = _i("EARLY_RELEASE_MIN_QUALITY_SCORE", 82, 70)
+    early_release_min_fresh_velocity_pct: float = _f("EARLY_RELEASE_MIN_FRESH_VELOCITY_PCT", 0.12, 0.02)
+    early_release_max_base_extension_pct: float = _f("EARLY_RELEASE_MAX_BASE_EXTENSION_PCT", 0.75, 0.10)
+    early_release_min_trigger_distance_pct: float = _f("EARLY_RELEASE_MIN_TRIGGER_DISTANCE_PCT", -0.35, -2.0)
+    early_release_max_trigger_distance_pct: float = _f("EARLY_RELEASE_MAX_TRIGGER_DISTANCE_PCT", 0.50, 0.0)
+    early_release_max_candidate_age_seconds: float = _f("EARLY_RELEASE_MAX_CANDIDATE_AGE_SECONDS", 15.0, 1.0)
+
     # Multi-timescale price velocity.
     # 15s = primary wake-up sensor
     # 30s = confirmation

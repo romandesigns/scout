@@ -1,3 +1,10 @@
+## 6.6.1
+
+- Added evidence-driven EARLY release path based on v6.6.0 promotion tracing.
+- Keeps CLEAN/bullish quality and participation gates intact while allowing notification before the legacy full impulse/release confirmation.
+- Adds configurable velocity, extension, trigger-distance, quality-score, and candidate-age safety bounds.
+- Persists early-release decision telemetry for post-deploy precision/late-risk measurement.
+
 # 6.6.0 - Promotion Gate Trace
 
 - Adds persistent promotion-gate traces to Developing/PRE_IGNITION findings without changing production detection thresholds.

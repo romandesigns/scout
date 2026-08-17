@@ -110,6 +110,60 @@ def build_promotion_trace(
     return trace
 
 
+def evaluate_early_release(
+    m: dict,
+    *,
+    first_leg_candidate: bool,
+    quality_actionable: bool,
+    participation_ok: bool,
+    trigger_distance_pct: float | None,
+    candidate_age_seconds: float,
+) -> dict:
+    """Evaluate the v6.6.1 early-notification release without weakening quality.
+
+    The legacy FIRST_LEG path remains intact. This path only advances the first
+    actionable notification for candidates that are already CLEAN + bullish,
+    structurally valid first-leg candidates with real participation and a
+    positive fresh velocity pulse, while they are still close to the base/trigger.
+    """
+    fresh_velocity = max(
+        float(m.get("change3") or 0.0),
+        float(m.get("change5") or 0.0),
+        float(m.get("change15") or 0.0),
+        float(m.get("change30") or 0.0),
+    )
+    base_extension = float(m.get("base_extension_pct") or 0.0)
+    quality_score = int(m.get("quality_score") or 0)
+
+    checks = {
+        "enabled": bool(settings.early_release_enabled),
+        "first_leg_candidate": bool(first_leg_candidate),
+        "quality_actionable": bool(quality_actionable),
+        "participation": bool(participation_ok),
+        "full_warmup": bool(m.get("full_warmup")),
+        "quality_score": quality_score >= settings.early_release_min_quality_score,
+        "fresh_velocity": fresh_velocity >= settings.early_release_min_fresh_velocity_pct,
+        "base_not_extended": base_extension <= settings.early_release_max_base_extension_pct,
+        "near_trigger": bool(
+            trigger_distance_pct is not None
+            and settings.early_release_min_trigger_distance_pct
+            <= float(trigger_distance_pct)
+            <= settings.early_release_max_trigger_distance_pct
+        ),
+        "fresh_candidate": candidate_age_seconds <= settings.early_release_max_candidate_age_seconds,
+    }
+    blockers = [name for name, passed in checks.items() if not passed]
+    return {
+        "ready": not blockers,
+        "checks": checks,
+        "blockers": blockers,
+        "fresh_velocity_pct": fresh_velocity,
+        "base_extension_pct": base_extension,
+        "trigger_distance_pct": trigger_distance_pct,
+        "candidate_age_seconds": round(float(candidate_age_seconds), 3),
+    }
+
+
 class Universe:
     def __init__(self):
         self.symbols: set[str] = set()
@@ -1419,6 +1473,20 @@ class MarketWatcher:
             and ts - s.last_stage_alert_at.get("FIRST_LEG", 0.0) >= settings.first_leg_cooldown_seconds
         )
 
+        candidate_age_seconds = max(0.0, ts - s.first_leg_candidate_at) if s.first_leg_candidate_at else 0.0
+        early_release_decision = evaluate_early_release(
+            m,
+            first_leg_candidate=first_leg_candidate,
+            quality_actionable=quality_actionable,
+            participation_ok=bool(regular_participation or fast_single_bucket or m.get("staircase")),
+            trigger_distance_pct=trigger_distance_pct,
+            candidate_age_seconds=candidate_age_seconds,
+        )
+        early_release_qualifies = bool(
+            early_release_decision["ready"]
+            and ts - s.last_stage_alert_at.get("EARLY", 0.0) >= settings.first_leg_cooldown_seconds
+        )
+
         reversal_context = bool(
             m["reversal_drawdown_pct"] >= settings.reversal_min_drawdown_pct
             and m["reversal_low_age_seconds"] <= settings.reversal_max_low_age_seconds
@@ -1585,13 +1653,15 @@ class MarketWatcher:
                 and pct_change(s.continuation_pullback_low, m["price"]) >= settings.reversal_rearm_min_bounce_pct
             )
 
-        if not any((first_leg_qualifies, early_qualifies, surge_qualifies, breakout_qualifies, ignition_qualifies, rearm_qualifies, reclaim_qualifies, reversal_rearm_qualifies)):
+        if not any((early_release_qualifies, first_leg_qualifies, early_qualifies, surge_qualifies, breakout_qualifies, ignition_qualifies, rearm_qualifies, reclaim_qualifies, reversal_rearm_qualifies)):
             return
 
         signals: list[str] = []
         if first_leg_qualifies:
             signals.extend(["FIRST_LEG", str(s.first_leg_context or m["leg_context"])])
-        if early_qualifies:
+        if early_release_qualifies:
+            signals.extend(["EARLY", "EARLY_RELEASE", str(s.first_leg_context or m["leg_context"])])
+        elif early_qualifies:
             signals.append("EARLY")
         if m["staircase"]:
             signals.append("STAIRCASE")
@@ -1622,6 +1692,8 @@ class MarketWatcher:
             stage, rank = "BREAKOUT", 4
         elif surge_qualifies:
             stage, rank = "SURGE", 3
+        elif early_release_qualifies:
+            stage, rank = "EARLY", 2
         elif first_leg_qualifies:
             stage, rank = "FIRST_LEG", 1
         elif staircase_qualifies and not sudden_impulse:
@@ -1665,6 +1737,8 @@ class MarketWatcher:
             "promoted": True,
             "selected_stage": stage,
             "promotion_delay_seconds": (round(max(0.0, ts - s.first_leg_candidate_at), 3) if s.first_leg_candidate_at else None),
+            "early_release": early_release_decision,
+            "early_release_used": bool(early_release_qualifies),
         })
         promoted_profile["promotion_trace"] = promoted_trace
 
@@ -1717,7 +1791,7 @@ class MarketWatcher:
             reversal_phase="REARM" if reversal_rearm_qualifies else "RECLAIM" if reclaim_qualifies else s.reversal_phase if s.reversal_phase != "IDLE" else None,
             reversal_low=s.reversal_low or (m["reversal_low"] if reclaim_qualifies else None),
             reversal_drawdown_pct=m["reversal_drawdown_pct"] if (reclaim_qualifies or reversal_rearm_qualifies) else None,
-            leg_context=str(s.first_leg_context or m["leg_context"]) if first_leg_qualifies else None,
+            leg_context=str(s.first_leg_context or m["leg_context"]) if (first_leg_qualifies or early_release_qualifies) else None,
             ross_match=m["ross_match"],
             ross_score=m["ross_score"],
             detection_timeframe_seconds=settings.bucket_seconds,
@@ -1728,13 +1802,19 @@ class MarketWatcher:
             trigger_level=m.get("breakout_level") or m.get("micro_resistance"),
             invalidation_level=m.get("base_low"),
             halt_pressure_score=int(m.get("halt_pressure_score") or 0),
-            urgency=("NOW" if stage in {"FIRST_LEG","HALT_PRESSURE"} else "EXTENDED" if m["extension"] >= 8 else "CONFIRMED" if stage in {"IGNITION","BREAKOUT","SURGE"} else "WATCH"),
+            urgency=("NOW" if stage in {"FIRST_LEG","EARLY","HALT_PRESSURE"} else "EXTENDED" if m["extension"] >= 8 else "CONFIRMED" if stage in {"IGNITION","BREAKOUT","SURGE"} else "WATCH"),
             engine_version=settings.app_version,
             lifecycle_phase=("REARM" if stage == "REARM" else "CONFIRMED" if stage in {"IGNITION","BREAKOUT","SURGE"} else "IGNITING"),
             shadow_mode=False, recipe_score=recipe_score, recipe_present=recipe_present, recipe_missing=recipe_missing,
             trigger_distance_pct=trigger_distance_pct, base_extension_at_detection_pct=base_extension,
             timeliness_label=timeliness_label(base_extension), precursor_finding_id=s.pre_ignition_finding_id,
         )
+        if early_release_qualifies:
+            f.evidence.extend([
+                "early release: clean structure + participation before full impulse confirmation",
+                f"fresh velocity {early_release_decision['fresh_velocity_pct']:+.2f}% while base extension is {base_extension:+.2f}%",
+                f"trigger distance {trigger_distance_pct:+.2f}%" if trigger_distance_pct is not None else "trigger distance unavailable",
+            ])
         if first_leg_qualifies:
             f.evidence.extend([
                 f"{f.leg_context.lower().replace('_', ' ')} confirmed",
