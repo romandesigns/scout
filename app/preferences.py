@@ -14,13 +14,13 @@ DEFAULT_NOTIFICATION_PREFERENCES: dict[str, Any] = {
             "priority": "high",
         },
         "windows": {
-            "enabled": True,
+            "enabled": False,
             "sound": True,
             "toast": True,
             "priority": "high",
         },
         "email": {
-            "enabled": True,
+            "enabled": False,
         },
     },
     "signals": {
@@ -28,6 +28,7 @@ DEFAULT_NOTIFICATION_PREFERENCES: dict[str, Any] = {
         "REVERSAL_WATCH": "silent",
         "FIRST_LEG_WATCH": "silent",
         "PRE_IGNITION": "silent",
+        "AWAKENING": "notify",
         "FIRST_LEG": "notify",
         "RECLAIM": "notify",
         "EMA_RECLAIM": "notify",

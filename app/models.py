@@ -77,7 +77,7 @@ class Finding:
     volume_rate_per_minute: float | None = None
     float_shares: float | None = None
     float_turnover: float | None = None
-    candidate_profile: dict[str, int | None] = field(default_factory=dict)
+    candidate_profile: dict[str, object] = field(default_factory=dict)
     episode_id: int = 0
     reversal_phase: str | None = None
     reversal_low: float | None = None
@@ -104,6 +104,11 @@ class Finding:
     base_extension_at_detection_pct: float | None = None
     timeliness_label: str | None = None
     precursor_finding_id: int | None = None
+    engine_source: str = "python"
+    hybrid_sources: list[str] = field(default_factory=list)
+    hybrid_score: int = 0
+    hybrid_key: str | None = None
+    notification_reason: str | None = None
 
 
 @dataclass

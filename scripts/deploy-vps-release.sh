@@ -96,4 +96,27 @@ if [[ "$universe_ready" != "1" ]]; then
   exit 1
 fi
 
-echo "VPS backend and PWA $version are healthy with $universe symbols. Backup: $backup"
+hybrid_ready=0
+for _ in $(seq 1 30); do
+  payload="$(curl -fsS http://127.0.0.1:18081/healthz 2>/dev/null || true)"
+  if python3 -c 'import json,sys; p=json.load(sys.stdin); h=p.get("hybrid",{}); raise SystemExit(0 if (not h.get("enabled",False) or h.get("running",False)) else 1)' <<<"$payload" 2>/dev/null; then
+    hybrid_ready=1
+    break
+  fi
+  sleep 2
+done
+
+if [[ "$hybrid_ready" != "1" ]]; then
+  echo "VPS/PWA are healthy but the Rust-primary hybrid bridge did not become ready. Backup: $backup" >&2
+  docker logs --since 5m --tail 200 stockhunter-scout >&2 || true
+  exit 1
+fi
+
+status_payload="$(curl -fsS http://127.0.0.1:18081/api/status)"
+rust_dropped="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("hybrid",{}).get("rust_bridge",{}).get("dropped",0))' <<<"$status_payload")"
+if [[ "$rust_dropped" =~ ^[0-9]+$ ]] && (( rust_dropped > 0 )); then
+  echo "Rust bridge reported $rust_dropped dropped trades during startup; refusing release." >&2
+  exit 1
+fi
+
+echo "VPS backend, Rust hybrid, and PWA $version are healthy with $universe symbols. Backup: $backup"

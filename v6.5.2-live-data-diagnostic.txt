@@ -1,0 +1,421 @@
+============================================================
+SCOUT v6.5.2 LIVE DATA DIAGNOSTIC
+Captured: 2026-08-16 23:44:11 -04:00
+============================================================
+
+===== LOCAL DOCKER CONTAINERS =====
+NAME      IMAGE     COMMAND   SERVICE   CREATED   STATUS    PORTS
+
+===== PORT 18081 =====
+
+
+===== BACKEND HEALTH =====
+HEALTH REQUEST FAILED:
+No connection could be made because the target machine actively refused it. (127.0.0.1:18081)
+
+===== COMPOSE CONFIG (SECRET VALUES REDACTED) =====
+name: scout-v620-repo
+services:
+  scout:
+    build:
+      context: D:\wavystack\scout-v6.2.0-repo
+      dockerfile: Dockerfile
+    container_name: stockhunter-scout
+    environment:
+      ALERT_COOLDOWN_SECONDS: "180"
+      ALPACA_API_KEY: [REDACTED]
+      ALPACA_API_SECRET: CBvi9wXj5wUPZRhVSFU2aUmrvNYKqAsAmAMssaipDBMk
+      ALPACA_DATA_BASE: https://data.alpaca.markets
+      ALPACA_FEED: sip
+      ALPACA_MARKET_WS: wss://stream.data.alpaca.markets/v2/sip
+      ALPACA_NEWS_WS: wss://stream.data.alpaca.markets/v1beta1/news
+      ALPACA_OVERNIGHT_FEED: boats
+      ALPACA_OVERNIGHT_WS: wss://stream.data.alpaca.markets/v1beta1/boats
+      ALPACA_TRADING_BASE: https://paper-api.alpaca.markets
+      APP_ENV: production
+      APP_NAME: StockHunter Scout
+      APP_TIMEZONE: America/New_York
+      APP_VERSION: 6.0.0
+      BASELINE_BUCKETS: "12"
+      BASELINE_VOLUME_FLOOR: "50"
+      BREAKOUT_MIN_DOLLAR_30S: "1500"
+      BREAKOUT_MIN_FRESH_VELOCITY_PCT: "0.20"
+      BREAKOUT_MIN_PENETRATION_PCT: "0.15"
+      BREAKOUT_MIN_TRADES_30S: "4"
+      BREAKOUT_MIN_VOL_RATIO: "3.0"
+      BUCKET_SECONDS: "15"
+      CATALYST_SOURCE_STALE_SECONDS: "300"
+      CATALYST_WATCHLIST: ""
+      CHART_DIR: /charts
+      DATA_DIR: /data
+      EARLY_MAX_BELOW_VWAP_PCT: "0.75"
+      EARLY_MIN_CHANGE_15S_PCT: "0.35"
+      EARLY_MIN_CHANGE_30S_PCT: "0.65"
+      EARLY_MIN_CHANGE_60S_PCT: "0.50"
+      EARLY_MIN_EXTENSION_PCT: "0.50"
+      EARLY_SCORE: "6"
+      EMA_GAP_TOLERANCE_PCT: "0.05"
+      EMA_SLOPE_TOLERANCE_PCT: "0.01"
+      EMAIL_EVERY_FINDING: "true"
+      ENABLE_OVERNIGHT_STREAM: "true"
+      FAST_PATH_MIN_INTERVAL_MS: "750"
+      FAST_PRICE_15S_PCT: "0.60"
+      FAST_PRICE_30S_PCT: "1.00"
+      FAST_PRICE_60S_PCT: "1.5"
+      FAST_SINGLE_BUCKET_CHANGE_15S_PCT: "0.60"
+      FAST_SINGLE_BUCKET_DOLLAR_VOLUME: "2500"
+      FAST_SINGLE_BUCKET_TRADES: "5"
+      FAST_SINGLE_BUCKET_VOL_RATIO: "8.0"
+      FAST_VOL_RATIO: "5.0"
+      FIRST_LEG_BASE_BUCKETS: "12"
+      FIRST_LEG_CONFIRMATION_SECONDS: "3"
+      FIRST_LEG_COOLDOWN_SECONDS: "180"
+      FIRST_LEG_MAX_BASE_RANGE_PCT: "1.50"
+      FIRST_LEG_MAX_EXTENSION_PCT: "2.0"
+      FIRST_LEG_MIN_CHANGE_3S_PCT: "0.18"
+      FIRST_LEG_MIN_CHANGE_5S_PCT: "0.28"
+      FIRST_LEG_MIN_CHANGE_15S_PCT: "0.45"
+      FIRST_LEG_MIN_DOLLAR_15S: "2500"
+      FIRST_LEG_MIN_TRADES_15S: "8"
+      FIRST_LEG_MIN_VOL_RATIO: "3.0"
+      FIRST_LEG_NOTIFICATION_CONSOLIDATION_SECONDS: "3"
+      HEALTH_PORT: "8080"
+      IGNITION_MIN_30S_DOLLAR_VOLUME: "2500"
+      IGNITION_MIN_30S_TRADES: "5"
+      IGNITION_MIN_CHANGE_15S_PCT: "0.85"
+      IGNITION_MIN_CHANGE_30S_PCT: "1.25"
+      IGNITION_MIN_CHANGE_60S_PCT: "1.50"
+      IGNITION_MIN_EXTENSION_PCT: "1.25"
+      IGNITION_MIN_FRESH_VELOCITY_PCT: "0.50"
+      IGNITION_SCORE: "9"
+      KEEP_BUCKETS: "160"
+      LOG_LEVEL: INFO
+      MARKET_QUALITY_PROFILE: balanced
+      MAX_EARLY_EXTENSION_PCT: "15.0"
+      MAX_PRICE: "10.00"
+      MIN_30S_DOLLAR_VOLUME: "1000"
+      MIN_30S_TRADES: "3"
+      MIN_BULLISH_SCORE: "3"
+      MIN_PRICE: "0.15"
+      NOTIFICATION_CONSOLIDATION_SECONDS: "8"
+      NOTIFICATION_QUEUE_MAX: "250"
+      NOTIFICATION_RETRY_ATTEMPTS: "5"
+      NOTIFICATION_RETRY_BASE_SECONDS: "2"
+      NOTIFICATION_RETRY_MAX_SECONDS: "120"
+      NTFY_CHART_FOLLOWUP: "false"
+      NTFY_MIN_INTERVAL_SECONDS: "2"
+      NTFY_SERVER: https://ntfy.sh
+      NTFY_TOPIC: jk6irqvjKYAPK07y
+      PRICE_ACCELERATION_MIN_PP: "0.20"
+      QUALITY_IMPULSE_MIN_DOLLAR_15S: "5000"
+      QUALITY_IMPULSE_MIN_TRADES_15S: "10"
+      QUALITY_MAX_DIRECTION_REVERSALS: "4"
+      QUALITY_MAX_GAP_PCT: "2.50"
+      QUALITY_MAX_STALE_SECONDS: "30"
+      QUALITY_MAX_WICK_RATIO: "5.0"
+      QUALITY_MIN_ACTIVE_RATIO: "0.625"
+      QUALITY_MIN_DIRECTIONAL_EFFICIENCY: "0.30"
+      QUALITY_MIN_DOLLAR_30S: "5000"
+      QUALITY_MIN_TRADES_30S: "12"
+      QUALITY_WATCH_COOLDOWN_SECONDS: "120"
+      QUALITY_WINDOW_BUCKETS: "8"
+      REARM_MIN_LEVEL_IMPROVEMENT_PCT: "0.50"
+      REARM_MIN_SECONDS: "120"
+      REQUIRE_TWO_ACTIVE_BUCKETS: "true"
+      RESEND_API_KEY: [REDACTED]
+      RESEND_FROM: StockHunter Scout <alerts@YOUR_VERIFIED_DOMAIN.com>
+      RESEND_MIN_INTERVAL_SECONDS: "1"
+      RESEND_TO: your-email@example.com
+      REVERSAL_EPISODE_COOLDOWN_SECONDS: "300"
+      REVERSAL_LOOKBACK_BUCKETS: "120"
+      REVERSAL_LOW_WINDOW_BUCKETS: "40"
+      REVERSAL_MAX_LOW_AGE_SECONDS: "900"
+      REVERSAL_MIN_DOLLAR_15S: "2500"
+      REVERSAL_MIN_DOLLAR_30S: "5000"
+      REVERSAL_MIN_DRAWDOWN_PCT: "5.0"
+      REVERSAL_MIN_TRADES_15S: "5"
+      REVERSAL_MIN_TRADES_30S: "12"
+      REVERSAL_MIN_VOL_RATIO: "3.0"
+      REVERSAL_MIN_VOL_RATIO_15S: "1.5"
+      REVERSAL_PULLBACK_MAX_PCT: "6.0"
+      REVERSAL_PULLBACK_MIN_PCT: "0.75"
+      REVERSAL_REARM_MIN_BOUNCE_PCT: "0.35"
+      REVERSAL_RECLAIM_MIN_BOUNCE_PCT: "2.0"
+      REVERSAL_WATCH_MIN_BOUNCE_PCT: "0.75"
+      RSS_FEEDS: ""
+      SCOUT_ALLOWED_ORIGINS: http://tauri.localhost,tauri://localhost,http://localhost:3000,http://127.0.0.1:3000
+      SCOUT_CLIENT_BASE_URL: https://srv1170872.tail86523.ts.net:8444
+      SEC_POLL_SECONDS: "10"
+      SEC_USER_AGENT: StockHunterScout/3.0 your-email@example.com
+      SIGNAL_STAGE_COOLDOWN_SECONDS: "60"
+      STAIRCASE_MIN_ACTIVE_BUCKETS: "5"
+      STAIRCASE_MIN_CHANGE_PCT: "1.00"
+      STAIRCASE_MIN_DOLLAR_VOLUME: "4000"
+      STAIRCASE_MIN_HIGHER_LOW_RATIO: "0.60"
+      STAIRCASE_MIN_TRADES: "8"
+      STAIRCASE_MIN_UP_STEP_RATIO: "0.60"
+      STAIRCASE_WINDOW_BUCKETS: "8"
+      SURGE_MIN_CHANGE_3S_PCT: "0.45"
+      SURGE_MIN_CHANGE_5S_PCT: "0.70"
+      SURGE_MIN_CHANGE_10S_PCT: "1.10"
+      SURGE_MIN_CHANGE_15S_PCT: "1.50"
+      SURGE_MIN_DOLLAR_15S: "2500"
+      SURGE_MIN_TRADES_15S: "5"
+      SURGE_MIN_VOL_RATIO: "5.0"
+      SURGE_WEAK_STRUCTURE_MIN_DOLLAR_15S: "10000"
+      SURGE_WEAK_STRUCTURE_MIN_TRADES_15S: "20"
+      UNIVERSE_BATCH_SIZE: "200"
+      UNIVERSE_MAX_PRICE: "10.00"
+      UNIVERSE_MAX_SYMBOLS: "12000"
+      UNIVERSE_MIN_PRICE: "0.15"
+      UNIVERSE_REFRESH_SECONDS: "30"
+      VAPID_PRIVATE_KEY: ""
+      VAPID_PUBLIC_KEY: ""
+      VAPID_SUBJECT: mailto:wavystyledev@gmail.com
+      VWAP_TOLERANCE_PCT: "0.20"
+      WAKEUP_EVAL_SECONDS: "15"
+      WAKEUP_PRICE_60S_PCT: "2.0"
+      WAKEUP_VOL_RATIO: "4.0"
+      WARMUP_BUCKETS: "8"
+      WEB_OUT_DIR: /srv/web-out
+      WILDCARD_MARKET_STREAM: "false"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz',
+          timeout=3).read()
+      timeout: 5s
+      interval: 30s
+      retries: 3
+      start_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-file: "5"
+        max-size: 20m
+    networks:
+      default: null
+    ports:
+      - mode: ingress
+        host_ip: 127.0.0.1
+        target: 8080
+        published: "18081"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: D:\wavystack\scout-v6.2.0-repo\data
+        target: /data
+        bind: {}
+      - type: bind
+        source: D:\wavystack\scout-v6.2.0-repo\charts
+        target: /charts
+        bind: {}
+networks:
+  default:
+    name: scout-v620-repo_default
+
+===== BACKEND LOGS - LAST 250 LINES =====
+
+===== FRONTEND API REFERENCES =====
+
+Path                                                                        LineNumber Line
+----                                                                        ---------- ----
+D:\wavystack\scout-v6.2.0-repo\web\app\page.tsx                                     51   API_BASE,
+D:\wavystack\scout-v6.2.0-repo\web\app\page.tsx                                    155 const CLIENT_VERSION=process.env.NEXT_PUBLIC_SCOUT_VERSION||"dev";
+D:\wavystack\scout-v6.2.0-repo\web\app\page.tsx                                    962     const source=new EventSource(`${API_BASE}/api/events`);
+D:\wavystack\scout-v6.2.0-repo\web\components\live-chart.tsx                         4 import { API_BASE, API_CONFIGURED, getMarketSnapshot } from "@/lib/api";
+D:\wavystack\scout-v6.2.0-repo\web\components\live-chart.tsx                       132     return <div className="chart-stage"><img src={`${API_BASE}${finding.chart_url}`} alt={`${finding.ticker} frozen detection chart`} className="chart-i…
+D:\wavystack\scout-v6.2.0-repo\web\components\pwa-runtime.tsx                       13     const nativeShell="__TAURI_INTERNALS__" in window||"__TAURI__" in window||window.location.hostname==="tauri.localhost";
+D:\wavystack\scout-v6.2.0-repo\web\components\pwa-runtime.tsx                       14     const clientVersion=process.env.NEXT_PUBLIC_SCOUT_VERSION||"dev";
+D:\wavystack\scout-v6.2.0-repo\web\lib\api.ts                                       19 const configured = process.env.NEXT_PUBLIC_SCOUT_API_BASE?.replace(/\/$/, "");
+D:\wavystack\scout-v6.2.0-repo\web\lib\api.ts                                       20 const sameOrigin = process.env.NEXT_PUBLIC_SCOUT_SAME_ORIGIN === "1";
+D:\wavystack\scout-v6.2.0-repo\web\lib\api.ts                                       22 export const API_BASE = configured ?? "";
+D:\wavystack\scout-v6.2.0-repo\web\lib\api.ts                                       25   const response = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
+D:\wavystack\scout-v6.2.0-repo\web\lib\api.ts                                       48   const response=await fetch(`${API_BASE}/api/findings/${id}/review`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(value…
+D:\wavystack\scout-v6.2.0-repo\web\lib\api.ts                                       96   const response = await fetch(`${API_BASE}/api/notifications/preferences`, {
+D:\wavystack\scout-v6.2.0-repo\web\lib\api.ts                                      106   const response = await fetch(`${API_BASE}/api/notifications/test`, {
+D:\wavystack\scout-v6.2.0-repo\web\lib\api.ts                                      120   const response=await fetch(`${API_BASE}/api/push/subscriptions`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({subscr…
+D:\wavystack\scout-v6.2.0-repo\web\lib\api.ts                                      126   const response=await fetch(`${API_BASE}/api/push/subscriptions`,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({endp…
+D:\wavystack\scout-v6.2.0-repo\web\lib\api.ts                                      136   const response = await fetch(`${API_BASE}/api/settings/scanner`, {method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(value)}…
+D:\wavystack\scout-v6.2.0-repo\web\lib\api.ts                                      147   const response=await fetch(`${API_BASE}/api/attention/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})…
+D:\wavystack\scout-v6.2.0-repo\web\out\_next\static\chunks\08ttfj81-47mu.js          1 (globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,66849,(e,t,n)=>{"trimStart"in String.pro…
+D:\wavystack\scout-v6.2.0-repo\web\out\_next\static\chunks\0cz1d0mv5g_q7.js          1 !function(){var t="undefined"!=typeof globalThis?globalThis:"undefined"!=typeof window?window:"undefined"!=typeof global?global:"undefined"!=typeof self…
+D:\wavystack\scout-v6.2.0-repo\web\out\_next\static\chunks\3_d98v9r2uhs7.js          1 (globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,31713,e=>{"use strict";let t,r,n,i;var a…
+D:\wavystack\scout-v6.2.0-repo\web\next.config.ts                                   14   env: { NEXT_PUBLIC_SCOUT_VERSION: scoutVersion },
+
+
+
+===== ENV VARIABLE NAMES ONLY =====
+ALERT_COOLDOWN_SECONDS
+ALPACA_API_KEY
+ALPACA_API_SECRET
+ALPACA_DATA_BASE
+ALPACA_FEED
+ALPACA_MARKET_WS
+ALPACA_NEWS_WS
+ALPACA_OVERNIGHT_FEED
+ALPACA_OVERNIGHT_WS
+ALPACA_TRADING_BASE
+APP_ENV
+APP_NAME
+APP_TIMEZONE
+APP_VERSION
+BASELINE_BUCKETS
+BASELINE_VOLUME_FLOOR
+BREAKOUT_MIN_DOLLAR_30S
+BREAKOUT_MIN_FRESH_VELOCITY_PCT
+BREAKOUT_MIN_PENETRATION_PCT
+BREAKOUT_MIN_TRADES_30S
+BREAKOUT_MIN_VOL_RATIO
+BUCKET_SECONDS
+CATALYST_SOURCE_STALE_SECONDS
+CATALYST_WATCHLIST
+CHART_DIR
+DATA_DIR
+EARLY_MAX_BELOW_VWAP_PCT
+EARLY_MIN_CHANGE_15S_PCT
+EARLY_MIN_CHANGE_30S_PCT
+EARLY_MIN_CHANGE_60S_PCT
+EARLY_MIN_EXTENSION_PCT
+EARLY_SCORE
+EMA_GAP_TOLERANCE_PCT
+EMA_SLOPE_TOLERANCE_PCT
+EMAIL_EVERY_FINDING
+ENABLE_OVERNIGHT_STREAM
+FAST_PATH_MIN_INTERVAL_MS
+FAST_PRICE_15S_PCT
+FAST_PRICE_30S_PCT
+FAST_PRICE_60S_PCT
+FAST_SINGLE_BUCKET_CHANGE_15S_PCT
+FAST_SINGLE_BUCKET_DOLLAR_VOLUME
+FAST_SINGLE_BUCKET_TRADES
+FAST_SINGLE_BUCKET_VOL_RATIO
+FAST_VOL_RATIO
+FIRST_LEG_BASE_BUCKETS
+FIRST_LEG_CONFIRMATION_SECONDS
+FIRST_LEG_COOLDOWN_SECONDS
+FIRST_LEG_MAX_BASE_RANGE_PCT
+FIRST_LEG_MAX_EXTENSION_PCT
+FIRST_LEG_MIN_CHANGE_15S_PCT
+FIRST_LEG_MIN_CHANGE_3S_PCT
+FIRST_LEG_MIN_CHANGE_5S_PCT
+FIRST_LEG_MIN_DOLLAR_15S
+FIRST_LEG_MIN_TRADES_15S
+FIRST_LEG_MIN_VOL_RATIO
+FIRST_LEG_NOTIFICATION_CONSOLIDATION_SECONDS
+HEALTH_PORT
+IGNITION_MIN_30S_DOLLAR_VOLUME
+IGNITION_MIN_30S_TRADES
+IGNITION_MIN_CHANGE_15S_PCT
+IGNITION_MIN_CHANGE_30S_PCT
+IGNITION_MIN_CHANGE_60S_PCT
+IGNITION_MIN_EXTENSION_PCT
+IGNITION_MIN_FRESH_VELOCITY_PCT
+IGNITION_SCORE
+KEEP_BUCKETS
+LOG_LEVEL
+MARKET_QUALITY_PROFILE
+MAX_EARLY_EXTENSION_PCT
+MAX_PRICE
+MIN_30S_DOLLAR_VOLUME
+MIN_30S_TRADES
+MIN_BULLISH_SCORE
+MIN_PRICE
+NOTIFICATION_CONSOLIDATION_SECONDS
+NOTIFICATION_QUEUE_MAX
+NOTIFICATION_RETRY_ATTEMPTS
+NOTIFICATION_RETRY_BASE_SECONDS
+NOTIFICATION_RETRY_MAX_SECONDS
+NTFY_CHART_FOLLOWUP
+NTFY_MIN_INTERVAL_SECONDS
+NTFY_SERVER
+NTFY_TOPIC
+PRICE_ACCELERATION_MIN_PP
+QUALITY_IMPULSE_MIN_DOLLAR_15S
+QUALITY_IMPULSE_MIN_TRADES_15S
+QUALITY_MAX_DIRECTION_REVERSALS
+QUALITY_MAX_GAP_PCT
+QUALITY_MAX_STALE_SECONDS
+QUALITY_MAX_WICK_RATIO
+QUALITY_MIN_ACTIVE_RATIO
+QUALITY_MIN_DIRECTIONAL_EFFICIENCY
+QUALITY_MIN_DOLLAR_30S
+QUALITY_MIN_TRADES_30S
+QUALITY_WATCH_COOLDOWN_SECONDS
+QUALITY_WINDOW_BUCKETS
+REARM_MIN_LEVEL_IMPROVEMENT_PCT
+REARM_MIN_SECONDS
+REQUIRE_TWO_ACTIVE_BUCKETS
+RESEND_API_KEY
+RESEND_FROM
+RESEND_MIN_INTERVAL_SECONDS
+RESEND_TO
+REVERSAL_EPISODE_COOLDOWN_SECONDS
+REVERSAL_LOOKBACK_BUCKETS
+REVERSAL_LOW_WINDOW_BUCKETS
+REVERSAL_MAX_LOW_AGE_SECONDS
+REVERSAL_MIN_DOLLAR_15S
+REVERSAL_MIN_DOLLAR_30S
+REVERSAL_MIN_DRAWDOWN_PCT
+REVERSAL_MIN_TRADES_15S
+REVERSAL_MIN_TRADES_30S
+REVERSAL_MIN_VOL_RATIO
+REVERSAL_MIN_VOL_RATIO_15S
+REVERSAL_PULLBACK_MAX_PCT
+REVERSAL_PULLBACK_MIN_PCT
+REVERSAL_REARM_MIN_BOUNCE_PCT
+REVERSAL_RECLAIM_MIN_BOUNCE_PCT
+REVERSAL_WATCH_MIN_BOUNCE_PCT
+RSS_FEEDS
+SCOUT_ALLOWED_ORIGINS
+SCOUT_CLIENT_BASE_URL
+SEC_POLL_SECONDS
+SEC_USER_AGENT
+SIGNAL_STAGE_COOLDOWN_SECONDS
+STAIRCASE_MIN_ACTIVE_BUCKETS
+STAIRCASE_MIN_CHANGE_PCT
+STAIRCASE_MIN_DOLLAR_VOLUME
+STAIRCASE_MIN_HIGHER_LOW_RATIO
+STAIRCASE_MIN_TRADES
+STAIRCASE_MIN_UP_STEP_RATIO
+STAIRCASE_WINDOW_BUCKETS
+SURGE_MIN_CHANGE_10S_PCT
+SURGE_MIN_CHANGE_15S_PCT
+SURGE_MIN_CHANGE_3S_PCT
+SURGE_MIN_CHANGE_5S_PCT
+SURGE_MIN_DOLLAR_15S
+SURGE_MIN_TRADES_15S
+SURGE_MIN_VOL_RATIO
+SURGE_WEAK_STRUCTURE_MIN_DOLLAR_15S
+SURGE_WEAK_STRUCTURE_MIN_TRADES_15S
+UNIVERSE_BATCH_SIZE
+UNIVERSE_MAX_PRICE
+UNIVERSE_MAX_SYMBOLS
+UNIVERSE_MIN_PRICE
+UNIVERSE_REFRESH_SECONDS
+VAPID_PRIVATE_KEY
+VAPID_PUBLIC_KEY
+VAPID_SUBJECT
+VWAP_TOLERANCE_PCT
+WAKEUP_EVAL_SECONDS
+WAKEUP_PRICE_60S_PCT
+WAKEUP_VOL_RATIO
+WARMUP_BUCKETS
+WEB_OUT_DIR
+WILDCARD_MARKET_STREAM
+
+===== ALPACA/APCA VARIABLE NAMES =====
+ALPACA_API_KEY
+ALPACA_API_SECRET
+ALPACA_DATA_BASE
+ALPACA_FEED
+ALPACA_MARKET_WS
+ALPACA_NEWS_WS
+ALPACA_OVERNIGHT_FEED
+ALPACA_OVERNIGHT_WS
+ALPACA_TRADING_BASE
+
+===== END =====

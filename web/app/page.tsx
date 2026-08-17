@@ -43,6 +43,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { ScoutTooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { LiveChart } from "@/components/live-chart";
 import { PwaRuntime } from "@/components/pwa-runtime";
 import { CandidateProfileChart, ParticipationChart, QualityGauge, TimeOfDayOutcomeChart, ValidationOutcomeChart, VelocityChart } from "@/components/scout-data-charts";
@@ -67,7 +68,7 @@ import {
   saveScannerSettings,
   testNotification,
 } from "@/lib/api";
-import { getNativeAutostartState, installNativeDeepLinkHandler, installNativeNotificationActionHandler, queueNativeScoutNotification, sendNativeTestNotification, setNativeAutostart, syncNativeNotificationChannels } from "@/lib/native";
+import { getNativeAutostartState, installNativeDeepLinkHandler, installNativeNotificationActionHandler, sendNativeTestNotification, setNativeAutostart } from "@/lib/native";
 import { disableWebPush, enableWebPush, webPushState, type WebPushState } from "@/lib/web-push";
 import type {
   Catalyst,
@@ -228,10 +229,10 @@ const defaultPrefs: NotificationPreferences = {
   master_enabled: true,
   platforms: {
     android: { enabled: true, sound: true, vibration: true, priority: "high" },
-    windows: { enabled: true, sound: true, toast: true, priority: "high" },
-    email: { enabled: true },
+    windows: { enabled: false, sound: true, toast: false, priority: "high" },
+    email: { enabled: false },
   },
-  signals: { ACTIVITY_WATCH:"silent", REVERSAL_WATCH:"silent", FIRST_LEG_WATCH:"silent", PRE_IGNITION:"silent", FIRST_LEG:"notify", RECLAIM:"notify", EMA_RECLAIM:"notify", VWAP_RECLAIM:"notify", FIRST_PULLBACK:"silent", EARLY:"notify", SURGE:"notify", BREAKOUT:"notify", STAIRCASE:"notify", IGNITION:"notify", CATALYST_WATCH:"notify", CATALYST_ACTIVE:"notify", HALT:"notify", RESUME:"notify", REARM:"notify" },
+  signals: { ACTIVITY_WATCH:"silent", REVERSAL_WATCH:"silent", FIRST_LEG_WATCH:"silent", PRE_IGNITION:"silent", AWAKENING:"notify", FIRST_LEG:"notify", RECLAIM:"notify", EMA_RECLAIM:"notify", VWAP_RECLAIM:"notify", FIRST_PULLBACK:"silent", EARLY:"notify", SURGE:"notify", BREAKOUT:"notify", STAIRCASE:"notify", IGNITION:"notify", CATALYST_WATCH:"notify", CATALYST_ACTIVE:"notify", HALT:"notify", RESUME:"notify", REARM:"notify" },
   sessions: { overnight:true, premarket:true, regular:true, afterhours:true },
   quiet_hours: { enabled:false, start:"22:00", end:"06:00", allow_critical:true },
   minimum_score: 0,
@@ -284,6 +285,7 @@ function tone(stage: string) {
   if (stage === "CONFIRMED") return "blue";
   if (stage === "NOW") return "green";
   if (["EXTENDED","RISK"].includes(stage)) return "red";
+  if (stage === "AWAKENING") return "blue";
   if (stage === "FIRST_LEG") return "green";
   if (stage === "FIRST_LEG_WATCH") return "blue";
   if (["IGNITION","SURGE","RECLAIM","EMA_RECLAIM","VWAP_RECLAIM","REARM"].includes(stage)) return "green";
@@ -294,6 +296,7 @@ function tone(stage: string) {
 }
 
 function stageGlyph(stage: string) {
+  if (stage === "AWAKENING") return <MdVisibility/>;
   if (stage === "FIRST_LEG") return <IconBolt size={11}/>;
   if (stage === "IGNITION") return <IconFlame size={11}/>;
   if (["CATALYST","CATALYST_WATCH","CATALYST_ACTIVE"].includes(stage)) return <IconDiamondFilled size={10}/>;
@@ -320,7 +323,8 @@ const EVENT_HELP:Record<string,string>={
   RECLAIM:"Reclaim — price recovered a key structural level",
   FIRST_LEG:"First leg — confirmed initial expansion from a base",
   FIRST_LEG_WATCH:"First-leg watch — base is developing before release",
-  PRE_IGNITION:"Pre-ignition shadow — recipe is armed before release; notifications remain silent during calibration",
+  PRE_IGNITION:"Pre-ignition shadow — recipe is armed before release; this observation remains silent",
+  AWAKENING:"Awakening — Rust primary perception detected a clean dormant-to-active transition",
   CATALYST:"Catalyst — fresh potentially bullish news",
   CATALYST_WATCH:"Catalyst watch — news exists but market reaction is unconfirmed",
   CATALYST_ACTIVE:"Active catalyst — news and market reaction are aligned",
@@ -335,6 +339,7 @@ function eventIcon(stage:string){
   if(stage==="NOW"||stage==="FIRST_LEG")return <MdNewReleases/>;
   if(stage==="WATCH"||stage.endsWith("_WATCH"))return <MdVisibility/>;
   if(stage==="PRE_IGNITION"||stage==="ARMED")return <MdTrackChanges/>;
+  if(stage==="AWAKENING")return <MdVisibility/>;
   if(stage==="IGNITION")return <MdLocalFireDepartment/>;
   if(stage==="SURGE"||stage==="HALT_PRESSURE")return <MdBolt/>;
   if(stage==="EARLY")return <MdTrackChanges/>;
@@ -348,7 +353,7 @@ function eventIcon(stage:string){
 
 function EventIcon({event}: {event:string}){
   const label=EVENT_HELP[event]||event.replaceAll("_"," ").toLowerCase();
-  return <span className="event-icon" data-tone={tone(event)} data-tooltip={label} title={label} aria-label={label} role="img" tabIndex={0}>{eventIcon(event)}</span>;
+  return <ScoutTooltip content={label}><span className="event-icon" data-tone={tone(event)} aria-label={label} role="img" tabIndex={0}>{eventIcon(event)}</span></ScoutTooltip>;
 }
 
 function eventGlyph(type:TimelineItem["type"], payload:TimelineItem["payload"]) {
@@ -360,7 +365,7 @@ function eventGlyph(type:TimelineItem["type"], payload:TimelineItem["payload"]) 
 }
 
 function IconButton({ label, active, onClick, children }: { label: string; active?: boolean; onClick?: () => void; children: React.ReactNode }) {
-  return <button type="button" aria-label={label} title={label} data-active={active || undefined} onClick={onClick} className="icon-button">{children}</button>;
+  return <ScoutTooltip content={label}><button type="button" aria-label={label} data-active={active || undefined} onClick={onClick} className="icon-button">{children}</button></ScoutTooltip>;
 }
 
 function PanelTitle({ icon, title, subtitle, actions }: { icon?: React.ReactNode; title: string; subtitle?: string; actions?: React.ReactNode }) {
@@ -590,7 +595,7 @@ function ChartGroup({ finding, allFindings, onSelectFinding, onClose, onMaximize
       <div className="flex min-w-0 items-center gap-2"><b className="ticker-symbol">{finding?.ticker ?? "—"}</b>{finding && <><span className="metric text-[12px]">{money(finding.price)}</span><span className="metric text-[11px] text-[var(--green)]">{pct(finding.extension_pct)}</span>{signals.map(signal=><EventIcon key={signal} event={signal}/>)}</>}</div>
       <div className="flex items-center gap-1"><Select className="timeframe-select" label="Chart timeframe" value={String(timeframe)} onValueChange={value=>setTimeframe(Number(value) as 15|30|60|300)} options={[{value:"15",label:"15s"},{value:"30",label:"30s"},{value:"60",label:"1m"},{value:"300",label:"5m"}]}/><span className="chart-mode-label">{frozen?"DETECTION":"LIVE"}</span><IconButton label="Chart menu"><IconDots size={14}/></IconButton></div>
     </div>
-    <div className="min-h-0 flex-1 overflow-hidden"><LiveChart finding={finding} frozen={frozen} active={active} pollOffsetMs={pollOffsetMs} refreshNonce={refreshNonce} timeframeSeconds={timeframe} showAnnotations={readUiPreferences().showChartMarkers} annotations={{formation:readUiPreferences().showFormationRegion,detection:readUiPreferences().showDetectionPrice,trigger:readUiPreferences().showTriggerLevel,invalidation:readUiPreferences().showInvalidationLevel}}/></div>
+    <div className="min-h-0 flex-1 overflow-hidden"><LiveChart finding={finding} frozen={frozen} active={active} pollOffsetMs={pollOffsetMs} refreshNonce={refreshNonce} timeframeSeconds={timeframe} showAnnotations={readUiPreferences().showChartMarkers} annotations={{formation:readUiPreferences().showFormationRegion,detection:readUiPreferences().showDetectionPrice,trigger:readUiPreferences().showTriggerLevel,invalidation:readUiPreferences().showInvalidationLevel}} onSelectFinding={onSelectFinding}/></div>
   </section>;
 }
 
@@ -652,7 +657,7 @@ function Inspector({ finding, onNotifications }: { finding?:Finding; onNotificat
     <div className="flex items-start justify-between gap-2"><div><div className="flex flex-wrap items-center gap-1.5"><b className="ticker-symbol text-[16px]">{finding.ticker}</b><Badge data-tone="blue"><IconPin size={10}/> SELECTED</Badge>{signals.map(signal=><EventIcon key={signal} event={signal}/>)}<Badge data-tone={finding.quality_label==="CLEAN"?"green":finding.quality_label==="DEVELOPING"?"blue":finding.quality_label==="CHOPPY"?"orange":"red"}>{finding.actionable_rank||"C"} · {finding.quality_label||"UNRATED"}</Badge></div><div className="mt-1 flex items-baseline gap-2"><span className="metric text-[16px] font-semibold">{money(finding.price)}</span><span className="metric text-[11px] text-[var(--green)]">{pct(finding.extension_pct)}</span></div><div className="mt-1 text-[10px] scout-muted">Inspector follows your selection only · detected {age(finding.detected_at)} · evidence {finding.score}/10</div></div><IconButton label="Notification settings" onClick={onNotifications}><IconBellFilled size={14}/></IconButton></div>
     <div className="inspector-tabs">{(["overview","pattern","verification","history"] as const).map(value=><Button key={value} variant="ghost" data-active={tab===value||undefined} onClick={()=>setTab(value)}>{value}</Button>)}</div>
     {tab==="pattern"&&<><InspectorSection title="PATTERN SNAPSHOT"><div className="pattern-snapshot"><LiveChart finding={finding} frozen={Boolean(finding.chart_url)} active={false} timeframeSeconds={(finding.detection_timeframe_seconds&&[15,30,60,300].includes(finding.detection_timeframe_seconds)?finding.detection_timeframe_seconds:15) as 15|30|60|300}/></div><KV k="Formation" v={(finding.leg_context||finding.stage).replaceAll("_"," ")}/><KV k="Detection" v={`${clock(finding.detected_at)} · ${money(finding.price)}`}/><KV k="Detection timeframe" v={`${finding.detection_timeframe_seconds||15}s`}/><KV k="Formation range" v={`${money(finding.formation_low)}–${money(finding.formation_high)}`}/><KV k="Trigger" v={money(finding.trigger_level||finding.breakout_level)}/><KV k="Invalidation" v={money(finding.invalidation_level)}/><KV k="Status" v={finding.urgency||"WATCH"}/></InspectorSection></>}
-    {tab==="verification"&&<><InspectorSection title="DETECTION VERDICT"><KV k="Detected" v="YES"/><KV k="Timestamp" v={new Date(finding.detected_at*1000).toLocaleString([], {timeZone:"America/New_York",hour12:true})+" ET"}/><KV k="Price / signal" v={`${money(finding.price)} · ${finding.stage}`}/><KV k="Engine" v={finding.engine_version||"Legacy"}/><div className="verification-grade"><span>{verification?.automatic_grade?"★".repeat(verification.automatic_grade)+"☆".repeat(5-verification.automatic_grade):"Outcome pending"}</span><b>{verification?.automatic_label||"PROVISIONAL"}</b></div>{verification?.grade_reasons?.map(reason=><div className="evidence-item" key={reason}><span className="evidence-dot"/>{reason}</div>)}</InspectorSection><InspectorSection title="OUTCOME COMPARISON"><div className="comparison-grid"><div><b>AT DETECTION</b><span>{money(finding.price)}</span><small>{finding.stage} · {finding.detection_timeframe_seconds||15}s</small></div><div><b>AFTERWARD</b><span>{pct(verification?.outcome?.max_15m_pct)}</span><small>15-minute maximum</small></div></div><KV k="+1 minute" v={pct(verification?.outcome?.max_1m_pct)}/><KV k="+5 minutes" v={pct(verification?.outcome?.max_5m_pct)}/><KV k="+15 minutes" v={pct(verification?.outcome?.max_15m_pct)}/><KV k="Session maximum" v={pct(verification?.outcome?.max_session_pct)}/></InspectorSection><InspectorSection title="DELIVERY VERDICT">{verification?.legacy_delivery_audit?<div className="notice-box">Legacy record — delivery auditing unavailable</div>:verification?.delivery.map(event=><div className="delivery-event" key={event.id}><span>{clock(event.event_at)}</span><b>{event.channel}</b><Badge data-tone={event.status.includes("failed")?"red":event.status==="provider_accepted"?"green":"blue"}>{event.status.replaceAll("_"," ")}</Badge></div>)}</InspectorSection><InspectorSection title="YOUR EVALUATION"><div className="star-picker">{[1,2,3,4,5].map(star=><Button key={star} variant="ghost" data-active={reviewGrade>=star||undefined} onClick={()=>setReviewGrade(star)}>★</Button>)}</div><Button className="w-full" onClick={()=>void saveFindingReview(finding.id,{user_grade:reviewGrade,user_agrees:reviewGrade===verification?.automatic_grade}).then(setVerification)}>Save evaluation</Button></InspectorSection></>}
+    {tab==="verification"&&<><InspectorSection title="DETECTION VERDICT"><KV k="Detected" v="YES"/><KV k="Timestamp" v={new Date(finding.detected_at*1000).toLocaleString([], {timeZone:"America/New_York",hour12:true})+" ET"}/><KV k="Price / signal" v={`${money(finding.price)} · ${finding.stage}`}/><KV k="Engine" v={finding.engine_version||"Legacy"}/><KV k="Source" v={(finding.hybrid_sources?.length?finding.hybrid_sources.join(" + "):finding.engine_source||"python").toUpperCase()}/>{finding.notification_reason&&<KV k="Why now" v={finding.notification_reason}/>}<div className="verification-grade"><span>{verification?.automatic_grade?"★".repeat(verification.automatic_grade)+"☆".repeat(5-verification.automatic_grade):"Outcome pending"}</span><b>{verification?.automatic_label||"PROVISIONAL"}</b></div>{verification?.grade_reasons?.map(reason=><div className="evidence-item" key={reason}><span className="evidence-dot"/>{reason}</div>)}</InspectorSection><InspectorSection title="OUTCOME COMPARISON"><div className="comparison-grid"><div><b>AT DETECTION</b><span>{money(finding.price)}</span><small>{finding.stage} · {finding.detection_timeframe_seconds||15}s</small></div><div><b>AFTERWARD</b><span>{pct(verification?.outcome?.max_15m_pct)}</span><small>15-minute maximum</small></div></div><KV k="+1 minute" v={pct(verification?.outcome?.max_1m_pct)}/><KV k="+5 minutes" v={pct(verification?.outcome?.max_5m_pct)}/><KV k="+15 minutes" v={pct(verification?.outcome?.max_15m_pct)}/><KV k="Session maximum" v={pct(verification?.outcome?.max_session_pct)}/></InspectorSection><InspectorSection title="DELIVERY VERDICT">{verification?.legacy_delivery_audit?<div className="notice-box">Legacy record — delivery auditing unavailable</div>:verification?.delivery.map(event=><div className="delivery-event" key={event.id}><span>{clock(event.event_at)}</span><b>{event.channel}</b><Badge data-tone={event.status.includes("failed")?"red":event.status==="provider_accepted"?"green":"blue"}>{event.status.replaceAll("_"," ")}</Badge></div>)}</InspectorSection><InspectorSection title="YOUR EVALUATION"><div className="star-picker">{[1,2,3,4,5].map(star=><Button key={star} variant="ghost" data-active={reviewGrade>=star||undefined} onClick={()=>setReviewGrade(star)}>★</Button>)}</div><Button className="w-full" onClick={()=>void saveFindingReview(finding.id,{user_grade:reviewGrade,user_agrees:reviewGrade===verification?.automatic_grade}).then(setVerification)}>Save evaluation</Button></InspectorSection></>}
     {tab==="history"&&<InspectorSection title="EVENT HISTORY"><KV k="Episode" v={`#${finding.episode_id??0}`}/><KV k="Selected event" v={`${finding.stage} · ${clock(finding.detected_at)}`}/><div className="notice-box">Historical events remain tied to this ticker and episode; selecting one restores its original chart context.</div></InspectorSection>}
     {tab==="overview"&&<>
     {(finding.recipe_score!=null||finding.lifecycle_phase)&&<InspectorSection title="PRE-IGNITION AUDIT"><KV k="Lifecycle" v={`${finding.lifecycle_phase||"UNCLASSIFIED"}${finding.shadow_mode?" · SHADOW":""}`}/><KV k="Recipe" v={`${finding.recipe_score??0}/10`}/><KV k="Timeliness" v={(finding.timeliness_label||"PENDING").replaceAll("_"," ")}/><KV k="Trigger distance" v={finding.trigger_distance_pct==null?"—":`${finding.trigger_distance_pct>=0?"":"+"}${Math.abs(finding.trigger_distance_pct).toFixed(2)}% ${finding.trigger_distance_pct>=0?"below":"through"}`}/><KV k="Base extension" v={finding.base_extension_at_detection_pct==null?"—":pct(finding.base_extension_at_detection_pct)}/>{finding.recipe_present?.map(item=><div className="evidence-item" key={`present-${item}`}><span className="evidence-dot"/>{item}</div>)}{finding.recipe_missing?.map(item=><div className="quality-rejection" key={`missing-${item}`}>Missing · {item}</div>)}{finding.shadow_mode&&<div className="notice-box">Shadow calibration only. This event is persisted and plotted but cannot send a notification.</div>}</InspectorSection>}
@@ -733,7 +738,7 @@ function NotificationSheet({ open, prefs, status, onClose, onChange, onSave, onT
   useEffect(()=>{if(open)void webPushState().then(setPushState).catch(error=>setPushState({supported:false,configured:false,permission:"default",subscribed:false,message:error instanceof Error?error.message:"Unable to inspect Web Push"}));},[open]);
   async function togglePush(){setPushBusy(true);try{setPushState(await (pushState?.subscribed?disableWebPush():enableWebPush()));}catch(error){setPushState(current=>({...current!,message:error instanceof Error?error.message:"Unable to update Web Push"}));}finally{setPushBusy(false);}}
   if(!open)return null;
-  const signals=["ACTIVITY_WATCH","REVERSAL_WATCH","FIRST_LEG_WATCH","PRE_IGNITION","FIRST_LEG","RECLAIM","EMA_RECLAIM","VWAP_RECLAIM","FIRST_PULLBACK","EARLY","SURGE","BREAKOUT","STAIRCASE","IGNITION","HALT_WATCH","HALT_PRESSURE","CATALYST_WATCH","CATALYST_ACTIVE","HALT","RESUME","REARM"];
+  const signals=["ACTIVITY_WATCH","REVERSAL_WATCH","FIRST_LEG_WATCH","PRE_IGNITION","AWAKENING","FIRST_LEG","RECLAIM","EMA_RECLAIM","VWAP_RECLAIM","FIRST_PULLBACK","EARLY","SURGE","BREAKOUT","STAIRCASE","IGNITION","HALT_WATCH","HALT_PRESSURE","CATALYST_WATCH","CATALYST_ACTIVE","HALT","RESUME","REARM"];
   const sessions=["overnight","premarket","regular","afterhours"];
   function setPlatform(platform:"windows"|"android"|"email",enabled:boolean){onChange({...prefs,platforms:{...prefs.platforms,[platform]:{...prefs.platforms[platform],enabled}} as NotificationPreferences["platforms"]});}
   return <div className="sheet-backdrop" onMouseDown={e=>{if(e.currentTarget===e.target)onClose();}}><aside className="notification-sheet">
@@ -746,12 +751,12 @@ function NotificationSheet({ open, prefs, status, onClose, onChange, onSave, onT
       </>}
       {notificationTab==="platforms"&&<>
       <div className="settings-section-title">PLATFORMS</div>
-      <PlatformRow title="Windows" subtitle="Native toast / tray client" enabled={prefs.platforms.windows.enabled} available={status?.notifications.windows_delivery_available!==false} onToggle={v=>setPlatform("windows",v)} onTest={()=>onTest("windows")}/>
-      <div className="settings-subgrid"><ToggleRow label="Sound preference" checked={prefs.platforms.windows.sound} onChange={v=>onChange({...prefs,platforms:{...prefs.platforms,windows:{...prefs.platforms.windows,sound:v}}})}/><ToggleRow label="Toast" checked={prefs.platforms.windows.toast} onChange={v=>onChange({...prefs,platforms:{...prefs.platforms,windows:{...prefs.platforms.windows,toast:v}}})}/><PriorityRow label="Scout priority" value={prefs.platforms.windows.priority} onChange={value=>onChange({...prefs,platforms:{...prefs.platforms,windows:{...prefs.platforms.windows,priority:value}}})}/></div>
-      <PlatformRow title="Android" subtitle={status?.notifications.android_delivery_configured===false?"Server channel not configured":"Push / native mobile delivery"} enabled={prefs.platforms.android.enabled} available={status?.notifications.android_delivery_configured!==false} onToggle={v=>setPlatform("android",v)} onTest={()=>onTest("android")}/>
-      <div className="push-enrollment"><div><b>Installed-app background alerts</b><small>{pushState?.message||"Checking this device…"}</small></div><Button disabled={pushBusy||!pushState?.supported||!pushState?.configured} onClick={()=>void togglePush()}>{pushBusy?"Working…":pushState?.subscribed?"Disable on this phone":"Enable on this phone"}</Button></div>
+      <div className="notice-box"><b>Primary alert channel: Scout → ntfy</b><div>Desktop OS toasts are suppressed by default to avoid duplicate alerts. The in-app Attention center remains active.</div></div>
+      <PlatformRow title="Windows native toast" subtitle="Paused in v6.5.2 · use Scout/ntfy to avoid duplicate OS alerts" enabled={false} available={false} onToggle={()=>{}} onTest={()=>onTest("windows")}/>
+      <PlatformRow title="Mobile / ntfy" subtitle={status?.notifications.android_delivery_configured===false?"ntfy server channel not configured":"Primary background alert channel"} enabled={prefs.platforms.android.enabled} available={status?.notifications.android_delivery_configured!==false} onToggle={v=>setPlatform("android",v)} onTest={()=>onTest("android")}/>
+      <div className="push-enrollment"><div><b>Optional PWA Web Push</b><small>{pushState?.message||"Checking this device…"} · leave disabled if ntfy is already installed on this phone.</small></div><Button disabled={pushBusy||!pushState?.supported||!pushState?.configured} onClick={()=>void togglePush()}>{pushBusy?"Working…":pushState?.subscribed?"Disable PWA push":"Enable PWA push"}</Button></div>
       <div className="settings-subgrid"><ToggleRow label="Sound preference" checked={prefs.platforms.android.sound} onChange={v=>onChange({...prefs,platforms:{...prefs.platforms,android:{...prefs.platforms.android,sound:v}}})}/><ToggleRow label="Vibration" checked={prefs.platforms.android.vibration} onChange={v=>onChange({...prefs,platforms:{...prefs.platforms,android:{...prefs.platforms.android,vibration:v}}})}/><PriorityRow label="Alert priority" value={prefs.platforms.android.priority} onChange={value=>onChange({...prefs,platforms:{...prefs.platforms,android:{...prefs.platforms.android,priority:value}}})}/></div>
-      <PlatformRow title="Email" subtitle={status?.notifications.email_delivery_configured===false?"Server delivery disabled":"Detailed Resend finding"} enabled={prefs.platforms.email.enabled} available={status?.notifications.email_delivery_configured!==false} onToggle={v=>setPlatform("email",v)} onTest={()=>onTest("email")}/>
+      <div className="settings-row"><div><b>Email / Resend</b><div className="text-[10px] scout-muted">Paused for this release. No setup is required.</div></div><Badge data-tone="blue">PAUSED</Badge></div>
       </>}
       {notificationTab==="signals"&&<>
       <div className="settings-section-title">SIGNALS</div>
@@ -819,7 +824,7 @@ function DesktopWorkbench(props:WorkbenchProps) {
 
   return <div className="desktop-workbench h-screen min-h-[680px] overflow-hidden">
     <header className="titlebar">
-      <div className="titlebar-left"><div className="title-brand"><IconTargetArrow size={15}/><b>SCOUT</b><span className="version-chip">v{CLIENT_VERSION}</span></div><Badge data-tone={connected?"green":"orange"}><span className="live-dot"/>{connectionLabel}</Badge>{status?.replay?.active&&<Badge data-tone="orange">SIMULATION</Badge>}{!status?.replay?.active&&status?.replay?.latest_run&&<Badge data-tone="blue" title={status.replay.latest_run.run_id}>REPLAY READY</Badge>}{status?.replay?.latest_run?.calibration&&<Badge data-tone="orange" title={`${status.replay.latest_run.calibration.successful_precursors}/${status.replay.latest_run.calibration.precursors} shadow precursors expanded · ${status.replay.latest_run.calibration.missed_expansions} missed expansions`}>CALIBRATED {status.replay.latest_run.calibration.precursors}</Badge>}{status?.version&&status.version!==CLIENT_VERSION&&<Badge data-tone="red">VERSION MISMATCH</Badge>}<button className="session-button">All sessions <IconChevronDown size={12}/></button></div>
+      <div className="titlebar-left"><div className="title-brand"><IconTargetArrow size={15}/><b>SCOUT</b><span className="version-chip">v{CLIENT_VERSION}</span></div><Badge data-tone={connected?"green":"orange"}><span className="live-dot"/>{connectionLabel}</Badge>{status?.replay?.active&&<Badge data-tone="orange">SIMULATION</Badge>}{!status?.replay?.active&&status?.replay?.latest_run&&<ScoutTooltip content={`Replay ${status.replay.latest_run.run_id}`}><span><Badge data-tone="blue">REPLAY READY</Badge></span></ScoutTooltip>}{status?.replay?.latest_run?.calibration&&<ScoutTooltip content={`${status.replay.latest_run.calibration.successful_precursors}/${status.replay.latest_run.calibration.precursors} shadow precursors expanded · ${status.replay.latest_run.calibration.missed_expansions} missed expansions`}><span><Badge data-tone="orange">CALIBRATED {status.replay.latest_run.calibration.precursors}</Badge></span></ScoutTooltip>}{status?.version&&status.version!==CLIENT_VERSION&&<Badge data-tone="red">VERSION MISMATCH</Badge>}{status?.hybrid?.rust_bridge?.enabled&&<Badge data-tone={status.hybrid.rust_bridge.running?"green":"red"}>{status.hybrid.rust_bridge.running?"HYBRID LIVE":"RUST DEGRADED"}</Badge>}<button className="session-button">All sessions <IconChevronDown size={12}/></button></div>
       <button className="command-center" aria-label="Search Scout" onClick={openCommand}><IconSearch size={13}/><span>Search ticker, catalyst, command…</span><kbd>Ctrl K</kbd></button>
       <div className="titlebar-right"><span>{status?.universe ?? "—"} symbols</span><span className={feedClass(status?.feeds.sip)}>SIP ●</span><span className={feedClass(status?.feeds.boats)}>BOATS ●</span><span className={feedClass(status?.feeds.news)}>NEWS ●</span><IconButton label="Toggle primary sidebar" active={showPrimary} onClick={()=>setShowPrimary(v=>!v)}><IconLayoutSidebarLeftCollapse size={15}/></IconButton><IconButton label="Toggle bottom panel" active={dockOpen} onClick={()=>setDockOpen(v=>!v)}><IconLayoutBottombarExpand size={15}/></IconButton><IconButton label="Toggle inspector" active={showInspector} onClick={()=>setShowInspector(v=>!v)}><IconLayoutSidebarRightCollapse size={15}/></IconButton><IconButton label="Notifications" onClick={openNotifications}><IconBellFilled size={14}/></IconButton></div>
     </header>
@@ -851,13 +856,13 @@ function MobileConsole(props:WorkbenchProps) {
   return <div className="mobile-console mobile-safe min-h-screen">
     <header className="mobile-header"><div className="flex h-12 items-center justify-between px-3"><div className="flex items-center gap-2"><IconTargetArrow size={17}/><b className="tracking-[.08em]">SCOUT</b><span className="version-chip">v{CLIENT_VERSION}</span><Badge data-tone={connected?"green":"orange"}><span className="live-dot"/>{connectionLabel}</Badge>{status?.replay?.active&&<Badge data-tone="orange">SIMULATION</Badge>}{!status?.replay?.active&&status?.replay?.latest_run&&<Badge data-tone="blue">REPLAY READY</Badge>}</div><div className="flex items-center gap-1"><IconButton label="Search" onClick={openCommand}><IconSearch size={18}/></IconButton><IconButton label="Notifications" onClick={openNotifications}><IconBellFilled size={16}/></IconButton></div></div><div className="mobile-status"><span>All sessions · {status?.universe ?? "—"}</span><span className={allFeedsLive?"feed-ok":status?"feed-bad":"feed-idle"}>SIP ● BOATS ● NEWS ●</span></div></header>
     <main className="pb-20">
-      {view==="radar" && <><div className="mobile-market-tabs">{marketIcons.map(item=><button key={item.id} aria-label={item.label} title={item.label} data-active={marketTab===item.id || undefined} onClick={()=>setMarketTab(item.id)}>{item.icon}{item.id==="halted"&&halts.length?<span className="mobile-dot-count">{halts.length}</span>:null}</button>)}</div>{marketTab==="radar"&&findings.map(f=><FindingRow key={f.id} finding={f} selected={selected?.id===f.id} onSelect={()=>setSelected(f)}/>)}{marketTab==="gainers"&&<GainerRows gainers={gainers} findings={findings} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}{marketTab==="halted"&&<HaltRows halts={halts} findings={findings} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}</>}
-      {view==="charts" && <div className="mobile-chart-page">{selected?<><div className="mobile-page-title"><div><b>{selected.ticker}</b><span className="metric ml-2">{money(selected.price)}</span></div><div className="flex gap-1">{Array.from(new Set([selected.stage,...(selected.signals||[])])).slice(0,3).map(signal=><EventIcon key={signal} event={signal}/>)}</div></div><div className="mobile-live-chart"><LiveChart finding={selected}/></div><div className="mobile-inspector"><Inspector finding={selected} onNotifications={openNotifications}/></div></>:<EmptyPane text="Select a ticker from Radar"/>}</div>}
+      {view==="radar" && <><div className="mobile-market-tabs">{marketIcons.map(item=><button key={item.id} aria-label={item.label} data-active={marketTab===item.id || undefined} onClick={()=>setMarketTab(item.id)}>{item.icon}{item.id==="halted"&&halts.length?<span className="mobile-dot-count">{halts.length}</span>:null}</button>)}</div>{marketTab==="radar"&&findings.map(f=><FindingRow key={f.id} finding={f} selected={selected?.id===f.id} onSelect={()=>{setSelected(f);setView("charts");}}/>)}{marketTab==="gainers"&&<GainerRows gainers={gainers} findings={findings} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}{marketTab==="halted"&&<HaltRows halts={halts} findings={findings} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}</>}
+      {view==="charts" && <div className="mobile-chart-page">{selected?<><div className="mobile-page-title"><div><b>{selected.ticker}</b><span className="metric ml-2">{money(selected.price)}</span></div><div className="flex gap-1">{Array.from(new Set([selected.stage,...(selected.signals||[])])).slice(0,3).map(signal=><EventIcon key={signal} event={signal}/>)}</div></div><div className="mobile-live-chart"><LiveChart finding={selected} onSelectFinding={setSelected}/></div><div className="mobile-inspector"><Inspector finding={selected} onNotifications={openNotifications}/></div></>:<EmptyPane text="Select a ticker from Radar"/>}</div>}
       {view==="catalysts" && <div className="mobile-page"><PanelTitle icon={<IconDiamondFilled size={12}/>} title="CATALYSTS"/><CatalystList catalysts={catalysts} findings={findings} onSelect={finding=>{setSelected(finding);setView("charts");}}/></div>}
       {view==="alerts" && <div className="mobile-page"><AttentionInbox items={attention} onOpen={item=>{setSelected(item.finding);void setAttentionStatus(item,'opened');setView('charts');}} onStatus={(item,next)=>void setAttentionStatus(item,next)}/></div>}
       {view==="settings" && <div className="mobile-page"><SettingsPanel connected={connected} onNotifications={openNotifications} scanner={scanner} saveScanner={saveScanner} scannerBusy={scannerBusy} scannerMessage={scannerMessage} backendVersion={status?.version}/></div>}
     </main>
-    <nav className="mobile-bottom-nav">{nav.map(item=><button key={item.id} aria-label={item.label} title={item.label} data-active={view===item.id || undefined} onClick={()=>setView(item.id)}>{item.icon}</button>)}</nav>
+    <nav className="mobile-bottom-nav">{nav.map(item=><button key={item.id} aria-label={item.label} data-active={view===item.id || undefined} onClick={()=>setView(item.id)}>{item.icon}</button>)}</nav>
     <OpportunitySpotlight items={attention} onOpen={item=>{setSelected(item.finding);void setAttentionStatus(item,'opened');setView('charts');}} onStatus={(item,next)=>void setAttentionStatus(item,next)}/>
   </div>;
 }
@@ -930,7 +935,7 @@ export default function ScoutPage() {
       const extra=await Promise.allSettled([getGainers(30),getNotificationPreferences(),getValidation(120),getTimeline(undefined,160)]);
       const [gainersResult,prefsResult,validationResult,timelineResult]=extra;
       if(gainersResult.status==='fulfilled')setGainers(gainersResult.value);
-      if(prefsResult.status==='fulfilled'){setPrefs(prefsResult.value);void syncNativeNotificationChannels(prefsResult.value);}
+      if(prefsResult.status==='fulfilled'){setPrefs(prefsResult.value);}
       if(validationResult.status==='fulfilled')setValidation(validationResult.value);
       if(timelineResult.status==='fulfilled')setTimeline(timelineResult.value);
     }
@@ -963,7 +968,6 @@ export default function ScoutPage() {
           const finding=envelope.payload as Finding;
           setFindings(current=>[finding,...current.filter(f=>f.ticker!==finding.ticker)].slice(0,120));
           setSelectedState(current=>current?.ticker===finding.ticker?finding:current);
-          queueNativeScoutNotification(finding,prefs);
         }
       }catch{}
       void refresh(false);
@@ -980,14 +984,13 @@ export default function ScoutPage() {
   async function savePrefs(){
     if(!API_CONFIGURED){setNotificationOpen(false);return;}
     setSaving(true);setTestMessage("");
-    try{const saved=await saveNotificationPreferences(prefs);setPrefs(saved);void syncNativeNotificationChannels(saved);setNotificationOpen(false);}catch(error){setTestMessage(error instanceof Error?error.message:"Unable to save preferences");}finally{setSaving(false);}
+    try{const saved=await saveNotificationPreferences(prefs);setPrefs(saved);setNotificationOpen(false);}catch(error){setTestMessage(error instanceof Error?error.message:"Unable to save preferences");}finally{setSaving(false);}
   }
 
   async function runNotificationTest(platform:"windows"|"android"|"email"){
     setTestMessage(`Testing ${platform}…`);
     try{
       if(platform!=="email"){
-        if(platform==="android") await syncNativeNotificationChannels(prefs);
         const native=await sendNativeTestNotification(platform);
         if(native){setTestMessage(`${platform[0].toUpperCase()+platform.slice(1)} native test sent.`);return;}
       }
@@ -1017,11 +1020,11 @@ export default function ScoutPage() {
     scanner,saveScanner:applyScannerRange,scannerBusy,scannerMessage,attention,setAttentionStatus,
   };
 
-  return <div className="scout-shell">
+  return <TooltipProvider><div className="scout-shell">
     <PwaRuntime/>
     <DesktopWorkbench {...props}/>
     <MobileConsole {...props}/>
     <NotificationSheet open={notificationOpen} prefs={prefs} status={status} onClose={()=>setNotificationOpen(false)} onChange={setPrefs} onSave={savePrefs} onTest={runNotificationTest} saving={saving} testMessage={testMessage}/>
     <CommandPalette open={commandOpen} query={commandQuery} onQuery={setCommandQuery} findings={visibleFindings} catalysts={catalysts} gainers={visibleGainers} onClose={()=>{setCommandOpen(false);setCommandQuery("");}} onSelect={setSelected}/>
-  </div>;
+  </div></TooltipProvider>;
 }

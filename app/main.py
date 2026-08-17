@@ -13,6 +13,7 @@ from .db import Store
 from .dispatch import Dispatcher
 from .events import EventHub
 from .market import MarketWatcher
+from .hybrid import RustPerceptionBridge
 
 
 async def serve_http(store: Store, market: MarketWatcher, events: EventHub, catalysts: CatalystWatcher, dispatcher: Dispatcher):
@@ -34,6 +35,9 @@ async def amain():
     events = EventHub()
     dispatcher = Dispatcher(store, events)
     market = MarketWatcher(store, dispatcher, events)
+    rust_bridge = RustPerceptionBridge(market.handle_rust_candidate)
+    market.set_rust_bridge(rust_bridge)
+    await rust_bridge.start()
     dispatcher.set_snapshot_provider(market.snapshot)
     dispatcher.set_finding_listener(market.register_finding)
     catalysts = CatalystWatcher(store, dispatcher, market)
@@ -65,14 +69,18 @@ async def amain():
         except NotImplementedError:
             pass
     waiter = asyncio.create_task(stop.wait())
-    done, _ = await asyncio.wait(tasks + [waiter], return_when=asyncio.FIRST_COMPLETED)
-    if waiter not in done:
-        for d in done:
-            if d.exception():
-                raise d.exception()
-    for t in tasks:
-        t.cancel()
-    await asyncio.gather(*tasks, return_exceptions=True)
+    try:
+        done, _ = await asyncio.wait(tasks + [waiter], return_when=asyncio.FIRST_COMPLETED)
+        if waiter not in done:
+            for d in done:
+                if d.exception():
+                    raise d.exception()
+    finally:
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await rust_bridge.stop()
+        store.close()
 
 
 def main():

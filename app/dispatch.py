@@ -35,7 +35,7 @@ class Dispatcher:
     def _stage_priority(stage: str) -> int:
         return {
             "ACTIVITY_WATCH": 0, "REVERSAL_WATCH": 0, "FIRST_LEG_WATCH": 0, "PRE_IGNITION": 0,
-            "FIRST_LEG": 3, "EARLY": 2, "STAIRCASE": 2, "EMA_RECLAIM": 3,
+            "AWAKENING": 2, "FIRST_LEG": 3, "EARLY": 2, "STAIRCASE": 2, "EMA_RECLAIM": 3,
             "SURGE": 3, "VWAP_RECLAIM": 3, "BREAKOUT": 4,
             "REARM": 5, "IGNITION": 6, "CATALYST": 7, "CATALYST_WATCH": 7, "CATALYST_ACTIVE": 9,
             "RESUME": 8, "HALT": 9,
@@ -54,7 +54,7 @@ class Dispatcher:
         queue = self._ntfy_queue if channel == "ntfy" else self._webpush_queue if channel == "webpush" else self._email_queue
         # Stage urgency must dominate evidence score. A score-10 watch can no
         # longer crowd out a FIRST_LEG, ignition, catalyst, or halt.
-        item = (-self._stage_priority(f.stage), -int(f.score), next(self._sequence), finding_id, f, prefs)
+        item = (-self._stage_priority(f.stage), -int(f.hybrid_score or 0), -int(f.score), next(self._sequence), finding_id, f, prefs)
         try:
             queue.put_nowait(item)
             await asyncio.to_thread(self.store.record_delivery, finding_id, channel, "queued")
@@ -65,7 +65,7 @@ class Dispatcher:
     async def _notification_worker(self, channel: str) -> None:
         queue = self._ntfy_queue if channel == "ntfy" else self._webpush_queue if channel == "webpush" else self._email_queue
         while True:
-            _, _, _, finding_id, f, prefs = await queue.get()
+            _, _, _, _, finding_id, f, prefs = await queue.get()
             try:
                 await asyncio.to_thread(self.store.record_delivery, finding_id, channel, "sending")
                 if channel == "webpush":
@@ -83,6 +83,19 @@ class Dispatcher:
             finally:
                 queue.task_done()
 
+    @staticmethod
+    def _merge_notification_context(preferred: Finding, other: Finding) -> Finding:
+        preferred.hybrid_sources = sorted(set((preferred.hybrid_sources or [preferred.engine_source]) + (other.hybrid_sources or [other.engine_source])))
+        preferred.hybrid_score = max(preferred.hybrid_score, other.hybrid_score)
+        if len(preferred.hybrid_sources) > 1:
+            preferred.hybrid_score = min(100, preferred.hybrid_score + 10)
+            preferred.notification_reason = "dual-engine confirmation with lifecycle priority"
+        preferred.signals = list(dict.fromkeys([*(preferred.signals or []), *(other.signals or [])]))
+        for evidence in other.evidence or []:
+            if evidence not in preferred.evidence:
+                preferred.evidence.append(evidence)
+        return preferred
+
     async def _flush_consolidated_ntfy(self, ticker: str) -> None:
         pending = self._pending_ntfy.get(ticker)
         delay = settings.first_leg_notification_consolidation_seconds if pending and pending[1].stage == "FIRST_LEG" else settings.notification_consolidation_seconds
@@ -99,8 +112,13 @@ class Dispatcher:
             return
         ticker = f.ticker.upper()
         current = self._pending_ntfy.get(ticker)
-        if current is None or self._stage_priority(f.stage) >= self._stage_priority(current[1].stage):
+        if current is None:
             self._pending_ntfy[ticker] = (finding_id, f, prefs)
+        elif self._stage_priority(f.stage) >= self._stage_priority(current[1].stage):
+            self._pending_ntfy[ticker] = (finding_id, self._merge_notification_context(f, current[1]), prefs)
+        else:
+            current_id, current_finding, current_prefs = current
+            self._pending_ntfy[ticker] = (current_id, self._merge_notification_context(current_finding, f), current_prefs)
         if ticker not in self._pending_ntfy_tasks:
             self._pending_ntfy_tasks[ticker] = asyncio.create_task(
                 self._flush_consolidated_ntfy(ticker), name=f"scout-ntfy-consolidate-{ticker}"
@@ -120,15 +138,26 @@ class Dispatcher:
             return
         ticker = f.ticker.upper()
         current = self._pending_email.get(ticker)
-        if current is None or self._stage_priority(f.stage) >= self._stage_priority(current[1].stage):
+        if current is None:
             self._pending_email[ticker] = (finding_id, f, prefs)
+        elif self._stage_priority(f.stage) >= self._stage_priority(current[1].stage):
+            self._pending_email[ticker] = (finding_id, self._merge_notification_context(f, current[1]), prefs)
+        else:
+            current_id, current_finding, current_prefs = current
+            self._pending_email[ticker] = (current_id, self._merge_notification_context(current_finding, f), current_prefs)
         if ticker not in self._pending_email_tasks:
             self._pending_email_tasks[ticker] = asyncio.create_task(
                 self._flush_consolidated_email(ticker), name=f"scout-email-consolidate-{ticker}"
             )
 
     def notification_queue_status(self) -> dict[str, int]:
-        return {"webpush": self._webpush_queue.qsize(), "ntfy": self._ntfy_queue.qsize(), "resend": self._email_queue.qsize()}
+        return {
+            "webpush": self._webpush_queue.qsize(),
+            "ntfy": self._ntfy_queue.qsize(),
+            "resend": self._email_queue.qsize(),
+            "pending_ntfy_consolidations": len(self._pending_ntfy),
+            "pending_email_consolidations": len(self._pending_email),
+        }
 
     def set_snapshot_provider(self, provider: Callable[[str], tuple[list[Bucket], Bucket | None] | None]) -> None:
         self.snapshot_provider = provider

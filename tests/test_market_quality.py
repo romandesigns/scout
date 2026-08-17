@@ -43,10 +43,13 @@ from app.preferences import DEFAULT_NOTIFICATION_PREFERENCES
 class MarketQualityTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        store = Store(Path(self.tmp.name) / "scout.db")
-        self.market = MarketWatcher(store, Dispatcher(store))
+        self.store = Store(Path(self.tmp.name) / "scout.db")
+        self.stores = [self.store]
+        self.market = MarketWatcher(self.store, Dispatcher(self.store))
 
     def tearDown(self):
+        for store in reversed(self.stores):
+            store.close()
         self.tmp.cleanup()
 
     def state(self, closes, *, current_volume=4000, current_trades=20):
@@ -108,6 +111,7 @@ class MarketQualityTests(unittest.TestCase):
 
     def test_validation_keeps_immature_horizons_pending_and_floors_max(self):
         store = Store(Path(self.tmp.name) / "validation.db")
+        self.stores.append(store)
         finding = Finding(
             ticker="TEST", stage="BREAKOUT", detected_at=time.time(), price=2, score=8,
             vol_ratio_15s=8, vol_ratio_30s=6, change_60s_pct=2, extension_pct=1,
@@ -124,6 +128,7 @@ class MarketQualityTests(unittest.TestCase):
 
     def test_scanner_range_is_persisted(self):
         store = Store(Path(self.tmp.name) / "range.db")
+        self.stores.append(store)
         self.assertEqual(store.get_scanner_settings(), {"min_price": 0.15, "max_price": 10.0})
         store.set_scanner_settings(2.0, 8.0)
         self.assertEqual(store.get_scanner_settings(), {"min_price": 2.0, "max_price": 8.0})
@@ -163,6 +168,7 @@ class MarketQualityTests(unittest.TestCase):
 
     def test_pre_ignition_recipe_round_trips_as_shadow_evidence(self):
         store = Store(Path(self.tmp.name) / "pre-ignition.db")
+        self.stores.append(store)
         finding = Finding(
             ticker="TEST", stage="PRE_IGNITION", detected_at=1_800_000_000, price=2.01, score=7,
             vol_ratio_15s=2.2, vol_ratio_30s=1.8, change_60s_pct=.2, extension_pct=.35,
@@ -183,6 +189,7 @@ class MarketQualityTests(unittest.TestCase):
 
     def test_attention_inbox_groups_episode_and_preserves_user_status(self):
         store = Store(Path(self.tmp.name) / "attention.db")
+        self.stores.append(store)
         base = dict(
             ticker="TEST", detected_at=1_800_000_000, price=2.02, score=9,
             vol_ratio_15s=7, vol_ratio_30s=5, change_60s_pct=1.2, extension_pct=1,
@@ -203,6 +210,7 @@ class MarketQualityTests(unittest.TestCase):
 
     def test_verification_combines_detection_delivery_and_user_grade(self):
         store = Store(Path(self.tmp.name) / "verification.db")
+        self.stores.append(store)
         finding = Finding(
             ticker="TEST", stage="EARLY", detected_at=1_800_000_000, price=2.00, score=9,
             vol_ratio_15s=8, vol_ratio_30s=6, change_60s_pct=2, extension_pct=1,
@@ -235,6 +243,7 @@ class MarketQualityTests(unittest.TestCase):
 
     def test_web_push_subscription_lifecycle(self):
         store = Store(Path(self.tmp.name) / "push.db")
+        self.stores.append(store)
         store.upsert_web_push_subscription("https://push.example/subscription", "public-key", "auth-secret", "Scout test")
         self.assertEqual(store.web_push_subscription_count(), 1)
         self.assertEqual(store.list_web_push_subscriptions()[0]["p256dh"], "public-key")

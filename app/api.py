@@ -53,8 +53,10 @@ class ScoutApi:
         self.dispatcher = dispatcher
 
     async def health(self, request: web.Request) -> web.Response:
+        hybrid_status = self.market.rust_bridge.status() if self.market.rust_bridge else {"enabled": False, "running": False}
         return web.json_response({
             "ok": True,
+            "hybrid_ready": (not hybrid_status.get("enabled", False)) or bool(hybrid_status.get("running", False)),
             "app": settings.app_name,
             "version": settings.app_version,
             "feed": settings.alpaca_feed,
@@ -65,7 +67,9 @@ class ScoutApi:
             "states": len(self.market.states),
             "halts": len(self.market.current_halts()),
             "dashboard": settings.web_out_dir.exists(),
-            "engines": ["PRE_IGNITION_SHADOW", "FIRST_LEG", "EARLY", "SURGE", "BREAKOUT", "STAIRCASE", "IGNITION", "REVERSAL_WATCH", "EMA_RECLAIM", "VWAP_RECLAIM", "REARM", "HALT_PRESSURE", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT"],
+            "hybrid": hybrid_status,
+            "feed_health": self.market.feed_health,
+            "engines": ["RUST_PRIMARY", "AWAKENING", "PRE_IGNITION_SHADOW", "FIRST_LEG", "EARLY", "SURGE", "BREAKOUT", "STAIRCASE", "IGNITION", "REVERSAL_WATCH", "EMA_RECLAIM", "VWAP_RECLAIM", "REARM", "HALT_PRESSURE", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT"],
         })
 
     async def status(self, request: web.Request) -> web.Response:
@@ -80,6 +84,7 @@ class ScoutApi:
                 "sip": bool(self.market.ws),
                 "boats": bool(self.market.overnight_ws) if settings.enable_overnight_stream else None,
                 "news": bool(getattr(self.catalyst_watcher, "news_connected", False)) if self.catalyst_watcher is not None else True,
+                "health": self.market.feed_health,
             },
             "universe": len(self.market._desired),
             "sip_subscribed": len(self.market.subscribed),
@@ -107,7 +112,15 @@ class ScoutApi:
                 "queues": self.dispatcher.notification_queue_status() if self.dispatcher else {},
                 "delivery": delivery_health(),
             },
+            "hybrid": {
+                "rust_bridge": self.market.rust_bridge.status() if self.market.rust_bridge else {"enabled": False, "running": False},
+                "precision": await asyncio.to_thread(self.store.hybrid_precision_stats, settings.hybrid_precision_threshold_pct),
+                "notification_latency": await asyncio.to_thread(self.store.notification_latency_stats),
+                "architecture": "rust-primary+python-specialist",
+            },
             "engines": {
+                "rust_primary": bool(self.market.rust_bridge and self.market.rust_bridge.enabled),
+                "awakening": True,
                 "early": True,
                 "first_leg": True,
                 "surge": True,

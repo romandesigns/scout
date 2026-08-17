@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 
 type InstallPrompt=Event&{prompt:()=>Promise<void>;userChoice:Promise<{outcome:string}>};
 
@@ -35,7 +36,7 @@ export function PwaRuntime(){
   if(online&&!install&&!update)return null;
   return <div className="pwa-runtime" role="status">
     {!online&&<span>Offline shell · live market data paused</span>}
-    {install&&<button onClick={()=>{void install.prompt();void install.userChoice.finally(()=>setInstall(null));}}>Install Scout</button>}
-    {update&&<button onClick={()=>{navigator.serviceWorker.addEventListener("controllerchange",()=>window.location.reload(),{once:true});update.postMessage({type:"SKIP_WAITING"});}}>Update available</button>}
+    {install&&<Button className="h-6 px-1.5 text-[10px]" onClick={()=>{void install.prompt();void install.userChoice.finally(()=>setInstall(null));}}>Install Scout</Button>}
+    {update&&<Button className="h-6 px-1.5 text-[10px]" onClick={()=>{navigator.serviceWorker.addEventListener("controllerchange",()=>window.location.reload(),{once:true});update.postMessage({type:"SKIP_WAITING"});}}>Update available</Button>}
   </div>;
 }

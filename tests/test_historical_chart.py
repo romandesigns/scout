@@ -64,6 +64,7 @@ class HistoricalChartTests(unittest.TestCase):
             }
             with patch("app.market.requests.get", return_value=_Response(trades)):
                 payload = watcher.historical_snapshot_sync("TEST", 1786717808, 15)
+            store.close()
         self.assertEqual("historical-trades", payload["source"])
         self.assertEqual(2, len(payload["buckets"]))
         self.assertEqual(2.08, payload["buckets"][0]["high"])
@@ -80,6 +81,7 @@ class HistoricalChartTests(unittest.TestCase):
             ]
             with patch("app.market.requests.get", side_effect=pages) as request:
                 payload = watcher.historical_snapshot_sync("TEST", 1786717808, 15)
+            store.close()
         self.assertEqual(2, request.call_count)
         self.assertEqual(2, payload["historical_pages"])
         self.assertEqual(2, payload["historical_trade_count"])

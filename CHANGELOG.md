@@ -1,5 +1,29 @@
 # Changelog
 
+## 6.5.2
+
+- Standardized Scout interaction overlays on shadcn/Base UI primitives; removed native browser select and native title-tooltip usage from event/icon controls.
+- Added collision-safe tooltips so toolbar hints do not cover adjacent controls.
+- Added professional chart pan/zoom/pinch/Fit interactions, compact crosshair OHLCV, clustered finding markers, and marker-to-Inspector selection.
+- Mobile Radar selection now routes directly to the chart/Inspector workflow.
+- Consolidated external alert policy around ntfy; automatic Tauri finding toasts are no longer queued from the live event stream.
+- PWA Web Push remains optional/opt-in and uses the existing VAPID subscription infrastructure.
+- Resend/email is paused and missing Resend configuration is no longer emitted as an operational warning.
+- Synchronized release identity across VERSION, web package, service worker, and Tauri metadata.
+
+## 6.5.0 — Rust-primary hybrid production integration
+
+- Wires the frozen v6.4.13 Rust perception core into the live Scout market stream through a bounded, restartable JSONL subprocess bridge.
+- Uses the same Rust state machine for replay and production streaming to prevent calibration/live drift.
+- Retains Python as specialist/context/lifecycle intelligence and preserves Python-only candidates.
+- Adds persisted engine provenance, hybrid episode keys, hybrid confidence, and human-readable notification reasons.
+- Adds actionable `AWAKENING` notifications for clean Rust dormant-to-active transitions while keeping non-actionable Rust candidates shadow/silent.
+- Deduplicates simultaneous Rust/Python notifications while preserving the higher lifecycle-stage alert and merging evidence.
+- Exposes live merged-stream outcome precision, notification delivery latency, Rust bridge health, and SIP/BOATS recovery telemetry.
+- Restores same-session lifecycle state after backend restart to reduce duplicate alerts.
+- Adds hybrid runtime status to the PWA and a repeatable v6.5.0 validation script.
+- Does not retune the v6.4.13 detector thresholds.
+
 ## 6.4.0 — Historical Replay Calibration
 
 - Builds bounded multi-session datasets from Alpaca historical bars and trades.

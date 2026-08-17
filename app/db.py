@@ -67,6 +67,11 @@ FINDING_COLUMNS: list[tuple[str, str]] = [
     ("base_extension_at_detection_pct", "REAL"),
     ("timeliness_label", "TEXT"),
     ("precursor_finding_id", "INTEGER"),
+    ("engine_source", "TEXT"),
+    ("hybrid_sources_json", "TEXT"),
+    ("hybrid_score", "INTEGER"),
+    ("hybrid_key", "TEXT"),
+    ("notification_reason", "TEXT"),
 ]
 
 
@@ -78,6 +83,24 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=NORMAL")
         self._init()
+
+    def close(self) -> None:
+        """Close the SQLite connection deterministically.
+
+        SQLite files cannot be removed while a connection is open on Windows,
+        so tests, replay jobs, and application shutdown must explicitly release
+        the handle instead of relying on garbage collection.
+        """
+        with self.lock:
+            db, self.db = self.db, None
+            if db is not None:
+                db.close()
+
+    def __enter__(self) -> "Store":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
 
     def _ensure_columns(self, table: str, columns: list[tuple[str, str]]) -> None:
         existing = {str(row[1]) for row in self.db.execute(f"PRAGMA table_info({table})").fetchall()}
@@ -305,8 +328,9 @@ class Store:
                     episode_id,reversal_phase,reversal_low,reversal_drawdown_pct,leg_context,ross_match,ross_score,
                     detection_timeframe_seconds,formation_start_at,formation_end_at,formation_low,formation_high,trigger_level,
                     invalidation_level,halt_pressure_score,urgency,engine_version,lifecycle_phase,shadow_mode,recipe_score,
-                    recipe_present_json,recipe_missing_json,trigger_distance_pct,base_extension_at_detection_pct,timeliness_label,precursor_finding_id
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    recipe_present_json,recipe_missing_json,trigger_distance_pct,base_extension_at_detection_pct,timeliness_label,precursor_finding_id,
+                    engine_source,hybrid_sources_json,hybrid_score,hybrid_key,notification_reason
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     f.ticker, f.stage, int(f.detected_at), f.price, f.score, f.vol_ratio_15s, f.vol_ratio_30s,
@@ -327,7 +351,8 @@ class Store:
                     f.trigger_level, f.invalidation_level, f.halt_pressure_score, f.urgency, f.engine_version,
                     f.lifecycle_phase, int(f.shadow_mode), f.recipe_score, json.dumps(f.recipe_present or []),
                     json.dumps(f.recipe_missing or []), f.trigger_distance_pct, f.base_extension_at_detection_pct,
-                    f.timeliness_label, f.precursor_finding_id,
+                    f.timeliness_label, f.precursor_finding_id, f.engine_source, json.dumps(f.hybrid_sources or []),
+                    f.hybrid_score, f.hybrid_key, f.notification_reason,
                 ),
             )
             self.db.commit()
@@ -341,7 +366,7 @@ class Store:
         return {
             "FIRST_LEG": 100, "CATALYST": 95, "CATALYST_WATCH": 95, "CATALYST_ACTIVE": 110, "HALT": 95,
             "EMA_RECLAIM": 85, "VWAP_RECLAIM": 85, "REARM": 85,
-            "IGNITION": 80, "BREAKOUT": 75, "SURGE": 70, "EARLY": 60,
+            "IGNITION": 80, "BREAKOUT": 75, "SURGE": 70, "AWAKENING": 65, "EARLY": 60,
         }.get(stage, 0)
 
     def _upsert_attention_locked(self, finding_id: int, f: Finding) -> None:
@@ -512,6 +537,11 @@ class Store:
         except Exception:
             item["candidate_profile"] = {}
             item.pop("candidate_profile_json", None)
+        try:
+            item["hybrid_sources"] = json.loads(item.pop("hybrid_sources_json") or "[]")
+        except Exception:
+            item["hybrid_sources"] = []
+            item.pop("hybrid_sources_json", None)
         for source, target in (("recipe_present_json", "recipe_present"), ("recipe_missing_json", "recipe_missing")):
             try:
                 item[target] = json.loads(item.pop(source) or "[]")
@@ -547,6 +577,7 @@ class Store:
             "episode_id","reversal_phase","reversal_low","reversal_drawdown_pct","leg_context","ross_match","ross_score",
             "detection_timeframe_seconds","formation_start_at","formation_end_at","formation_low","formation_high","trigger_level","invalidation_level","halt_pressure_score","urgency","engine_version",
             "lifecycle_phase","shadow_mode","recipe_score","recipe_present_json","recipe_missing_json","trigger_distance_pct","base_extension_at_detection_pct","timeliness_label","precursor_finding_id",
+            "engine_source","hybrid_sources_json","hybrid_score","hybrid_key","notification_reason",
         ]
         sql = f"SELECT {','.join(keys)} FROM findings {clause} ORDER BY detected_at DESC LIMIT ?"
         params.append(limit)
@@ -566,10 +597,82 @@ class Store:
             "episode_id","reversal_phase","reversal_low","reversal_drawdown_pct","leg_context","ross_match","ross_score",
             "detection_timeframe_seconds","formation_start_at","formation_end_at","formation_low","formation_high","trigger_level","invalidation_level","halt_pressure_score","urgency","engine_version",
             "lifecycle_phase","shadow_mode","recipe_score","recipe_present_json","recipe_missing_json","trigger_distance_pct","base_extension_at_detection_pct","timeliness_label","precursor_finding_id",
+            "engine_source","hybrid_sources_json","hybrid_score","hybrid_key","notification_reason",
         ]
         with self.lock:
             row = self.db.execute(f"SELECT {','.join(keys)} FROM findings WHERE id=?", (int(finding_id),)).fetchone()
         return self._decode_finding(row, keys) if row else None
+
+    def notification_latency_stats(self, limit: int = 500) -> dict[str, Any]:
+        """Recent provider-accepted latency measured from detection to delivery."""
+        with self.lock:
+            rows = self.db.execute(
+                """
+                SELECT d.channel, (d.event_at - f.detected_at) AS latency
+                FROM notification_delivery_events d
+                JOIN findings f ON f.id=d.finding_id
+                WHERE d.status='provider_accepted' AND d.event_at>=f.detected_at
+                ORDER BY d.event_at DESC LIMIT ?
+                """,
+                (max(1, min(5000, int(limit))),),
+            ).fetchall()
+        grouped: dict[str, list[float]] = {}
+        for channel, latency in rows:
+            grouped.setdefault(str(channel), []).append(float(latency or 0))
+        result: dict[str, Any] = {}
+        for channel, values in grouped.items():
+            ordered = sorted(values)
+            result[channel] = {
+                "samples": len(ordered),
+                "median_seconds": ordered[len(ordered)//2],
+                "p95_seconds": ordered[min(len(ordered)-1, int(len(ordered)*0.95))],
+                "max_seconds": ordered[-1],
+            }
+        return result
+
+    def hybrid_precision_stats(self, threshold_pct: float = 5.0) -> dict[str, Any]:
+        """Outcome precision for persisted hybrid episode keys.
+
+        This becomes exact for the live merged stream because all Rust/Python
+        findings in the same lifecycle episode share a hybrid_key. Episodes
+        without a completed 15-minute outcome are excluded from the denominator.
+        """
+        with self.lock:
+            rows = self.db.execute(
+                """
+                WITH ranked AS (
+                    SELECT f.id, f.hybrid_key, f.detected_at,
+                           ROW_NUMBER() OVER (PARTITION BY f.hybrid_key ORDER BY f.detected_at, f.id) AS rn
+                    FROM findings f
+                    WHERE f.hybrid_key IS NOT NULL
+                )
+                SELECT r.hybrid_key,
+                       (SELECT GROUP_CONCAT(DISTINCT COALESCE(f2.engine_source,'python'))
+                          FROM findings f2 WHERE f2.hybrid_key=r.hybrid_key),
+                       o.max_15m_pct
+                FROM ranked r
+                JOIN outcomes o ON o.finding_id=r.id
+                WHERE r.rn=1 AND o.max_15m_pct IS NOT NULL
+                """
+            ).fetchall()
+        completed = len(rows)
+        successful = sum(1 for _, _, max_pct in rows if float(max_pct or 0) >= float(threshold_pct))
+        source_counts = {"rust": 0, "python": 0, "both": 0}
+        for _, sources, _ in rows:
+            parts = set(str(sources or "").split(","))
+            if {"rust", "python"}.issubset(parts):
+                source_counts["both"] += 1
+            elif "rust" in parts:
+                source_counts["rust"] += 1
+            elif "python" in parts:
+                source_counts["python"] += 1
+        return {
+            "threshold_pct": float(threshold_pct),
+            "completed_episodes": completed,
+            "successful_episodes": successful,
+            "precision": round(successful / completed, 6) if completed else None,
+            "source_mix": source_counts,
+        }
 
     def list_episodes(self, limit: int = 100) -> list[dict[str, Any]]:
         """Return one current lifecycle row per ticker, newest episode first."""

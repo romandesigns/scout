@@ -19,6 +19,7 @@ from .dispatch import Dispatcher
 from .indicators import ema, pct_change, median_positive
 from .models import Bucket, Finding, SymbolState
 from .events import EventHub
+from .hybrid import HybridMemory, RustPerceptionBridge
 
 log = logging.getLogger("scout.market")
 ET = ZoneInfo(settings.timezone)
@@ -128,11 +129,160 @@ class MarketWatcher:
         self.universe.max_price = self.max_price
         stored_profile = self.store.get_notification_preferences().get("market_quality_profile", settings.quality_profile)
         self.quality_profile = stored_profile if stored_profile in {"strict", "balanced", "permissive"} else "balanced"
+        self.rust_bridge: RustPerceptionBridge | None = None
+        self.hybrid_memory = HybridMemory(
+            settings.hybrid_merge_window_seconds, settings.hybrid_dedupe_seconds,
+            episode_gap_seconds=settings.hybrid_episode_gap_seconds,
+        )
+        self._restored_symbols: set[str] = set()
+        self.feed_health: dict[str, dict[str, object]] = {
+            "sip": {"connected": False, "connections": 0, "disconnects": 0, "last_connected_at": None, "last_disconnected_at": None, "last_error": None},
+            "boats": {"connected": False, "connections": 0, "disconnects": 0, "last_connected_at": None, "last_disconnected_at": None, "last_error": None},
+        }
 
     def set_quality_profile(self, profile: str) -> None:
         normalized = str(profile).lower()
         if normalized in {"strict", "balanced", "permissive"}:
             self.quality_profile = normalized
+
+    def set_rust_bridge(self, bridge: RustPerceptionBridge | None) -> None:
+        self.rust_bridge = bridge
+
+    @staticmethod
+    def _stage_rank(stage: str) -> int:
+        return {
+            "PRE_IGNITION": 0, "AWAKENING": 1, "FIRST_LEG": 1, "EARLY": 2, "STAIRCASE": 2,
+            "SURGE": 3, "EMA_RECLAIM": 3, "VWAP_RECLAIM": 3, "BREAKOUT": 4,
+            "IGNITION": 5, "REARM": 5, "HALT_PRESSURE": 7,
+        }.get(str(stage).upper(), 0)
+
+    async def _restore_state_from_store(self, state: SymbolState, ts: float) -> None:
+        symbol = state.symbol.upper()
+        if symbol in self._restored_symbols:
+            return
+        self._restored_symbols.add(symbol)
+        rows = await asyncio.to_thread(self.store.latest_findings_by_ticker, [symbol])
+        latest = rows.get(symbol)
+        if not latest or trading_session_key(float(latest.get("detected_at") or 0)) != trading_session_key(ts):
+            return
+        stage = str(latest.get("stage") or "")
+        detected_at = float(latest.get("detected_at") or 0)
+        state.episode_id = int(latest.get("episode_id") or 0)
+        state.last_alert_at = detected_at
+        state.last_stage_rank = self._stage_rank(stage)
+        if stage:
+            state.last_stage_alert_at[stage] = detected_at
+        hybrid_key = str(latest.get("hybrid_key") or "")
+        if hybrid_key:
+            try:
+                sequence = int(hybrid_key.rsplit(":", 1)[1])
+                self.hybrid_memory.restore_episode(symbol, trading_session_key(detected_at), sequence, detected_at)
+            except (TypeError, ValueError):
+                pass
+        if stage in {"PRE_IGNITION", "AWAKENING"}:
+            state.pre_ignition_finding_id = int(latest.get("id") or 0) or None
+        if stage in {"BREAKOUT", "IGNITION", "REARM"}:
+            state.continuation_peak = float(latest.get("price") or 0) or None
+            state.continuation_started_at = detected_at
+        if stage in {"EMA_RECLAIM", "VWAP_RECLAIM", "REARM"}:
+            state.reversal_phase = "REARM" if stage == "REARM" else "RECLAIM"
+            state.reversal_low = latest.get("reversal_low")
+            state.reversal_started_at = detected_at
+        log.info("restored %s lifecycle stage=%s episode=%s from persisted state", symbol, stage, state.episode_id)
+
+    def _hybrid_key(self, state: SymbolState, ts: float) -> str:
+        return self.hybrid_memory.episode_key(state.symbol, trading_session_key(ts), ts)
+
+    def _decorate_hybrid(self, finding: Finding, source: str) -> None:
+        sources = self.hybrid_memory.observe(finding.ticker, source, finding.detected_at, finding.stage)
+        finding.engine_source = source
+        finding.hybrid_sources = sources
+        finding.hybrid_score = min(100, int(finding.quality_score) + (15 if len(sources) > 1 else 0))
+        if not finding.hybrid_key:
+            state = self.states.get(finding.ticker.upper())
+            finding.hybrid_key = self._hybrid_key(state, finding.detected_at) if state else f"{finding.ticker}:{trading_session_key(finding.detected_at)}:0"
+        if len(sources) > 1:
+            finding.evidence.append("Rust + Python candidate agreement")
+            finding.notification_reason = "dual-engine confirmation"
+        elif source == "rust":
+            finding.notification_reason = "Rust primary perception detected dormant-to-active transition"
+        else:
+            if finding.stage == "REARM" or "FIRST_PULLBACK" in (finding.signals or []):
+                finding.notification_reason = "controlled pullback held and bullish momentum reaccelerated"
+            elif finding.stage in {"FIRST_LEG", "EARLY"}:
+                finding.notification_reason = "Python specialist confirmed an early bullish release"
+            elif finding.stage in {"BREAKOUT", "SURGE", "IGNITION"}:
+                finding.notification_reason = "bullish lifecycle escalated into confirmed expansion"
+            else:
+                finding.notification_reason = finding.notification_reason or "Python specialist intelligence"
+
+    async def handle_rust_candidate(self, candidate: dict) -> None:
+        symbol = str(candidate.get("ticker") or "").upper()
+        if not symbol:
+            return
+        state = self.states.get(symbol)
+        if not state:
+            return
+        detected_at = float(candidate.get("detected_at") or time.time())
+        metrics = self._metrics(state, detected_at)
+        if not metrics or not (self.min_price <= float(metrics["price"]) <= self.max_price):
+            return
+        recipe_score = int(candidate.get("recipe_score") or 0)
+        actionable = bool(
+            metrics.get("full_warmup")
+            and metrics.get("quality_label") == "CLEAN"
+            and recipe_score >= 7
+            and float(metrics.get("vol15") or 0) >= settings.hybrid_awakening_min_vol_ratio
+            and (float(metrics.get("change15") or 0) >= settings.hybrid_awakening_min_change_15s_pct or float(metrics.get("change5") or 0) > 0)
+        )
+        duplicate = self.hybrid_memory.rust_notification_is_duplicate(symbol, detected_at)
+        stage = "AWAKENING" if actionable and not duplicate else "PRE_IGNITION"
+        catalyst = self.store.recent_catalyst(symbol)
+        evidence = [
+            "Rust primary perception qualified an early structural transition",
+            *[str(x) for x in candidate.get("recipe_present") or []][:6],
+        ]
+        signals = [stage]
+        if catalyst:
+            signals.append("CATALYST")
+        finding = Finding(
+            ticker=symbol, stage=stage, detected_at=detected_at, price=float(metrics["price"]),
+            score=min(10, max(recipe_score, int(metrics.get("score") or 0))),
+            vol_ratio_15s=float(metrics.get("vol15") or 0), vol_ratio_30s=float(metrics.get("vol30") or 0),
+            change_60s_pct=float(metrics.get("change60") or 0), extension_pct=float(metrics.get("extension") or 0),
+            ema9=metrics.get("ema9"), ema21=metrics.get("ema21"), ema9_slope=metrics.get("ema9_slope"),
+            vwap=metrics.get("vwap"), above_vwap=bool(metrics.get("above_vwap")), quiet_break=bool(metrics.get("quiet_break")),
+            evidence=evidence, change_3s_pct=metrics.get("change3"), change_5s_pct=metrics.get("change5"),
+            change_10s_pct=metrics.get("change10"), change_15s_pct=metrics.get("change15"), change_30s_pct=metrics.get("change30"),
+            accel_15s_pp=metrics.get("accel15_pp"), dollar_volume_15s=metrics.get("dollar15"), dollar_volume_30s=metrics.get("dollar30"),
+            trades_15s=metrics.get("trades15"), trades_30s=metrics.get("trades30"), breakout_level=metrics.get("breakout_level"),
+            breakout_window=metrics.get("breakout_window"), signals=signals, quality_label=str(metrics.get("quality_label") or "DEVELOPING"),
+            quality_score=int(metrics.get("quality_score") or 0), actionable_rank=("A" if actionable and catalyst else "B" if actionable else "C"),
+            rejection_reasons=list(metrics.get("rejection_reasons") or []), directional_efficiency=metrics.get("directional_efficiency"),
+            active_bucket_ratio=metrics.get("active_bucket_ratio"), direction_reversals=metrics.get("direction_reversals"), previous_close=metrics.get("previous_close"),
+            gap_pct=metrics.get("gap_pct"), day_volume=metrics.get("day_volume"), projected_session_volume=metrics.get("projected_session_volume"),
+            volume_rate_per_minute=metrics.get("volume_rate_per_minute"), candidate_profile=dict(metrics.get("candidate_profile") or {}),
+            episode_id=state.episode_id, detection_timeframe_seconds=settings.bucket_seconds, formation_start_at=detected_at - 300.0,
+            formation_end_at=detected_at, formation_low=metrics.get("base_low"), formation_high=metrics.get("base_high"),
+            trigger_level=float(metrics.get("micro_resistance") or 0) or None, invalidation_level=metrics.get("base_low"),
+            urgency=("EARLY" if actionable else "WATCH"), engine_version=settings.app_version, lifecycle_phase=("AWAKENING" if actionable else "ARMED"),
+            shadow_mode=not actionable or duplicate, recipe_score=recipe_score,
+            recipe_present=[str(x) for x in candidate.get("recipe_present") or []], recipe_missing=[str(x) for x in candidate.get("recipe_missing") or []],
+            trigger_distance_pct=float(candidate.get("trigger_distance_pct") or 0),
+            base_extension_at_detection_pct=float(candidate.get("base_extension_pct") or 0),
+            timeliness_label="EARLY", precursor_finding_id=state.pre_ignition_finding_id,
+            hybrid_key=self._hybrid_key(state, detected_at),
+        )
+        if catalyst:
+            finding.catalyst_headline, finding.catalyst_category, finding.catalyst_score, finding.catalyst_url, _ = catalyst
+            finding.candidate_profile["catalyst"] = min(100, int((finding.catalyst_score or 0) * 20))
+        self._decorate_hybrid(finding, "rust")
+        snap = self.snapshot(symbol)
+        buckets, current = snap if snap else ([], None)
+        finding_id = await self.dispatcher.emit(finding, buckets, current)
+        if state.pre_ignition_finding_id is None:
+            state.pre_ignition_finding_id = finding_id
+        log.info("%s %s $%.4f rust_recipe=%d actionable=%s duplicate=%s", stage, symbol, finding.price, recipe_score, actionable, duplicate)
 
     async def apply_scanner_range(self, minimum: float, maximum: float) -> dict[str, float]:
         value = await asyncio.to_thread(self.store.set_scanner_settings, minimum, maximum)
@@ -1152,6 +1302,7 @@ class MarketWatcher:
                     trigger_distance_pct=trigger_distance_pct, base_extension_at_detection_pct=base_extension,
                     timeliness_label=timeliness_label(base_extension),
                 )
+                self._decorate_hybrid(watch, "python")
                 snap = self.snapshot(s.symbol)
                 buckets, current = snap if snap else ([], None)
                 s.pre_ignition_finding_id = await self.dispatcher.emit(watch, buckets, current)
@@ -1259,6 +1410,7 @@ class MarketWatcher:
                     s.reversal_low = m["reversal_low"]
                     s.reversal_peak = m["price"]
                     s.reversal_started_at = ts
+                self._decorate_hybrid(watch, "python")
                 snap = self.snapshot(s.symbol)
                 buckets, current = snap if snap else ([], None)
                 await self.dispatcher.emit(watch, buckets, current)
@@ -1510,6 +1662,7 @@ class MarketWatcher:
             s.continuation_pullback_low = None
             s.continuation_started_at = ts
 
+        self._decorate_hybrid(f, "python")
         snap = self.snapshot(s.symbol)
         buckets, current = snap if snap else ([], None)
         await self.dispatcher.emit(f, buckets, current)
@@ -1522,7 +1675,7 @@ class MarketWatcher:
             m["dollar30"], m["trades30"],
         )
 
-    async def _handle_trade(self, msg: dict, subscribed: set[str]):
+    async def _handle_trade(self, msg: dict, subscribed: set[str], feed: str = "sip"):
         symbol = str(msg.get("S", "")).upper()
         if not symbol:
             return
@@ -1545,8 +1698,11 @@ class MarketWatcher:
         s = self.states.get(symbol)
         if s is None:
             s = self.states[symbol] = SymbolState(symbol, settings.bucket_seconds, settings.keep_buckets)
+            await self._restore_state_from_store(s, ts)
         s.update_trade(ts, price, size, session_date)
         self._update_outcomes(symbol, ts, price)
+        if self.rust_bridge:
+            self.rust_bridge.submit_trade(symbol=symbol, ts=ts, price=price, size=size, feed=feed)
 
         now_ms = ts * 1000
         if now_ms - s.last_fast_eval_at * 1000 >= settings.fast_path_min_interval_ms:
@@ -1574,6 +1730,12 @@ class MarketWatcher:
                     else:
                         self.ws = ws
                     subscribed.clear()
+                    health_key = "boats" if overnight else "sip"
+                    health = self.feed_health[health_key]
+                    health["connected"] = True
+                    health["connections"] = int(health["connections"] or 0) + 1
+                    health["last_connected_at"] = int(time.time())
+                    health["last_error"] = None
                     await ws.send(json.dumps({"action": "auth", "key": settings.alpaca_key, "secret": settings.alpaca_secret}))
                     raw = await asyncio.wait_for(ws.recv(), timeout=10)
                     log.info("Alpaca %s auth: %s", label, str(raw)[:250])
@@ -1592,12 +1754,21 @@ class MarketWatcher:
                             if not isinstance(msg, dict):
                                 continue
                             if msg.get("T") == "t":
-                                await self._handle_trade(msg, subscribed)
+                                await self._handle_trade(msg, subscribed, settings.alpaca_overnight_feed if overnight else settings.alpaca_feed)
                             elif msg.get("T") == "s" and not overnight:
                                 await self._handle_status(msg)
+                    raise ConnectionError(f"Alpaca {label} stream closed")
             except asyncio.CancelledError:
+                health_key = "boats" if overnight else "sip"
+                self.feed_health[health_key]["connected"] = False
                 raise
-            except Exception:
+            except Exception as exc:
+                health_key = "boats" if overnight else "sip"
+                health = self.feed_health[health_key]
+                health["connected"] = False
+                health["disconnects"] = int(health["disconnects"] or 0) + 1
+                health["last_disconnected_at"] = int(time.time())
+                health["last_error"] = str(exc)
                 if overnight:
                     self.overnight_ws = None
                     self.overnight_subscribed.clear()

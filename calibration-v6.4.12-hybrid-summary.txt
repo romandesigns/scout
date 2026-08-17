@@ -1,0 +1,2532 @@
+{
+  "mode": "SIMULATION",
+  "python_engine": "2.0.0",
+  "rust_engine": "scout-market-replay-rust/0.1.0",
+  "raw": {
+    "tolerance_seconds": 5.0,
+    "python_precursors": 53581,
+    "rust_precursors": 199790,
+    "matched": 15946,
+    "missing_in_rust": 37635,
+    "extra_in_rust": 183844,
+    "parity_rate": 0.067162
+  },
+  "episodes": {
+    "gap_seconds": 900.0,
+    "match_seconds": 900.0,
+    "python": {
+      "episodes": 4068,
+      "detections": 53581,
+      "detections_per_episode_median": 1.0,
+      "detections_per_episode_p95": 68.0,
+      "detections_per_episode_max": 397.0,
+      "duration_seconds_median": 0.0,
+      "duration_seconds_p95": 9970.816067,
+      "followed_by_expansion": 549,
+      "false_arm_episodes": 3519,
+      "episode_success_rate": 0.134956,
+      "lead_seconds_median": 339.007784
+    },
+    "rust": {
+      "episodes": 7833,
+      "detections": 199790,
+      "detections_per_episode_median": 1.0,
+      "detections_per_episode_p95": 37.0,
+      "detections_per_episode_max": 2547.0,
+      "duration_seconds_median": 0.0,
+      "duration_seconds_p95": 7245.274909,
+      "followed_by_expansion": 1321,
+      "false_arm_episodes": 6512,
+      "episode_success_rate": 0.168645,
+      "lead_seconds_median": 337.797168
+    },
+    "matched": 1903,
+    "missing_in_rust": 2165,
+    "extra_in_rust": 5930,
+    "parity_rate": 0.190338,
+    "timing": {
+      "rust_earlier": 917,
+      "python_earlier": 664,
+      "near_simultaneous": 322
+    },
+    "absolute_first_detection_delta_seconds_median": 272.253941,
+    "absolute_first_detection_delta_seconds_p95": 822.146088
+  },
+  "outcomes": {
+    "available": true,
+    "definition": {
+      "expansion_pct": 2.0,
+      "horizon_seconds": 900.0,
+      "base_window_seconds": 300.0
+    },
+    "objective_expansion_episodes": 4892
+  },
+  "event_significance": {
+    "available": true,
+    "profiles": {
+      "plus_2pct_15m": {
+        "definition": {
+          "threshold_pct": 2.0,
+          "horizon_seconds": 900.0
+        },
+        "detector_episode_precision": {
+          "python": {
+            "episodes": 4068,
+            "successful": 335,
+            "false_arms": 3733,
+            "success_rate": 0.08235,
+            "lead_seconds_median": 285.401768,
+            "lead_seconds_p95": 832.759853,
+            "max_favorable_pct_median": 0.2567275
+          },
+          "rust": {
+            "episodes": 7833,
+            "successful": 920,
+            "false_arms": 6913,
+            "success_rate": 0.117452,
+            "lead_seconds_median": 276.295348,
+            "lead_seconds_p95": 812.926413,
+            "max_favorable_pct_median": 0.257069
+          }
+        },
+        "objective_move_coverage": {
+          "objective_moves": 4892,
+          "sessions_with_objective_moves": 21,
+          "python": {
+            "caught": 549,
+            "recall": 0.112224,
+            "recall_ci95": [
+              0.103682,
+              0.121375
+            ],
+            "lead_seconds_median": 339.0077838897705,
+            "lead_seconds_p95": 847.3296849727631
+          },
+          "rust": {
+            "caught": 1321,
+            "recall": 0.270033,
+            "recall_ci95": [
+              0.257775,
+              0.282651
+            ],
+            "lead_seconds_median": 337.7971680164337,
+            "lead_seconds_p95": 814.3495440483093
+          },
+          "classification": {
+            "both": 189,
+            "rust_only": 1132,
+            "python_only": 360,
+            "neither": 3211
+          },
+          "timing_when_both": {
+            "rust_earlier": 86,
+            "python_earlier": 54,
+            "near_simultaneous": 49
+          },
+          "paired_statistics": {
+            "mcnemar_exact_two_sided_p": 0.0,
+            "rust_minus_python_recall": {
+              "difference": 0.157809,
+              "ci95_low": 0.143295,
+              "ci95_high": 0.172527,
+              "iterations": 10000
+            },
+            "rust_minus_python_lead_seconds": {
+              "paired_moves": 189,
+              "median_rust_minus_python_seconds": 0.0,
+              "ci95_low": 0.0,
+              "ci95_high": 9.605189,
+              "iterations": 10000
+            },
+            "interpretation": "For recall difference, positive favors Rust. For Rust-minus-Python lead seconds among moves caught by both, negative means Rust detected earlier."
+          },
+          "session_breakdown": [
+            {
+              "session_date": "2026-07-17",
+              "objective_moves": 255,
+              "both": 9,
+              "rust_only": 60,
+              "python_only": 11,
+              "neither": 175
+            },
+            {
+              "session_date": "2026-07-20",
+              "objective_moves": 276,
+              "both": 11,
+              "rust_only": 64,
+              "python_only": 19,
+              "neither": 182
+            },
+            {
+              "session_date": "2026-07-21",
+              "objective_moves": 274,
+              "both": 10,
+              "rust_only": 54,
+              "python_only": 30,
+              "neither": 180
+            },
+            {
+              "session_date": "2026-07-22",
+              "objective_moves": 181,
+              "both": 6,
+              "rust_only": 34,
+              "python_only": 18,
+              "neither": 123
+            },
+            {
+              "session_date": "2026-07-23",
+              "objective_moves": 216,
+              "both": 10,
+              "rust_only": 44,
+              "python_only": 14,
+              "neither": 148
+            },
+            {
+              "session_date": "2026-07-24",
+              "objective_moves": 216,
+              "both": 11,
+              "rust_only": 42,
+              "python_only": 14,
+              "neither": 149
+            },
+            {
+              "session_date": "2026-07-27",
+              "objective_moves": 224,
+              "both": 11,
+              "rust_only": 66,
+              "python_only": 11,
+              "neither": 136
+            },
+            {
+              "session_date": "2026-07-28",
+              "objective_moves": 175,
+              "both": 9,
+              "rust_only": 41,
+              "python_only": 13,
+              "neither": 112
+            },
+            {
+              "session_date": "2026-07-29",
+              "objective_moves": 252,
+              "both": 9,
+              "rust_only": 60,
+              "python_only": 26,
+              "neither": 157
+            },
+            {
+              "session_date": "2026-07-30",
+              "objective_moves": 173,
+              "both": 7,
+              "rust_only": 42,
+              "python_only": 12,
+              "neither": 112
+            },
+            {
+              "session_date": "2026-07-31",
+              "objective_moves": 247,
+              "both": 5,
+              "rust_only": 62,
+              "python_only": 15,
+              "neither": 165
+            },
+            {
+              "session_date": "2026-08-03",
+              "objective_moves": 314,
+              "both": 5,
+              "rust_only": 85,
+              "python_only": 18,
+              "neither": 206
+            },
+            {
+              "session_date": "2026-08-04",
+              "objective_moves": 235,
+              "both": 9,
+              "rust_only": 53,
+              "python_only": 14,
+              "neither": 159
+            },
+            {
+              "session_date": "2026-08-05",
+              "objective_moves": 247,
+              "both": 11,
+              "rust_only": 42,
+              "python_only": 18,
+              "neither": 176
+            },
+            {
+              "session_date": "2026-08-06",
+              "objective_moves": 193,
+              "both": 6,
+              "rust_only": 35,
+              "python_only": 14,
+              "neither": 138
+            },
+            {
+              "session_date": "2026-08-07",
+              "objective_moves": 281,
+              "both": 7,
+              "rust_only": 70,
+              "python_only": 18,
+              "neither": 186
+            },
+            {
+              "session_date": "2026-08-10",
+              "objective_moves": 287,
+              "both": 19,
+              "rust_only": 72,
+              "python_only": 21,
+              "neither": 175
+            },
+            {
+              "session_date": "2026-08-11",
+              "objective_moves": 196,
+              "both": 4,
+              "rust_only": 48,
+              "python_only": 20,
+              "neither": 124
+            },
+            {
+              "session_date": "2026-08-12",
+              "objective_moves": 163,
+              "both": 8,
+              "rust_only": 39,
+              "python_only": 17,
+              "neither": 99
+            },
+            {
+              "session_date": "2026-08-13",
+              "objective_moves": 290,
+              "both": 14,
+              "rust_only": 72,
+              "python_only": 16,
+              "neither": 188
+            },
+            {
+              "session_date": "2026-08-14",
+              "objective_moves": 197,
+              "both": 8,
+              "rust_only": 47,
+              "python_only": 21,
+              "neither": 121
+            }
+          ]
+        },
+        "rust_only_successful_discoveries": {
+          "count": 721
+        },
+        "python_only_successful_discoveries": {
+          "count": 175
+        }
+      },
+      "plus_5pct_15m": {
+        "definition": {
+          "threshold_pct": 5.0,
+          "horizon_seconds": 900.0
+        },
+        "detector_episode_precision": {
+          "python": {
+            "episodes": 4068,
+            "successful": 73,
+            "false_arms": 3995,
+            "success_rate": 0.017945,
+            "lead_seconds_median": 386.722586,
+            "lead_seconds_p95": 845.832507,
+            "max_favorable_pct_median": 0.2567275
+          },
+          "rust": {
+            "episodes": 7833,
+            "successful": 214,
+            "false_arms": 7619,
+            "success_rate": 0.02732,
+            "lead_seconds_median": 304.205953,
+            "lead_seconds_p95": 801.635246,
+            "max_favorable_pct_median": 0.257069
+          }
+        },
+        "objective_move_coverage": {
+          "objective_moves": 1422,
+          "sessions_with_objective_moves": 21,
+          "python": {
+            "caught": 133,
+            "recall": 0.09353,
+            "recall_ci95": [
+              0.079472,
+              0.109778
+            ],
+            "lead_seconds_median": 351.6803789138794,
+            "lead_seconds_p95": 844.1873979568481
+          },
+          "rust": {
+            "caught": 319,
+            "recall": 0.224332,
+            "recall_ci95": [
+              0.20341,
+              0.246739
+            ],
+            "lead_seconds_median": 323.4111409187317,
+            "lead_seconds_p95": 805.1165890693665
+          },
+          "classification": {
+            "both": 41,
+            "rust_only": 278,
+            "python_only": 92,
+            "neither": 1011
+          },
+          "timing_when_both": {
+            "rust_earlier": 18,
+            "python_earlier": 12,
+            "near_simultaneous": 11
+          },
+          "paired_statistics": {
+            "mcnemar_exact_two_sided_p": 0.0,
+            "rust_minus_python_recall": {
+              "difference": 0.130802,
+              "ci95_low": 0.104782,
+              "ci95_high": 0.156118,
+              "iterations": 10000
+            },
+            "rust_minus_python_lead_seconds": {
+              "paired_moves": 41,
+              "median_rust_minus_python_seconds": 0.0,
+              "ci95_low": 0.0,
+              "ci95_high": 100.916922,
+              "iterations": 10000
+            },
+            "interpretation": "For recall difference, positive favors Rust. For Rust-minus-Python lead seconds among moves caught by both, negative means Rust detected earlier."
+          },
+          "session_breakdown": [
+            {
+              "session_date": "2026-07-17",
+              "objective_moves": 61,
+              "both": 1,
+              "rust_only": 13,
+              "python_only": 4,
+              "neither": 43
+            },
+            {
+              "session_date": "2026-07-20",
+              "objective_moves": 91,
+              "both": 2,
+              "rust_only": 17,
+              "python_only": 7,
+              "neither": 65
+            },
+            {
+              "session_date": "2026-07-21",
+              "objective_moves": 110,
+              "both": 1,
+              "rust_only": 18,
+              "python_only": 10,
+              "neither": 81
+            },
+            {
+              "session_date": "2026-07-22",
+              "objective_moves": 40,
+              "both": 0,
+              "rust_only": 5,
+              "python_only": 1,
+              "neither": 34
+            },
+            {
+              "session_date": "2026-07-23",
+              "objective_moves": 70,
+              "both": 3,
+              "rust_only": 16,
+              "python_only": 7,
+              "neither": 44
+            },
+            {
+              "session_date": "2026-07-24",
+              "objective_moves": 66,
+              "both": 3,
+              "rust_only": 15,
+              "python_only": 2,
+              "neither": 46
+            },
+            {
+              "session_date": "2026-07-27",
+              "objective_moves": 39,
+              "both": 2,
+              "rust_only": 10,
+              "python_only": 0,
+              "neither": 27
+            },
+            {
+              "session_date": "2026-07-28",
+              "objective_moves": 36,
+              "both": 2,
+              "rust_only": 7,
+              "python_only": 1,
+              "neither": 26
+            },
+            {
+              "session_date": "2026-07-29",
+              "objective_moves": 70,
+              "both": 0,
+              "rust_only": 16,
+              "python_only": 8,
+              "neither": 46
+            },
+            {
+              "session_date": "2026-07-30",
+              "objective_moves": 34,
+              "both": 1,
+              "rust_only": 5,
+              "python_only": 1,
+              "neither": 27
+            },
+            {
+              "session_date": "2026-07-31",
+              "objective_moves": 78,
+              "both": 2,
+              "rust_only": 13,
+              "python_only": 9,
+              "neither": 54
+            },
+            {
+              "session_date": "2026-08-03",
+              "objective_moves": 119,
+              "both": 1,
+              "rust_only": 28,
+              "python_only": 2,
+              "neither": 88
+            },
+            {
+              "session_date": "2026-08-04",
+              "objective_moves": 45,
+              "both": 3,
+              "rust_only": 8,
+              "python_only": 1,
+              "neither": 33
+            },
+            {
+              "session_date": "2026-08-05",
+              "objective_moves": 98,
+              "both": 6,
+              "rust_only": 9,
+              "python_only": 4,
+              "neither": 79
+            },
+            {
+              "session_date": "2026-08-06",
+              "objective_moves": 61,
+              "both": 1,
+              "rust_only": 7,
+              "python_only": 2,
+              "neither": 51
+            },
+            {
+              "session_date": "2026-08-07",
+              "objective_moves": 93,
+              "both": 1,
+              "rust_only": 22,
+              "python_only": 5,
+              "neither": 65
+            },
+            {
+              "session_date": "2026-08-10",
+              "objective_moves": 92,
+              "both": 6,
+              "rust_only": 19,
+              "python_only": 10,
+              "neither": 57
+            },
+            {
+              "session_date": "2026-08-11",
+              "objective_moves": 46,
+              "both": 1,
+              "rust_only": 6,
+              "python_only": 5,
+              "neither": 34
+            },
+            {
+              "session_date": "2026-08-12",
+              "objective_moves": 28,
+              "both": 2,
+              "rust_only": 7,
+              "python_only": 4,
+              "neither": 15
+            },
+            {
+              "session_date": "2026-08-13",
+              "objective_moves": 102,
+              "both": 2,
+              "rust_only": 28,
+              "python_only": 5,
+              "neither": 67
+            },
+            {
+              "session_date": "2026-08-14",
+              "objective_moves": 43,
+              "both": 1,
+              "rust_only": 9,
+              "python_only": 4,
+              "neither": 29
+            }
+          ]
+        },
+        "rust_only_successful_discoveries": {
+          "count": 169
+        },
+        "python_only_successful_discoveries": {
+          "count": 40
+        }
+      },
+      "plus_10pct_30m": {
+        "definition": {
+          "threshold_pct": 10.0,
+          "horizon_seconds": 1800.0
+        },
+        "detector_episode_precision": {
+          "python": {
+            "episodes": 4068,
+            "successful": 38,
+            "false_arms": 4030,
+            "success_rate": 0.009341,
+            "lead_seconds_median": 837.9165555,
+            "lead_seconds_p95": 1710.541937,
+            "max_favorable_pct_median": 0.401606
+          },
+          "rust": {
+            "episodes": 7833,
+            "successful": 92,
+            "false_arms": 7741,
+            "success_rate": 0.011745,
+            "lead_seconds_median": 775.6480815,
+            "lead_seconds_p95": 1724.906672,
+            "max_favorable_pct_median": 0.485437
+          }
+        },
+        "objective_move_coverage": {
+          "objective_moves": 322,
+          "sessions_with_objective_moves": 21,
+          "python": {
+            "caught": 45,
+            "recall": 0.139752,
+            "recall_ci95": [
+              0.106112,
+              0.181885
+            ],
+            "lead_seconds_median": 787.1833920478821,
+            "lead_seconds_p95": 1663.332650899887
+          },
+          "rust": {
+            "caught": 108,
+            "recall": 0.335404,
+            "recall_ci95": [
+              0.286044,
+              0.388644
+            ],
+            "lead_seconds_median": 810.2366015911102,
+            "lead_seconds_p95": 1744.083261013031
+          },
+          "classification": {
+            "both": 15,
+            "rust_only": 93,
+            "python_only": 30,
+            "neither": 184
+          },
+          "timing_when_both": {
+            "rust_earlier": 9,
+            "python_earlier": 4,
+            "near_simultaneous": 2
+          },
+          "paired_statistics": {
+            "mcnemar_exact_two_sided_p": 1e-08,
+            "rust_minus_python_recall": {
+              "difference": 0.195652,
+              "ci95_low": 0.13354,
+              "ci95_high": 0.26087,
+              "iterations": 10000
+            },
+            "rust_minus_python_lead_seconds": {
+              "paired_moves": 15,
+              "median_rust_minus_python_seconds": 174.378614,
+              "ci95_low": -238.80247,
+              "ci95_high": 453.529052,
+              "iterations": 10000
+            },
+            "interpretation": "For recall difference, positive favors Rust. For Rust-minus-Python lead seconds among moves caught by both, negative means Rust detected earlier."
+          },
+          "session_breakdown": [
+            {
+              "session_date": "2026-07-17",
+              "objective_moves": 9,
+              "both": 0,
+              "rust_only": 2,
+              "python_only": 1,
+              "neither": 6
+            },
+            {
+              "session_date": "2026-07-20",
+              "objective_moves": 22,
+              "both": 1,
+              "rust_only": 4,
+              "python_only": 4,
+              "neither": 13
+            },
+            {
+              "session_date": "2026-07-21",
+              "objective_moves": 22,
+              "both": 0,
+              "rust_only": 5,
+              "python_only": 1,
+              "neither": 16
+            },
+            {
+              "session_date": "2026-07-22",
+              "objective_moves": 8,
+              "both": 0,
+              "rust_only": 2,
+              "python_only": 0,
+              "neither": 6
+            },
+            {
+              "session_date": "2026-07-23",
+              "objective_moves": 11,
+              "both": 1,
+              "rust_only": 2,
+              "python_only": 0,
+              "neither": 8
+            },
+            {
+              "session_date": "2026-07-24",
+              "objective_moves": 17,
+              "both": 1,
+              "rust_only": 5,
+              "python_only": 1,
+              "neither": 10
+            },
+            {
+              "session_date": "2026-07-27",
+              "objective_moves": 6,
+              "both": 1,
+              "rust_only": 1,
+              "python_only": 1,
+              "neither": 3
+            },
+            {
+              "session_date": "2026-07-28",
+              "objective_moves": 11,
+              "both": 0,
+              "rust_only": 5,
+              "python_only": 1,
+              "neither": 5
+            },
+            {
+              "session_date": "2026-07-29",
+              "objective_moves": 24,
+              "both": 1,
+              "rust_only": 10,
+              "python_only": 3,
+              "neither": 10
+            },
+            {
+              "session_date": "2026-07-30",
+              "objective_moves": 9,
+              "both": 1,
+              "rust_only": 3,
+              "python_only": 1,
+              "neither": 4
+            },
+            {
+              "session_date": "2026-07-31",
+              "objective_moves": 18,
+              "both": 0,
+              "rust_only": 4,
+              "python_only": 3,
+              "neither": 11
+            },
+            {
+              "session_date": "2026-08-03",
+              "objective_moves": 29,
+              "both": 1,
+              "rust_only": 15,
+              "python_only": 0,
+              "neither": 13
+            },
+            {
+              "session_date": "2026-08-04",
+              "objective_moves": 3,
+              "both": 0,
+              "rust_only": 0,
+              "python_only": 0,
+              "neither": 3
+            },
+            {
+              "session_date": "2026-08-05",
+              "objective_moves": 35,
+              "both": 2,
+              "rust_only": 8,
+              "python_only": 4,
+              "neither": 21
+            },
+            {
+              "session_date": "2026-08-06",
+              "objective_moves": 15,
+              "both": 0,
+              "rust_only": 4,
+              "python_only": 0,
+              "neither": 11
+            },
+            {
+              "session_date": "2026-08-07",
+              "objective_moves": 19,
+              "both": 0,
+              "rust_only": 9,
+              "python_only": 1,
+              "neither": 9
+            },
+            {
+              "session_date": "2026-08-10",
+              "objective_moves": 20,
+              "both": 3,
+              "rust_only": 7,
+              "python_only": 2,
+              "neither": 8
+            },
+            {
+              "session_date": "2026-08-11",
+              "objective_moves": 9,
+              "both": 0,
+              "rust_only": 1,
+              "python_only": 2,
+              "neither": 6
+            },
+            {
+              "session_date": "2026-08-12",
+              "objective_moves": 3,
+              "both": 0,
+              "rust_only": 0,
+              "python_only": 0,
+              "neither": 3
+            },
+            {
+              "session_date": "2026-08-13",
+              "objective_moves": 24,
+              "both": 2,
+              "rust_only": 4,
+              "python_only": 4,
+              "neither": 14
+            },
+            {
+              "session_date": "2026-08-14",
+              "objective_moves": 8,
+              "both": 1,
+              "rust_only": 2,
+              "python_only": 1,
+              "neither": 4
+            }
+          ]
+        },
+        "rust_only_successful_discoveries": {
+          "count": 73
+        },
+        "python_only_successful_discoveries": {
+          "count": 24
+        }
+      },
+      "plus_20pct_60m": {
+        "definition": {
+          "threshold_pct": 20.0,
+          "horizon_seconds": 3600.0
+        },
+        "detector_episode_precision": {
+          "python": {
+            "episodes": 4068,
+            "successful": 20,
+            "false_arms": 4048,
+            "success_rate": 0.004916,
+            "lead_seconds_median": 1608.5575925,
+            "lead_seconds_p95": 3268.443699,
+            "max_favorable_pct_median": 0.626959
+          },
+          "rust": {
+            "episodes": 7833,
+            "successful": 55,
+            "false_arms": 7778,
+            "success_rate": 0.007022,
+            "lead_seconds_median": 1868.003076,
+            "lead_seconds_p95": 3435.807476,
+            "max_favorable_pct_median": 0.74813
+          }
+        },
+        "objective_move_coverage": {
+          "objective_moves": 80,
+          "sessions_with_objective_moves": 17,
+          "python": {
+            "caught": 19,
+            "recall": 0.2375,
+            "recall_ci95": [
+              0.157647,
+              0.341408
+            ],
+            "lead_seconds_median": 2084.6211171150208,
+            "lead_seconds_p95": 3303.1146829128265
+          },
+          "rust": {
+            "caught": 43,
+            "recall": 0.5375,
+            "recall_ci95": [
+              0.429044,
+              0.64252
+            ],
+            "lead_seconds_median": 2182.5779688358307,
+            "lead_seconds_p95": 3435.80801987648
+          },
+          "classification": {
+            "both": 11,
+            "rust_only": 32,
+            "python_only": 8,
+            "neither": 29
+          },
+          "timing_when_both": {
+            "rust_earlier": 6,
+            "python_earlier": 5,
+            "near_simultaneous": 0
+          },
+          "paired_statistics": {
+            "mcnemar_exact_two_sided_p": 0.00018217,
+            "rust_minus_python_recall": {
+              "difference": 0.3,
+              "ci95_low": 0.1625,
+              "ci95_high": 0.4375,
+              "iterations": 10000
+            },
+            "rust_minus_python_lead_seconds": {
+              "paired_moves": 11,
+              "median_rust_minus_python_seconds": 174.378614,
+              "ci95_low": -1345.022643,
+              "ci95_high": 1078.32199,
+              "iterations": 10000
+            },
+            "interpretation": "For recall difference, positive favors Rust. For Rust-minus-Python lead seconds among moves caught by both, negative means Rust detected earlier."
+          },
+          "session_breakdown": [
+            {
+              "session_date": "2026-07-17",
+              "objective_moves": 2,
+              "both": 0,
+              "rust_only": 0,
+              "python_only": 0,
+              "neither": 2
+            },
+            {
+              "session_date": "2026-07-20",
+              "objective_moves": 6,
+              "both": 0,
+              "rust_only": 3,
+              "python_only": 2,
+              "neither": 1
+            },
+            {
+              "session_date": "2026-07-21",
+              "objective_moves": 4,
+              "both": 1,
+              "rust_only": 2,
+              "python_only": 0,
+              "neither": 1
+            },
+            {
+              "session_date": "2026-07-22",
+              "objective_moves": 3,
+              "both": 0,
+              "rust_only": 0,
+              "python_only": 0,
+              "neither": 3
+            },
+            {
+              "session_date": "2026-07-24",
+              "objective_moves": 7,
+              "both": 1,
+              "rust_only": 3,
+              "python_only": 0,
+              "neither": 3
+            },
+            {
+              "session_date": "2026-07-27",
+              "objective_moves": 2,
+              "both": 0,
+              "rust_only": 1,
+              "python_only": 0,
+              "neither": 1
+            },
+            {
+              "session_date": "2026-07-28",
+              "objective_moves": 3,
+              "both": 0,
+              "rust_only": 1,
+              "python_only": 0,
+              "neither": 2
+            },
+            {
+              "session_date": "2026-07-29",
+              "objective_moves": 9,
+              "both": 1,
+              "rust_only": 5,
+              "python_only": 1,
+              "neither": 2
+            },
+            {
+              "session_date": "2026-07-31",
+              "objective_moves": 4,
+              "both": 1,
+              "rust_only": 1,
+              "python_only": 0,
+              "neither": 2
+            },
+            {
+              "session_date": "2026-08-03",
+              "objective_moves": 9,
+              "both": 1,
+              "rust_only": 7,
+              "python_only": 0,
+              "neither": 1
+            },
+            {
+              "session_date": "2026-08-05",
+              "objective_moves": 9,
+              "both": 3,
+              "rust_only": 1,
+              "python_only": 2,
+              "neither": 3
+            },
+            {
+              "session_date": "2026-08-06",
+              "objective_moves": 3,
+              "both": 0,
+              "rust_only": 1,
+              "python_only": 0,
+              "neither": 2
+            },
+            {
+              "session_date": "2026-08-07",
+              "objective_moves": 3,
+              "both": 0,
+              "rust_only": 2,
+              "python_only": 1,
+              "neither": 0
+            },
+            {
+              "session_date": "2026-08-10",
+              "objective_moves": 7,
+              "both": 2,
+              "rust_only": 2,
+              "python_only": 1,
+              "neither": 2
+            },
+            {
+              "session_date": "2026-08-11",
+              "objective_moves": 2,
+              "both": 0,
+              "rust_only": 1,
+              "python_only": 0,
+              "neither": 1
+            },
+            {
+              "session_date": "2026-08-13",
+              "objective_moves": 5,
+              "both": 0,
+              "rust_only": 1,
+              "python_only": 1,
+              "neither": 3
+            },
+            {
+              "session_date": "2026-08-14",
+              "objective_moves": 2,
+              "both": 1,
+              "rust_only": 1,
+              "python_only": 0,
+              "neither": 0
+            }
+          ]
+        },
+        "rust_only_successful_discoveries": {
+          "count": 45
+        },
+        "python_only_successful_discoveries": {
+          "count": 11
+        }
+      }
+    }
+  },
+  "bullish_event_evaluation": {
+    "available": true,
+    "methodology": {
+      "base_event": "+5% objective expansion from rolling local base",
+      "forward_horizon_seconds": 3600.0,
+      "dedupe_seconds": 900.0,
+      "taxonomy_is_evaluation_only": true,
+      "detectors_modified": false,
+      "capture_efficiency_definition": "(forward peak - detection price) / (forward peak - pre-expansion base), clipped to [0,1] for aggregate medians",
+      "principle": "Reward early recognition across diverse bullish structures without forcing either engine into a fixed pattern catalog."
+    },
+    "overall": {
+      "events": 1422,
+      "python": {
+        "caught": 336,
+        "recall": 0.236287,
+        "lead_seconds_median": 1647.8294605,
+        "capture_efficiency_median": 0.6174075,
+        "remaining_move_pct_median": 4.650106
+      },
+      "rust": {
+        "caught": 763,
+        "recall": 0.536568,
+        "lead_seconds_median": 1995.397191,
+        "capture_efficiency_median": 0.8125,
+        "remaining_move_pct_median": 5.797101
+      },
+      "classification": {
+        "both": 216,
+        "rust_only": 547,
+        "python_only": 120,
+        "neither": 539
+      }
+    },
+    "by_magnitude": {
+      "100pct_plus": {
+        "events": 5,
+        "python": {
+          "caught": 1,
+          "recall": 0.2,
+          "lead_seconds_median": 2624.375004,
+          "capture_efficiency_median": 0.980545,
+          "remaining_move_pct_median": 154.601227
+        },
+        "rust": {
+          "caught": 5,
+          "recall": 1.0,
+          "lead_seconds_median": 2404.470035,
+          "capture_efficiency_median": 0.982412,
+          "remaining_move_pct_median": 142.899408
+        },
+        "classification": {
+          "both": 1,
+          "rust_only": 4,
+          "python_only": 0,
+          "neither": 0
+        }
+      },
+      "10_to_20pct": {
+        "events": 341,
+        "python": {
+          "caught": 83,
+          "recall": 0.243402,
+          "lead_seconds_median": 1539.171998,
+          "capture_efficiency_median": 0.734375,
+          "remaining_move_pct_median": 9.859155
+        },
+        "rust": {
+          "caught": 163,
+          "recall": 0.478006,
+          "lead_seconds_median": 1827.189923,
+          "capture_efficiency_median": 0.871429,
+          "remaining_move_pct_median": 10.555556
+        },
+        "classification": {
+          "both": 45,
+          "rust_only": 118,
+          "python_only": 38,
+          "neither": 140
+        }
+      },
+      "20_to_50pct": {
+        "events": 122,
+        "python": {
+          "caught": 30,
+          "recall": 0.245902,
+          "lead_seconds_median": 1898.685972,
+          "capture_efficiency_median": 0.9424239999999999,
+          "remaining_move_pct_median": 26.83019
+        },
+        "rust": {
+          "caught": 68,
+          "recall": 0.557377,
+          "lead_seconds_median": 2319.4902,
+          "capture_efficiency_median": 0.9623489999999999,
+          "remaining_move_pct_median": 25.956706
+        },
+        "classification": {
+          "both": 20,
+          "rust_only": 48,
+          "python_only": 10,
+          "neither": 44
+        }
+      },
+      "50_to_100pct": {
+        "events": 25,
+        "python": {
+          "caught": 5,
+          "recall": 0.2,
+          "lead_seconds_median": 2005.138327,
+          "capture_efficiency_median": 1.0,
+          "remaining_move_pct_median": 76.623377
+        },
+        "rust": {
+          "caught": 19,
+          "recall": 0.76,
+          "lead_seconds_median": 2759.023152,
+          "capture_efficiency_median": 0.972222,
+          "remaining_move_pct_median": 57.282164
+        },
+        "classification": {
+          "both": 4,
+          "rust_only": 15,
+          "python_only": 1,
+          "neither": 5
+        }
+      },
+      "5_to_10pct": {
+        "events": 929,
+        "python": {
+          "caught": 217,
+          "recall": 0.233584,
+          "lead_seconds_median": 1639.605624,
+          "capture_efficiency_median": 0.5,
+          "remaining_move_pct_median": 3.381579
+        },
+        "rust": {
+          "caught": 508,
+          "recall": 0.546825,
+          "lead_seconds_median": 1982.313199,
+          "capture_efficiency_median": 0.7079145,
+          "remaining_move_pct_median": 4.463216
+        },
+        "classification": {
+          "both": 146,
+          "rust_only": 362,
+          "python_only": 71,
+          "neither": 350
+        }
+      }
+    },
+    "by_morphology": {
+      "compressed_breakout": {
+        "events": 3,
+        "python": {
+          "caught": 0,
+          "recall": 0.0,
+          "lead_seconds_median": null,
+          "capture_efficiency_median": null,
+          "remaining_move_pct_median": null
+        },
+        "rust": {
+          "caught": 0,
+          "recall": 0.0,
+          "lead_seconds_median": null,
+          "capture_efficiency_median": null,
+          "remaining_move_pct_median": null
+        },
+        "classification": {
+          "both": 0,
+          "rust_only": 0,
+          "python_only": 0,
+          "neither": 3
+        }
+      },
+      "explosive_acceleration": {
+        "events": 248,
+        "python": {
+          "caught": 55,
+          "recall": 0.221774,
+          "lead_seconds_median": 1266.5243,
+          "capture_efficiency_median": 0.963415,
+          "remaining_move_pct_median": 14.80315
+        },
+        "rust": {
+          "caught": 126,
+          "recall": 0.508065,
+          "lead_seconds_median": 1845.930479,
+          "capture_efficiency_median": 0.96775,
+          "remaining_move_pct_median": 14.2706765
+        },
+        "classification": {
+          "both": 32,
+          "rust_only": 94,
+          "python_only": 23,
+          "neither": 99
+        }
+      },
+      "extreme_runner": {
+        "events": 30,
+        "python": {
+          "caught": 6,
+          "recall": 0.2,
+          "lead_seconds_median": 2314.7566655,
+          "capture_efficiency_median": 0.9971909999999999,
+          "remaining_move_pct_median": 76.623377
+        },
+        "rust": {
+          "caught": 24,
+          "recall": 0.8,
+          "lead_seconds_median": 2646.9257015000003,
+          "capture_efficiency_median": 0.977317,
+          "remaining_move_pct_median": 71.86533700000001
+        },
+        "classification": {
+          "both": 5,
+          "rust_only": 19,
+          "python_only": 1,
+          "neither": 5
+        }
+      },
+      "fast_repricing": {
+        "events": 158,
+        "python": {
+          "caught": 36,
+          "recall": 0.227848,
+          "lead_seconds_median": 1446.4039695000001,
+          "capture_efficiency_median": 0.9470665,
+          "remaining_move_pct_median": 15.557609
+        },
+        "rust": {
+          "caught": 88,
+          "recall": 0.556962,
+          "lead_seconds_median": 2000.861919,
+          "capture_efficiency_median": 1.0,
+          "remaining_move_pct_median": 23.672161
+        },
+        "classification": {
+          "both": 23,
+          "rust_only": 65,
+          "python_only": 13,
+          "neither": 57
+        }
+      },
+      "multi_leg_runner": {
+        "events": 59,
+        "python": {
+          "caught": 15,
+          "recall": 0.254237,
+          "lead_seconds_median": 1778.101556,
+          "capture_efficiency_median": 0.918367,
+          "remaining_move_pct_median": 30.081301
+        },
+        "rust": {
+          "caught": 40,
+          "recall": 0.677966,
+          "lead_seconds_median": 2056.986443,
+          "capture_efficiency_median": 0.9719865000000001,
+          "remaining_move_pct_median": 35.83905
+        },
+        "classification": {
+          "both": 12,
+          "rust_only": 28,
+          "python_only": 3,
+          "neither": 16
+        }
+      },
+      "orderly_trend": {
+        "events": 25,
+        "python": {
+          "caught": 5,
+          "recall": 0.2,
+          "lead_seconds_median": 1460.208687,
+          "capture_efficiency_median": 0.469848,
+          "remaining_move_pct_median": 7.544141
+        },
+        "rust": {
+          "caught": 16,
+          "recall": 0.64,
+          "lead_seconds_median": 2434.1908595,
+          "capture_efficiency_median": 0.672991,
+          "remaining_move_pct_median": 8.900148
+        },
+        "classification": {
+          "both": 5,
+          "rust_only": 11,
+          "python_only": 0,
+          "neither": 9
+        }
+      },
+      "other_bullish_expansion": {
+        "events": 952,
+        "python": {
+          "caught": 223,
+          "recall": 0.234244,
+          "lead_seconds_median": 1660.643935,
+          "capture_efficiency_median": 0.5,
+          "remaining_move_pct_median": 3.421053
+        },
+        "rust": {
+          "caught": 520,
+          "recall": 0.546218,
+          "lead_seconds_median": 1975.409042,
+          "capture_efficiency_median": 0.7121165,
+          "remaining_move_pct_median": 4.4736095
+        },
+        "classification": {
+          "both": 149,
+          "rust_only": 371,
+          "python_only": 74,
+          "neither": 358
+        }
+      },
+      "pullback_continuation": {
+        "events": 210,
+        "python": {
+          "caught": 55,
+          "recall": 0.261905,
+          "lead_seconds_median": 1778.101556,
+          "capture_efficiency_median": 0.716667,
+          "remaining_move_pct_median": 11.860465
+        },
+        "rust": {
+          "caught": 112,
+          "recall": 0.533333,
+          "lead_seconds_median": 2281.694633,
+          "capture_efficiency_median": 0.9183749999999999,
+          "remaining_move_pct_median": 13.463062
+        },
+        "classification": {
+          "both": 32,
+          "rust_only": 80,
+          "python_only": 23,
+          "neither": 75
+        }
+      },
+      "triple_digit_runner": {
+        "events": 5,
+        "python": {
+          "caught": 1,
+          "recall": 0.2,
+          "lead_seconds_median": 2624.375004,
+          "capture_efficiency_median": 0.980545,
+          "remaining_move_pct_median": 154.601227
+        },
+        "rust": {
+          "caught": 5,
+          "recall": 1.0,
+          "lead_seconds_median": 2404.470035,
+          "capture_efficiency_median": 0.982412,
+          "remaining_move_pct_median": 142.899408
+        },
+        "classification": {
+          "both": 1,
+          "rust_only": 4,
+          "python_only": 0,
+          "neither": 0
+        }
+      }
+    },
+    "by_session_phase": {
+      "after_hours": {
+        "events": 557,
+        "python": {
+          "caught": 201,
+          "recall": 0.360862,
+          "lead_seconds_median": 1832.283979,
+          "capture_efficiency_median": 0.777778,
+          "remaining_move_pct_median": 6.688963
+        },
+        "rust": {
+          "caught": 281,
+          "recall": 0.504488,
+          "lead_seconds_median": 2254.512511,
+          "capture_efficiency_median": 0.9599,
+          "remaining_move_pct_median": 9.618478
+        },
+        "classification": {
+          "both": 113,
+          "rust_only": 168,
+          "python_only": 88,
+          "neither": 188
+        }
+      },
+      "opening_drive": {
+        "events": 192,
+        "python": {
+          "caught": 23,
+          "recall": 0.119792,
+          "lead_seconds_median": 884.583706,
+          "capture_efficiency_median": 0.468,
+          "remaining_move_pct_median": 3.381579
+        },
+        "rust": {
+          "caught": 74,
+          "recall": 0.385417,
+          "lead_seconds_median": 650.151998,
+          "capture_efficiency_median": 0.7518285,
+          "remaining_move_pct_median": 5.3931000000000004
+        },
+        "classification": {
+          "both": 12,
+          "rust_only": 62,
+          "python_only": 11,
+          "neither": 107
+        }
+      },
+      "overnight": {
+        "events": 4,
+        "python": {
+          "caught": 1,
+          "recall": 0.25,
+          "lead_seconds_median": 3290.715639,
+          "capture_efficiency_median": 1.0,
+          "remaining_move_pct_median": 9.139785
+        },
+        "rust": {
+          "caught": 0,
+          "recall": 0.0,
+          "lead_seconds_median": null,
+          "capture_efficiency_median": null,
+          "remaining_move_pct_median": null
+        },
+        "classification": {
+          "both": 0,
+          "rust_only": 0,
+          "python_only": 1,
+          "neither": 3
+        }
+      },
+      "power_hour": {
+        "events": 61,
+        "python": {
+          "caught": 11,
+          "recall": 0.180328,
+          "lead_seconds_median": 1691.760491,
+          "capture_efficiency_median": 0.565217,
+          "remaining_move_pct_median": 3.073286
+        },
+        "rust": {
+          "caught": 40,
+          "recall": 0.655738,
+          "lead_seconds_median": 1782.8892580000002,
+          "capture_efficiency_median": 0.886552,
+          "remaining_move_pct_median": 6.3078375
+        },
+        "classification": {
+          "both": 10,
+          "rust_only": 30,
+          "python_only": 1,
+          "neither": 20
+        }
+      },
+      "premarket": {
+        "events": 126,
+        "python": {
+          "caught": 11,
+          "recall": 0.087302,
+          "lead_seconds_median": 999.014269,
+          "capture_efficiency_median": 0.714286,
+          "remaining_move_pct_median": 7.563025
+        },
+        "rust": {
+          "caught": 36,
+          "recall": 0.285714,
+          "lead_seconds_median": 1616.0258749999998,
+          "capture_efficiency_median": 0.5,
+          "remaining_move_pct_median": 3.3613785
+        },
+        "classification": {
+          "both": 7,
+          "rust_only": 29,
+          "python_only": 4,
+          "neither": 86
+        }
+      },
+      "regular_session": {
+        "events": 482,
+        "python": {
+          "caught": 89,
+          "recall": 0.184647,
+          "lead_seconds_median": 1525.344937,
+          "capture_efficiency_median": 0.413834,
+          "remaining_move_pct_median": 2.390852
+        },
+        "rust": {
+          "caught": 332,
+          "recall": 0.688797,
+          "lead_seconds_median": 2091.8891395,
+          "capture_efficiency_median": 0.630682,
+          "remaining_move_pct_median": 4.3700589999999995
+        },
+        "classification": {
+          "both": 74,
+          "rust_only": 258,
+          "python_only": 15,
+          "neither": 135
+        }
+      }
+    }
+  },
+  "early_detection_quality_gate": {
+    "status": "PASS",
+    "recommendation": "ADVANCE_TO_HYBRID_INTELLIGENCE_INTEGRATION",
+    "detectors_modified": false,
+    "decision_principle": "A detector advances when it finds diverse bullish expansions early enough to preserve meaningful upside, while objective precision remains no worse than the comparison engine.",
+    "passed_hard_gates": [
+      "overall_sample",
+      "overall_rust_recall",
+      "overall_capture_efficiency",
+      "overall_recall_advantage",
+      "5_to_10pct_sample",
+      "5_to_10pct_rust_recall",
+      "5_to_10pct_capture_efficiency",
+      "10_to_20pct_sample",
+      "10_to_20pct_rust_recall",
+      "10_to_20pct_capture_efficiency",
+      "20_to_50pct_sample",
+      "20_to_50pct_rust_recall",
+      "20_to_50pct_capture_efficiency",
+      "50_to_100pct_sample",
+      "50_to_100pct_rust_recall",
+      "50_to_100pct_capture_efficiency",
+      "morphology_explosive_acceleration_rust_recall",
+      "morphology_multi_leg_runner_rust_recall",
+      "morphology_pullback_continuation_rust_recall",
+      "morphology_orderly_trend_rust_recall",
+      "phase_opening_drive_rust_recall",
+      "phase_regular_session_rust_recall",
+      "phase_power_hour_rust_recall",
+      "phase_premarket_rust_recall",
+      "phase_after_hours_rust_recall",
+      "plus_2pct_15m_precision_noninferiority",
+      "plus_5pct_15m_precision_noninferiority"
+    ],
+    "failed_hard_gates": [],
+    "gates": {
+      "overall_sample": {
+        "pass": true,
+        "actual": 1422,
+        "required": 500,
+        "comparator": ">="
+      },
+      "overall_rust_recall": {
+        "pass": true,
+        "actual": 0.536568,
+        "required": 0.45,
+        "comparator": ">=",
+        "python": 0.236287
+      },
+      "overall_capture_efficiency": {
+        "pass": true,
+        "actual": 0.8125,
+        "required": 0.75,
+        "comparator": ">=",
+        "python": 0.6174075
+      },
+      "overall_recall_advantage": {
+        "pass": true,
+        "actual": 2.2708316581106875,
+        "required": 1.75,
+        "comparator": ">=",
+        "rust": 0.536568,
+        "python": 0.236287
+      },
+      "5_to_10pct_sample": {
+        "pass": true,
+        "actual": 929,
+        "required": 100,
+        "comparator": ">="
+      },
+      "5_to_10pct_rust_recall": {
+        "pass": true,
+        "actual": 0.546825,
+        "required": 0.45,
+        "comparator": ">=",
+        "python": 0.233584
+      },
+      "5_to_10pct_capture_efficiency": {
+        "pass": true,
+        "actual": 0.7079145,
+        "required": 0.65,
+        "comparator": ">=",
+        "python": 0.5
+      },
+      "10_to_20pct_sample": {
+        "pass": true,
+        "actual": 341,
+        "required": 100,
+        "comparator": ">="
+      },
+      "10_to_20pct_rust_recall": {
+        "pass": true,
+        "actual": 0.478006,
+        "required": 0.4,
+        "comparator": ">=",
+        "python": 0.243402
+      },
+      "10_to_20pct_capture_efficiency": {
+        "pass": true,
+        "actual": 0.871429,
+        "required": 0.75,
+        "comparator": ">=",
+        "python": 0.734375
+      },
+      "20_to_50pct_sample": {
+        "pass": true,
+        "actual": 122,
+        "required": 50,
+        "comparator": ">="
+      },
+      "20_to_50pct_rust_recall": {
+        "pass": true,
+        "actual": 0.557377,
+        "required": 0.5,
+        "comparator": ">=",
+        "python": 0.245902
+      },
+      "20_to_50pct_capture_efficiency": {
+        "pass": true,
+        "actual": 0.9623489999999999,
+        "required": 0.85,
+        "comparator": ">=",
+        "python": 0.9424239999999999
+      },
+      "50_to_100pct_sample": {
+        "pass": true,
+        "actual": 25,
+        "required": 20,
+        "comparator": ">="
+      },
+      "50_to_100pct_rust_recall": {
+        "pass": true,
+        "actual": 0.76,
+        "required": 0.6,
+        "comparator": ">=",
+        "python": 0.2
+      },
+      "50_to_100pct_capture_efficiency": {
+        "pass": true,
+        "actual": 0.972222,
+        "required": 0.85,
+        "comparator": ">=",
+        "python": 1.0
+      },
+      "morphology_explosive_acceleration_sample": {
+        "pass": true,
+        "actual": 248,
+        "required": 50,
+        "comparator": ">=",
+        "hard_gate": false
+      },
+      "morphology_explosive_acceleration_rust_recall": {
+        "pass": true,
+        "actual": 0.508065,
+        "required": 0.45,
+        "comparator": ">=",
+        "python": 0.221774,
+        "hard_gate": true
+      },
+      "morphology_multi_leg_runner_sample": {
+        "pass": true,
+        "actual": 59,
+        "required": 30,
+        "comparator": ">=",
+        "hard_gate": false
+      },
+      "morphology_multi_leg_runner_rust_recall": {
+        "pass": true,
+        "actual": 0.677966,
+        "required": 0.55,
+        "comparator": ">=",
+        "python": 0.254237,
+        "hard_gate": true
+      },
+      "morphology_pullback_continuation_sample": {
+        "pass": true,
+        "actual": 210,
+        "required": 50,
+        "comparator": ">=",
+        "hard_gate": false
+      },
+      "morphology_pullback_continuation_rust_recall": {
+        "pass": true,
+        "actual": 0.533333,
+        "required": 0.45,
+        "comparator": ">=",
+        "python": 0.261905,
+        "hard_gate": true
+      },
+      "morphology_orderly_trend_sample": {
+        "pass": true,
+        "actual": 25,
+        "required": 20,
+        "comparator": ">=",
+        "hard_gate": false
+      },
+      "morphology_orderly_trend_rust_recall": {
+        "pass": true,
+        "actual": 0.64,
+        "required": 0.45,
+        "comparator": ">=",
+        "python": 0.2,
+        "hard_gate": true
+      },
+      "phase_opening_drive_sample": {
+        "pass": true,
+        "actual": 192,
+        "required": 50,
+        "comparator": ">=",
+        "hard_gate": false
+      },
+      "phase_opening_drive_rust_recall": {
+        "pass": true,
+        "actual": 0.385417,
+        "required": 0.3,
+        "comparator": ">=",
+        "python": 0.119792,
+        "hard_gate": true
+      },
+      "phase_regular_session_sample": {
+        "pass": true,
+        "actual": 482,
+        "required": 100,
+        "comparator": ">=",
+        "hard_gate": false
+      },
+      "phase_regular_session_rust_recall": {
+        "pass": true,
+        "actual": 0.688797,
+        "required": 0.5,
+        "comparator": ">=",
+        "python": 0.184647,
+        "hard_gate": true
+      },
+      "phase_power_hour_sample": {
+        "pass": true,
+        "actual": 61,
+        "required": 30,
+        "comparator": ">=",
+        "hard_gate": false
+      },
+      "phase_power_hour_rust_recall": {
+        "pass": true,
+        "actual": 0.655738,
+        "required": 0.5,
+        "comparator": ">=",
+        "python": 0.180328,
+        "hard_gate": true
+      },
+      "phase_premarket_sample": {
+        "pass": true,
+        "actual": 126,
+        "required": 50,
+        "comparator": ">=",
+        "hard_gate": false
+      },
+      "phase_premarket_rust_recall": {
+        "pass": true,
+        "actual": 0.285714,
+        "required": 0.2,
+        "comparator": ">=",
+        "python": 0.087302,
+        "hard_gate": true
+      },
+      "phase_after_hours_sample": {
+        "pass": true,
+        "actual": 557,
+        "required": 100,
+        "comparator": ">=",
+        "hard_gate": false
+      },
+      "phase_after_hours_rust_recall": {
+        "pass": true,
+        "actual": 0.504488,
+        "required": 0.4,
+        "comparator": ">=",
+        "python": 0.360862,
+        "hard_gate": true
+      },
+      "plus_2pct_15m_precision_noninferiority": {
+        "pass": true,
+        "rust": 0.117452,
+        "python": 0.08235,
+        "required": "rust >= python",
+        "hard_gate": true
+      },
+      "plus_5pct_15m_precision_noninferiority": {
+        "pass": true,
+        "rust": 0.02732,
+        "python": 0.017945,
+        "required": "rust >= python",
+        "hard_gate": true
+      }
+    },
+    "observational_not_hard_gates": {
+      "100pct_plus": {
+        "events": 5,
+        "rust_recall": 1.0,
+        "python_recall": 0.2,
+        "rust_capture_efficiency_median": 0.982412,
+        "python_capture_efficiency_median": 0.980545,
+        "reason": "Rare-event sample retained for monitoring; not allowed to decide the release by itself."
+      },
+      "compressed_breakout": {
+        "stats": {
+          "events": 3,
+          "python": {
+            "caught": 0,
+            "recall": 0.0,
+            "lead_seconds_median": null,
+            "capture_efficiency_median": null,
+            "remaining_move_pct_median": null
+          },
+          "rust": {
+            "caught": 0,
+            "recall": 0.0,
+            "lead_seconds_median": null,
+            "capture_efficiency_median": null,
+            "remaining_move_pct_median": null
+          },
+          "classification": {
+            "both": 0,
+            "rust_only": 0,
+            "python_only": 0,
+            "neither": 3
+          }
+        },
+        "reason": "Small taxonomy sample is diagnostic only; do not tune detector logic against it."
+      },
+      "overnight": {
+        "stats": {
+          "events": 4,
+          "python": {
+            "caught": 1,
+            "recall": 0.25,
+            "lead_seconds_median": 3290.715639,
+            "capture_efficiency_median": 1.0,
+            "remaining_move_pct_median": 9.139785
+          },
+          "rust": {
+            "caught": 0,
+            "recall": 0.0,
+            "lead_seconds_median": null,
+            "capture_efficiency_median": null,
+            "remaining_move_pct_median": null
+          },
+          "classification": {
+            "both": 0,
+            "rust_only": 0,
+            "python_only": 1,
+            "neither": 3
+          }
+        },
+        "reason": "Small session sample is diagnostic only; do not tune detector logic against it."
+      }
+    }
+  },
+  "hybrid_intelligence_evaluation": {
+    "status": "PASS",
+    "recommendation": "ADOPT_RUST_PRIMARY_PLUS_PYTHON_SPECIALIST_HYBRID",
+    "detectors_modified": false,
+    "decision_principle": "Hybrid wins only if Python adds unique actionable coverage to validated Rust without an unacceptable precision penalty.",
+    "passed_gates": [
+      "rust_quality_gate_already_passed",
+      "overall_union_recall_gain",
+      "major_move_union_gain",
+      "python_adds_unique_major_winners",
+      "plus2_precision_proxy_acceptable",
+      "plus5_precision_proxy_acceptable"
+    ],
+    "failed_gates": [],
+    "gates": {
+      "rust_quality_gate_already_passed": {
+        "pass": true,
+        "actual": "PASS",
+        "required": "PASS"
+      },
+      "overall_union_recall_gain": {
+        "pass": true,
+        "actual": 0.084388,
+        "required": 0.03,
+        "rust_recall": 0.536568,
+        "union_recall": 0.620956
+      },
+      "major_move_union_gain": {
+        "pass": true,
+        "required": ">=0.02 in populated +20-50% and +50-100% bands"
+      },
+      "python_adds_unique_major_winners": {
+        "pass": true,
+        "actual": 11,
+        "required": 3,
+        "rust_only_major_winners": 67
+      },
+      "plus2_precision_proxy_acceptable": {
+        "pass": true,
+        "python_success_rate": 0.08235,
+        "rust_success_rate": 0.117452,
+        "union_success_rate_proxy": 0.105453,
+        "python_episodes": 4068,
+        "rust_episodes": 7833,
+        "union_episode_denominator_proxy": 11901,
+        "note": "Conservative proxy only; exact merged-stream precision is re-measured after hybrid integration.",
+        "drop_fraction_vs_rust": 0.102161,
+        "max_allowed_drop_fraction": 0.35
+      },
+      "plus5_precision_proxy_acceptable": {
+        "pass": true,
+        "python_success_rate": 0.017945,
+        "rust_success_rate": 0.02732,
+        "union_success_rate_proxy": 0.024116,
+        "python_episodes": 4068,
+        "rust_episodes": 7833,
+        "union_episode_denominator_proxy": 11901,
+        "note": "Conservative proxy only; exact merged-stream precision is re-measured after hybrid integration.",
+        "drop_fraction_vs_rust": 0.117277,
+        "max_allowed_drop_fraction": 0.35
+      }
+    },
+    "overall": {
+      "events": 1422,
+      "python_recall": 0.236287,
+      "rust_recall": 0.536568,
+      "union_recall": 0.620956,
+      "union_gain_vs_rust": 0.084388,
+      "classification": {
+        "both": 216,
+        "rust_only": 547,
+        "python_only": 120,
+        "neither": 539
+      }
+    },
+    "by_magnitude": {
+      "100pct_plus": {
+        "events": 5,
+        "python_recall": 0.2,
+        "rust_recall": 1.0,
+        "union_recall": 1.0,
+        "union_gain_vs_rust": 0.0,
+        "python_only": 0,
+        "rust_only": 4,
+        "both": 1,
+        "neither": 0
+      },
+      "10_to_20pct": {
+        "events": 341,
+        "python_recall": 0.243402,
+        "rust_recall": 0.478006,
+        "union_recall": 0.589443,
+        "union_gain_vs_rust": 0.111437,
+        "python_only": 38,
+        "rust_only": 118,
+        "both": 45,
+        "neither": 140
+      },
+      "20_to_50pct": {
+        "events": 122,
+        "python_recall": 0.245902,
+        "rust_recall": 0.557377,
+        "union_recall": 0.639344,
+        "union_gain_vs_rust": 0.081967,
+        "python_only": 10,
+        "rust_only": 48,
+        "both": 20,
+        "neither": 44
+      },
+      "50_to_100pct": {
+        "events": 25,
+        "python_recall": 0.2,
+        "rust_recall": 0.76,
+        "union_recall": 0.8,
+        "union_gain_vs_rust": 0.04,
+        "python_only": 1,
+        "rust_only": 15,
+        "both": 4,
+        "neither": 5
+      },
+      "5_to_10pct": {
+        "events": 929,
+        "python_recall": 0.233584,
+        "rust_recall": 0.546825,
+        "union_recall": 0.623251,
+        "union_gain_vs_rust": 0.076426,
+        "python_only": 71,
+        "rust_only": 362,
+        "both": 146,
+        "neither": 350
+      }
+    },
+    "by_morphology": {
+      "compressed_breakout": {
+        "events": 3,
+        "python_recall": 0.0,
+        "rust_recall": 0.0,
+        "union_recall": 0.0,
+        "python_only": 0,
+        "rust_only": 0,
+        "neither": 3
+      },
+      "explosive_acceleration": {
+        "events": 248,
+        "python_recall": 0.221774,
+        "rust_recall": 0.508065,
+        "union_recall": 0.600806,
+        "python_only": 23,
+        "rust_only": 94,
+        "neither": 99
+      },
+      "extreme_runner": {
+        "events": 30,
+        "python_recall": 0.2,
+        "rust_recall": 0.8,
+        "union_recall": 0.833333,
+        "python_only": 1,
+        "rust_only": 19,
+        "neither": 5
+      },
+      "fast_repricing": {
+        "events": 158,
+        "python_recall": 0.227848,
+        "rust_recall": 0.556962,
+        "union_recall": 0.639241,
+        "python_only": 13,
+        "rust_only": 65,
+        "neither": 57
+      },
+      "multi_leg_runner": {
+        "events": 59,
+        "python_recall": 0.254237,
+        "rust_recall": 0.677966,
+        "union_recall": 0.728814,
+        "python_only": 3,
+        "rust_only": 28,
+        "neither": 16
+      },
+      "orderly_trend": {
+        "events": 25,
+        "python_recall": 0.2,
+        "rust_recall": 0.64,
+        "union_recall": 0.64,
+        "python_only": 0,
+        "rust_only": 11,
+        "neither": 9
+      },
+      "other_bullish_expansion": {
+        "events": 952,
+        "python_recall": 0.234244,
+        "rust_recall": 0.546218,
+        "union_recall": 0.62395,
+        "python_only": 74,
+        "rust_only": 371,
+        "neither": 358
+      },
+      "pullback_continuation": {
+        "events": 210,
+        "python_recall": 0.261905,
+        "rust_recall": 0.533333,
+        "union_recall": 0.642857,
+        "python_only": 23,
+        "rust_only": 80,
+        "neither": 75
+      },
+      "triple_digit_runner": {
+        "events": 5,
+        "python_recall": 0.2,
+        "rust_recall": 1.0,
+        "union_recall": 1.0,
+        "python_only": 0,
+        "rust_only": 4,
+        "neither": 0
+      }
+    },
+    "by_session_phase": {
+      "after_hours": {
+        "events": 557,
+        "python_recall": 0.360862,
+        "rust_recall": 0.504488,
+        "union_recall": 0.662478,
+        "python_only": 88,
+        "rust_only": 168,
+        "neither": 188
+      },
+      "opening_drive": {
+        "events": 192,
+        "python_recall": 0.119792,
+        "rust_recall": 0.385417,
+        "union_recall": 0.442708,
+        "python_only": 11,
+        "rust_only": 62,
+        "neither": 107
+      },
+      "overnight": {
+        "events": 4,
+        "python_recall": 0.25,
+        "rust_recall": 0.0,
+        "union_recall": 0.25,
+        "python_only": 1,
+        "rust_only": 0,
+        "neither": 3
+      },
+      "power_hour": {
+        "events": 61,
+        "python_recall": 0.180328,
+        "rust_recall": 0.655738,
+        "union_recall": 0.672131,
+        "python_only": 1,
+        "rust_only": 30,
+        "neither": 20
+      },
+      "premarket": {
+        "events": 126,
+        "python_recall": 0.087302,
+        "rust_recall": 0.285714,
+        "union_recall": 0.31746,
+        "python_only": 4,
+        "rust_only": 29,
+        "neither": 86
+      },
+      "regular_session": {
+        "events": 482,
+        "python_recall": 0.184647,
+        "rust_recall": 0.688797,
+        "union_recall": 0.719917,
+        "python_only": 15,
+        "rust_only": 258,
+        "neither": 135
+      }
+    },
+    "precision_proxies": {
+      "plus_2pct_15m": {
+        "python_success_rate": 0.08235,
+        "rust_success_rate": 0.117452,
+        "union_success_rate_proxy": 0.105453,
+        "python_episodes": 4068,
+        "rust_episodes": 7833,
+        "union_episode_denominator_proxy": 11901,
+        "note": "Conservative proxy only; exact merged-stream precision is re-measured after hybrid integration.",
+        "drop_fraction_vs_rust": 0.102161,
+        "max_allowed_drop_fraction": 0.35
+      },
+      "plus_5pct_15m": {
+        "python_success_rate": 0.017945,
+        "rust_success_rate": 0.02732,
+        "union_success_rate_proxy": 0.024116,
+        "python_episodes": 4068,
+        "rust_episodes": 7833,
+        "union_episode_denominator_proxy": 11901,
+        "note": "Conservative proxy only; exact merged-stream precision is re-measured after hybrid integration.",
+        "drop_fraction_vs_rust": 0.117277,
+        "max_allowed_drop_fraction": 0.35
+      }
+    },
+    "production_note": "Candidate-stream architecture only. Exact merged notification precision must be re-measured after hybrid implementation."
+  },
+  "boundary_diagnostics": {
+    "available": true,
+    "samples_per_category": 12,
+    "window_seconds": 45.0,
+    "mirror_verification": {
+      "sampled_rust_boundaries": 24,
+      "emitted_transition_matches": 24,
+      "match_rate": 1.0
+    },
+    "python_only_sample_summary": {
+      "hard_gate_failure_counts": {
+        "base_extension_above_0.75pct": 7,
+        "trigger_distance_outside_gate": 4,
+        "recipe_score_below_7": 2
+      },
+      "python_present_but_rust_missing_counts": {
+        "price remains near the base": 7,
+        "pressing a nearby trigger": 3,
+        "EMA structure is improving": 2,
+        "path avoids bearish failure": 2
+      },
+      "geometry_disagreement_counts": {
+        "near_trigger_disagrees": 4
+      },
+      "absolute_base_extension_delta_pct_median": null,
+      "absolute_trigger_distance_delta_pct_median": 0.093556,
+      "rolling_state": {
+        "classification_counts": {
+          "sparse_300s_trade_count_nonblocking": 3,
+          "sparse_prior_trade_count_nonblocking": 2
+        },
+        "trade_count_300s_median": 135.5,
+        "closed_bucket_count_median": 160.0,
+        "prior_trade_count_median": 76.5,
+        "trade_span_seconds_300s_median": 281.41209506988525,
+        "seconds_since_first_seen_median": 47549.75297391415,
+        "stream_previous_trade_gap_seconds_median": 2.2774895429611206,
+        "stream_previous_trade_gap_seconds_p95": 31.18719792366028
+      }
+    },
+    "matched_large_delta_state_summary": {
+      "samples": 12,
+      "rust_history_blocked_at_python_boundary": 3,
+      "became_history_ready_between_python_and_rust_boundaries": 3
+    },
+    "python_only_samples": 12,
+    "rust_only_samples": 12,
+    "matched_large_delta_samples": 12
+  },
+  "architecture_decision": {
+    "status": "INCONCLUSIVE",
+    "architecture_recommendation": "COLLECT_MORE_HISTORICAL_EVIDENCE",
+    "confidence": "LOW",
+    "parity_is_decision_gate": false,
+    "decision_principle": "Choose the architecture by objective-move recall, useful precision, lead time, exclusive discovery value, and implementation integrity; parity is diagnostic only.",
+    "passed_gates": [
+      "sample_sufficiency_plus_5",
+      "sample_sufficiency_plus_10",
+      "plus_2_recall",
+      "plus_2_precision_efficiency",
+      "plus_5_recall_advantage",
+      "plus_5_precision_efficiency",
+      "plus_5_exclusive_discovery",
+      "plus_10_recall_noninferiority",
+      "mirror_integrity"
+    ],
+    "failed_gates": [
+      "plus_5_recall",
+      "plus_10_lead_time_advantage"
+    ],
+    "gates": {
+      "sample_sufficiency_plus_5": {
+        "pass": true,
+        "actual": 1422,
+        "required": 50
+      },
+      "sample_sufficiency_plus_10": {
+        "pass": true,
+        "actual": 322,
+        "required": 20
+      },
+      "plus_2_recall": {
+        "pass": true,
+        "rust": 0.270033,
+        "python": 0.112224,
+        "required_rust_min": 0.25
+      },
+      "plus_2_precision_efficiency": {
+        "pass": true,
+        "rust": 0.117452,
+        "python": 0.08235
+      },
+      "plus_5_recall": {
+        "pass": false,
+        "rust": 0.224332,
+        "python": 0.09353,
+        "required_rust_min": 0.25
+      },
+      "plus_5_recall_advantage": {
+        "pass": true,
+        "rust_vs_python_multiple": 2.3985,
+        "required_multiple": 2.0
+      },
+      "plus_5_precision_efficiency": {
+        "pass": true,
+        "rust": 0.02732,
+        "python": 0.017945
+      },
+      "plus_5_exclusive_discovery": {
+        "pass": true,
+        "rust_only_successful": 169,
+        "python_only_successful": 40,
+        "rust_vs_python_multiple": 4.225,
+        "required_rust_only_min": 10,
+        "required_multiple": 2.0
+      },
+      "plus_10_recall_noninferiority": {
+        "pass": true,
+        "rust": 0.335404,
+        "python": 0.139752
+      },
+      "plus_10_lead_time_advantage": {
+        "pass": false,
+        "rust_median_seconds": 810.2366015911102,
+        "python_median_seconds": 787.1833920478821,
+        "rust_vs_python_ratio": 1.0293,
+        "max_allowed_ratio": 0.75
+      },
+      "mirror_integrity": {
+        "pass": true,
+        "actual": 1.0,
+        "required": 1.0
+      }
+    },
+    "plus_20_validation": {
+      "status": "INCONCLUSIVE",
+      "conclusion": "COLLECT_MORE_PLUS20_EVENTS",
+      "sample_ready": false,
+      "gates": {
+        "minimum_objective_moves": {
+          "pass": true,
+          "actual": 80,
+          "required": 30,
+          "preferred": 50
+        },
+        "minimum_sessions": {
+          "pass": false,
+          "actual": 17,
+          "required": 20
+        }
+      },
+      "objective_moves": 80,
+      "sessions_with_objective_moves": 17,
+      "rust_recall": 0.5375,
+      "python_recall": 0.2375,
+      "rust_recall_ci95": [
+        0.429044,
+        0.64252
+      ],
+      "python_recall_ci95": [
+        0.157647,
+        0.341408
+      ],
+      "rust_only": 32,
+      "python_only": 8,
+      "mcnemar_exact_two_sided_p": 0.00018217,
+      "rust_minus_python_recall_bootstrap": {
+        "difference": 0.3,
+        "ci95_low": 0.1625,
+        "ci95_high": 0.4375,
+        "iterations": 10000
+      },
+      "paired_lead_bootstrap": {
+        "paired_moves": 11,
+        "median_rust_minus_python_seconds": 174.378614,
+        "ci95_low": -1345.022643,
+        "ci95_high": 1078.32199,
+        "iterations": 10000
+      },
+      "noninferiority_margin": 0.05,
+      "alpha": 0.05,
+      "superiority_established": false,
+      "noninferiority_established": false,
+      "session_breakdown": [
+        {
+          "session_date": "2026-07-17",
+          "objective_moves": 2,
+          "both": 0,
+          "rust_only": 0,
+          "python_only": 0,
+          "neither": 2
+        },
+        {
+          "session_date": "2026-07-20",
+          "objective_moves": 6,
+          "both": 0,
+          "rust_only": 3,
+          "python_only": 2,
+          "neither": 1
+        },
+        {
+          "session_date": "2026-07-21",
+          "objective_moves": 4,
+          "both": 1,
+          "rust_only": 2,
+          "python_only": 0,
+          "neither": 1
+        },
+        {
+          "session_date": "2026-07-22",
+          "objective_moves": 3,
+          "both": 0,
+          "rust_only": 0,
+          "python_only": 0,
+          "neither": 3
+        },
+        {
+          "session_date": "2026-07-24",
+          "objective_moves": 7,
+          "both": 1,
+          "rust_only": 3,
+          "python_only": 0,
+          "neither": 3
+        },
+        {
+          "session_date": "2026-07-27",
+          "objective_moves": 2,
+          "both": 0,
+          "rust_only": 1,
+          "python_only": 0,
+          "neither": 1
+        },
+        {
+          "session_date": "2026-07-28",
+          "objective_moves": 3,
+          "both": 0,
+          "rust_only": 1,
+          "python_only": 0,
+          "neither": 2
+        },
+        {
+          "session_date": "2026-07-29",
+          "objective_moves": 9,
+          "both": 1,
+          "rust_only": 5,
+          "python_only": 1,
+          "neither": 2
+        },
+        {
+          "session_date": "2026-07-31",
+          "objective_moves": 4,
+          "both": 1,
+          "rust_only": 1,
+          "python_only": 0,
+          "neither": 2
+        },
+        {
+          "session_date": "2026-08-03",
+          "objective_moves": 9,
+          "both": 1,
+          "rust_only": 7,
+          "python_only": 0,
+          "neither": 1
+        },
+        {
+          "session_date": "2026-08-05",
+          "objective_moves": 9,
+          "both": 3,
+          "rust_only": 1,
+          "python_only": 2,
+          "neither": 3
+        },
+        {
+          "session_date": "2026-08-06",
+          "objective_moves": 3,
+          "both": 0,
+          "rust_only": 1,
+          "python_only": 0,
+          "neither": 2
+        },
+        {
+          "session_date": "2026-08-07",
+          "objective_moves": 3,
+          "both": 0,
+          "rust_only": 2,
+          "python_only": 1,
+          "neither": 0
+        },
+        {
+          "session_date": "2026-08-10",
+          "objective_moves": 7,
+          "both": 2,
+          "rust_only": 2,
+          "python_only": 1,
+          "neither": 2
+        },
+        {
+          "session_date": "2026-08-11",
+          "objective_moves": 2,
+          "both": 0,
+          "rust_only": 1,
+          "python_only": 0,
+          "neither": 1
+        },
+        {
+          "session_date": "2026-08-13",
+          "objective_moves": 5,
+          "both": 0,
+          "rust_only": 1,
+          "python_only": 1,
+          "neither": 3
+        },
+        {
+          "session_date": "2026-08-14",
+          "objective_moves": 2,
+          "both": 1,
+          "rust_only": 1,
+          "python_only": 0,
+          "neither": 0
+        }
+      ]
+    }
+  },
+  "production_cutover_ready": false
+}

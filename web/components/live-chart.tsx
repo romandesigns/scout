@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { API_BASE, API_CONFIGURED, getMarketSnapshot } from "@/lib/api";
+import { Button } from "@/components/ui/button";
 import type { Bucket, Finding, MarketSnapshot } from "@/lib/types";
 
 function emaSeries(values: number[], length: number) {
@@ -91,7 +92,7 @@ function markerTone(stage: string) {
 }
 
 export type ChartAnnotations = { formation?:boolean; detection?:boolean; trigger?:boolean; invalidation?:boolean };
-export function LiveChart({ finding, frozen = false, active = true, pollOffsetMs = 0, refreshNonce = 0, timeframeSeconds = 15, showAnnotations = true, annotations = {}, onSnapshot }: { finding?: Finding; frozen?: boolean; active?: boolean; pollOffsetMs?: number; refreshNonce?: number; timeframeSeconds?: 15|30|60|300; showAnnotations?:boolean; annotations?:ChartAnnotations; onSnapshot?: (snapshot: MarketSnapshot | null) => void }) {
+export function LiveChart({ finding, frozen = false, active = true, pollOffsetMs = 0, refreshNonce = 0, timeframeSeconds = 15, showAnnotations = true, annotations = {}, onSnapshot, onSelectFinding }: { finding?: Finding; frozen?: boolean; active?: boolean; pollOffsetMs?: number; refreshNonce?: number; timeframeSeconds?: 15|30|60|300; showAnnotations?:boolean; annotations?:ChartAnnotations; onSnapshot?: (snapshot: MarketSnapshot | null) => void; onSelectFinding?: (finding: Finding) => void }) {
   const [snapshot, setSnapshot] = useState<MarketSnapshot | null>(finding ? demoSnapshot(finding) : null);
   const [error, setError] = useState<string>("");
 
@@ -132,15 +133,16 @@ export function LiveChart({ finding, frozen = false, active = true, pollOffsetMs
   }
   if (!snapshot?.buckets?.length) return <div className="chart-empty">{error || "Waiting for live buckets…"}</div>;
 
-  return <SvgChart snapshot={snapshot} selectedFinding={finding} error={error} timeframeSeconds={timeframeSeconds} showAnnotations={showAnnotations} annotations={annotations}/>;
+  return <SvgChart snapshot={snapshot} selectedFinding={finding} error={error} timeframeSeconds={timeframeSeconds} showAnnotations={showAnnotations} annotations={annotations} onSelectFinding={onSelectFinding}/>;
 }
 
-function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnnotations, annotations }: { snapshot: MarketSnapshot; selectedFinding: Finding; error?: string; timeframeSeconds:15|30|60|300; showAnnotations:boolean; annotations:ChartAnnotations }) {
+function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnnotations, annotations, onSelectFinding }: { snapshot: MarketSnapshot; selectedFinding: Finding; error?: string; timeframeSeconds:15|30|60|300; showAnnotations:boolean; annotations:ChartAnnotations; onSelectFinding?: (finding: Finding) => void }) {
   const allRows = useMemo(() => aggregateBuckets(snapshot.buckets, timeframeSeconds), [snapshot.buckets,timeframeSeconds]);
   const [visibleCount,setVisibleCount]=useState(80);
   const [rightOffset,setRightOffset]=useState(0);
   const [hoverIndex,setHoverIndex]=useState<number|null>(null);
   const drag=useRef<{x:number;offset:number}|null>(null);
+  const pinch=useRef<{distance:number;count:number}|null>(null);
   const safeCount=Math.max(12,Math.min(160,visibleCount,allRows.length));
   const safeOffset=Math.max(0,Math.min(rightOffset,Math.max(0,allRows.length-safeCount)));
   const end=Math.max(safeCount,allRows.length-safeOffset);
@@ -182,6 +184,21 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
   const markerX = (ts: number) => layout.x(ts);
   const inWindow=(ts:number)=>ts>=firstTs&&ts<layout.domainEnd;
   const findingMarkers = snapshot.findings.filter((f) => inWindow(f.detected_at)).slice().reverse();
+  const findingClusters = useMemo(() => {
+    const groups = new Map<string, Finding[]>();
+    for (const finding of findingMarkers) {
+      const bucket = Math.floor(finding.detected_at / timeframeSeconds) * timeframeSeconds;
+      const key = String(bucket);
+      const current = groups.get(key) || [];
+      current.push(finding);
+      groups.set(key, current);
+    }
+    return Array.from(groups.entries()).map(([bucket, items]) => {
+      const selected = items.find(item => item.id === selectedFinding.id);
+      const lead = selected || items.slice().sort((a,b)=>(b.score||0)-(a.score||0))[0];
+      return { bucket:Number(bucket), items, lead, selected:Boolean(selected) };
+    });
+  }, [findingMarkers, timeframeSeconds, selectedFinding.id]);
   const catalystMarkers = snapshot.catalysts.filter((c) => c.published_at >= firstTs - 15 && c.published_at <= lastTs + 30).slice(-6);
   const statusMarkers = snapshot.statuses.filter((s) => s.event_at >= firstTs - 15 && s.event_at <= lastTs + 30).slice(-4);
   const current = rows.at(-1)?.close ?? selectedFinding.price;
@@ -199,6 +216,9 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
     const ratio=Math.max(0,Math.min(1,(x-layout.left)/(layout.width-layout.left-layout.right)));
     return Math.max(0,Math.min(rows.length-1,Math.round(ratio*(rows.length-1))));
   };
+  const resetViewport=()=>{setVisibleCount(Math.min(80,Math.max(12,allRows.length)));setRightOffset(0);setHoverIndex(null);};
+  const zoom=(delta:number)=>setVisibleCount(value=>Math.max(12,Math.min(160,value+delta)));
+  const touchDistance=(touches:React.TouchList)=>touches.length<2?0:Math.hypot(touches[0].clientX-touches[1].clientX,touches[0].clientY-touches[1].clientY);
 
   return <div className="chart-stage">
     <svg viewBox={`0 0 ${layout.width} ${layout.height}`} preserveAspectRatio="none" className="chart-svg chart-interactive" role="img" aria-label={`${snapshot.ticker} ${timeframeSeconds}-second candlestick chart. Use the mouse wheel to zoom and drag to pan.`}
@@ -207,7 +227,10 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
       onPointerMove={event=>{setHoverIndex(pointerIndex(event));if(drag.current){const box=event.currentTarget.getBoundingClientRect();const candlePx=box.width/Math.max(1,safeCount);setRightOffset(Math.max(0,Math.round(drag.current.offset+(event.clientX-drag.current.x)/candlePx)));}}}
       onPointerUp={event=>{event.currentTarget.releasePointerCapture(event.pointerId);drag.current=null;}}
       onPointerLeave={()=>{setHoverIndex(null);drag.current=null;}}
-      onDoubleClick={()=>{setVisibleCount(80);setRightOffset(0);}}>
+      onDoubleClick={resetViewport}
+      onTouchStart={event=>{if(event.touches.length===2)pinch.current={distance:touchDistance(event.touches),count:safeCount};}}
+      onTouchMove={event=>{if(event.touches.length===2&&pinch.current){event.preventDefault();const next=touchDistance(event.touches);if(next>0){const scale=pinch.current.distance/next;setVisibleCount(Math.max(12,Math.min(160,Math.round(pinch.current.count*scale))));}}}}
+      onTouchEnd={()=>{pinch.current=null;}}>
       <g className="chart-grid-lines">
         {priceTicks.map((p) => <line key={p} x1={layout.left} x2={layout.width-layout.right} y1={layout.y(p)} y2={layout.y(p)}/>) }
         {timeTicks.slice(1,-1).map((ts) => <line key={ts} x1={layout.x(ts)} x2={layout.x(ts)} y1={layout.top} y2={layout.bottom}/>) }
@@ -247,16 +270,25 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
         const x = markerX(c.published_at);
         return <g key={`c-${c.id}-${idx}`} className="chart-event-marker"><line x1={x} x2={x} y1={layout.top} y2={layout.priceBottom} stroke="var(--cyan)" strokeDasharray="2 4" opacity=".45"/><text x={x+4} y={28 + (idx%2)*12} className="chart-event-label" fill="var(--cyan)">CAT</text></g>;
       })}
-      {showAnnotations && annotations.detection !== false && findingMarkers.map((f, idx) => {
-        const x = markerX(f.detected_at);
-        const fused = Array.from(new Set([f.stage, ...(f.signals || [])].filter(Boolean)));
-        const primary = fused.find((signal) => ["PRE_IGNITION", "ARMED", "REARM", "VWAP_RECLAIM", "EMA_RECLAIM", "RECLAIM", "IGNITION", "BREAKOUT", "SURGE", "STAIRCASE", "EARLY", "REVERSAL_WATCH"].includes(signal)) || f.stage;
-        const color = markerTone(primary);
-        const label = `${f.shadow_mode?"SHADOW · ":""}${fused.filter((signal) => signal !== "CATALYST").slice(0, 2).join("·") || f.stage}`;
-        const selected=f.id===selectedFinding.id;
-        return <g key={`f-${f.id}`} className="chart-event-marker"><line x1={x} x2={x} y1={layout.top} y2={layout.priceBottom} stroke={color} strokeDasharray={selected?"1 0":"3 3"} opacity={selected?".95":".55"}/><circle cx={x} cy={layout.y(f.price)} r={selected?"5":"3.5"} fill={color}/><text x={x+5} y={48 + (idx%4)*12} className="chart-event-label" fill={color}>{selected?"DETECTED · ":""}{label}</text><title>{`${exactEtTime(f.detected_at)} · ${f.price.toFixed(4)} · ${f.timeliness_label||"ungraded"}${f.recipe_score!=null?` · recipe ${f.recipe_score}/10`:""}${selected?` · ${detectionOffset?.toFixed(3)??"—"}s into ${timeframeSeconds}s candle`:""}`}</title></g>;
+      {showAnnotations && annotations.detection !== false && findingClusters.map((cluster) => {
+        const f=cluster.lead;
+        const x=markerX(f.detected_at);
+        const fused=Array.from(new Set([f.stage,...(f.signals||[])].filter(Boolean)));
+        const primary=fused.find(signal=>["PRE_IGNITION","ARMED","REARM","VWAP_RECLAIM","EMA_RECLAIM","RECLAIM","IGNITION","BREAKOUT","SURGE","STAIRCASE","EARLY","REVERSAL_WATCH"].includes(signal))||f.stage;
+        const color=markerTone(primary);
+        const selected=cluster.selected;
+        const y=layout.y(f.price);
+        const label=selected?`${f.stage.replaceAll("_"," ")} · ${exactEtTime(f.detected_at)}`:`${cluster.items.length} Scout event${cluster.items.length===1?"":"s"}`;
+        return <g key={`fc-${cluster.bucket}`} className="chart-event-chip" role="button" tabIndex={0} aria-label={label}
+          onClick={event=>{event.stopPropagation();onSelectFinding?.(f);}}
+          onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();onSelectFinding?.(f);}}}>
+          {selected&&<line x1={x} x2={x} y1={layout.top} y2={layout.priceBottom} stroke={color} strokeDasharray="1 0" opacity=".72"/>}
+          <circle cx={x} cy={y} r={selected?6:cluster.items.length>1?6:4} fill={color} opacity={selected?1:.9}/>
+          {cluster.items.length>1&&<text x={x} y={y+3} textAnchor="middle" className="chart-cluster-count">{cluster.items.length>9?"9+":cluster.items.length}</text>}
+          {selected&&<text x={x+8} y={Math.max(layout.top+14,y-8)} className="chart-event-label" fill={color}>DETECTED · {primary.replaceAll("_"," ")}</text>}
+        </g>;
       })}
-      {deliveryMarkers.map((event,idx)=>{const x=markerX(event.event_at);const sent=event.status==="sent"||event.status==="delivered";return <g key={`delivery-${event.id}`} className="chart-delivery-marker"><line x1={x} x2={x} y1={layout.top} y2={layout.priceBottom} stroke={sent?"var(--green)":"var(--orange)"} strokeDasharray="1 4" opacity=".75"/><text x={x+4} y={112+(idx%3)*12} className="chart-event-label" fill={sent?"var(--green)":"var(--orange)"}>{sent?"ALERT":"QUEUE"}</text><title>{`${event.channel} ${event.status} · ${exactEtTime(event.event_at)}`}</title></g>})}
+      {deliveryMarkers.map((event,idx)=>{const x=markerX(event.event_at);const sent=event.status==="sent"||event.status==="delivered";return <g key={`delivery-${event.id}`} className="chart-delivery-marker"><line x1={x} x2={x} y1={layout.top} y2={layout.priceBottom} stroke={sent?"var(--green)":"var(--orange)"} strokeDasharray="1 4" opacity=".75"/><circle cx={x} cy={layout.top+8+(idx%2)*8} r="2.5" fill={sent?"var(--green)":"var(--orange)"}/></g>})}
       {statusMarkers.map((s, idx) => {
         const x = markerX(s.event_at);
         return <g key={`s-${s.id ?? idx}`} className="chart-event-marker"><line x1={x} x2={x} y1={layout.top} y2={layout.priceBottom} stroke={s.is_halted ? "var(--red)" : "var(--green)"} strokeDasharray="2 3"/><text x={x+4} y={92 + (idx%2)*12} className="chart-event-label" fill={s.is_halted ? "var(--red)" : "var(--green)"}>{s.is_halted ? "HALT" : "RESUME"}</text></g>;
@@ -277,13 +309,10 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
       <span>EMA9</span><i className="legend-ema9"/><span>EMA21</span><i className="legend-ema21"/><span>VWAP</span><i className="legend-vwap"/>
       <span className="chart-source">{snapshot.source?.replaceAll("-"," ")||"live"}</span>
       {snapshot.source?.startsWith("historical")&&<span className="chart-source">{snapshot.historical_complete===false?"INCOMPLETE":`${snapshot.historical_trade_count??0} trades · ${snapshot.historical_pages??1}p`}</span>}
+      <span className="ml-auto flex gap-1 pointer-events-auto"><Button variant="ghost" className="h-6 px-1.5 text-[10px]" aria-label="Zoom in" onClick={()=>zoom(-8)}>＋</Button><Button variant="ghost" className="h-6 px-1.5 text-[10px]" aria-label="Zoom out" onClick={()=>zoom(8)}>−</Button><Button variant="ghost" className="h-6 px-1.5 text-[10px]" onClick={resetViewport}>Fit</Button></span>
     </div>
-    {hovered&&<div className="candle-tooltip">
-      <b>{etTime(hovered.start_ts)} ET</b>
-      <span>O <strong>{hovered.open.toFixed(4)}</strong></span><span>H <strong>{hovered.high.toFixed(4)}</strong></span>
-      <span>L <strong>{hovered.low.toFixed(4)}</strong></span><span>C <strong>{hovered.close.toFixed(4)}</strong></span>
-      <span>V <strong>{hovered.volume.toLocaleString()}</strong></span><span>T <strong>{hovered.trades.toLocaleString()}</strong></span>
-    </div>}
+    {hovered&&<div className="chart-crosshair-readout"><b>{etTime(hovered.start_ts)} ET</b><span>O {moneyPrice(hovered.open)}</span><span>H {moneyPrice(hovered.high)}</span><span>L {moneyPrice(hovered.low)}</span><span>C {moneyPrice(hovered.close)}</span><span>V {hovered.volume.toLocaleString()}</span></div>}
+    <div className="chart-gesture-hint">drag pan · wheel/pinch zoom · double-click Fit · tap marker for Inspector</div>
     {detectionCandle&&<div className="detection-audit"><b>Detected {exactEtTime(selectedFinding.detected_at)}</b><span>{detectionOffset?.toFixed(3)}s into candle</span><span>{moneyPrice(selectedFinding.price)} detection</span><span>{moneyPrice(detectionCandle.low)}–{moneyPrice(detectionCandle.high)} candle</span></div>}
     {error && <div className="chart-connection-note">{error}</div>}
   </div>;

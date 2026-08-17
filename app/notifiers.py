@@ -173,6 +173,8 @@ def _quiet_now(f: Finding, prefs: dict[str, Any] | None) -> bool:
         return False
 
 def _allowed(f: Finding, prefs: dict[str, Any] | None, platform: str) -> bool:
+    if f.shadow_mode:
+        return False
     if f.stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"} and f.quality_label != "CLEAN":
         return False
     if not prefs:
@@ -207,8 +209,11 @@ def _message(f: Finding) -> str:
         velocity.append(f"15s {f.change_15s_pct:+.2f}%")
     if f.change_30s_pct is not None:
         velocity.append(f"30s {f.change_30s_pct:+.2f}%")
+    hybrid = "+".join(f.hybrid_sources or [f.engine_source])
     lines = [
         f"${f.price:.4f} | rank {f.actionable_rank} | quality {f.quality_label} {f.quality_score}/100 | {signals}",
+        f"Scout intelligence: {hybrid} | hybrid {f.hybrid_score}/100" if hybrid else None,
+        f"Why now: {f.notification_reason}" if f.notification_reason else None,
         " | ".join(velocity) if velocity else f"60s move {f.change_60s_pct:+.1f}%",
         f"15s RVOL {f.vol_ratio_15s:.1f}× | 30s RVOL {f.vol_ratio_30s:.1f}×",
         (f"30s ${f.dollar_volume_30s:,.0f} | {f.trades_30s} trades" if f.dollar_volume_30s is not None and f.trades_30s is not None else None),
@@ -237,6 +242,7 @@ def send_ntfy(f: Finding, prefs: dict[str, Any] | None = None) -> None:
     if _is_critical(f):
         priority = 5
     icons = {
+        "AWAKENING": "👀",
         "FIRST_LEG": "⚡",
         "FIRST_LEG_WATCH": "◌",
         "EARLY": "⚡",
@@ -393,7 +399,7 @@ def send_resend_email(f: Finding, prefs: dict[str, Any] | None = None) -> None:
     if not settings.email_every_finding:
         return
     if not (settings.resend_api_key and settings.resend_from and settings.resend_to):
-        log.warning("Resend is not fully configured; email suppressed")
+        log.debug("Resend not configured; email channel is paused")
         return
 
     ev = "<br>".join(html.escape(x) for x in f.evidence[:10])

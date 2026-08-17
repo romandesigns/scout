@@ -217,80 +217,83 @@ async def run_dataset(dataset: Path, output_root: Path | None = None) -> dict[st
 
     digest = hashlib.sha256(dataset.read_bytes()).hexdigest()
     replay_store = Store(run_dir / "state.db")
-    capture = ReplayDispatcher()
-    market = MarketWatcher(replay_store, capture)
-    clock = ReplayClock()
-    processed = 0
-    started_wall = time.perf_counter()
-    started_cpu = time.process_time()
-    tracemalloc.start()
+    try:
+        capture = ReplayDispatcher()
+        market = MarketWatcher(replay_store, capture)
+        clock = ReplayClock()
+        processed = 0
+        started_wall = time.perf_counter()
+        started_cpu = time.process_time()
+        tracemalloc.start()
 
-    for event in events:
-        ts = clock.advance(event.source_ts)
-        if event.event_type != "trade":
-            continue
-        state = market.states.get(event.symbol)
-        if state is None:
-            state = market.states[event.symbol] = SymbolState(event.symbol, settings.bucket_seconds, settings.keep_buckets)
-        price = float(event.payload["price"])
-        size = float(event.payload["size"])
-        state.update_trade(ts, price, size, trading_session_key(ts))
-        market._update_outcomes(event.symbol, ts, price)
-        now_ms = ts * 1000
-        if now_ms - state.last_fast_eval_at * 1000 >= settings.fast_path_min_interval_ms:
-            state.last_fast_eval_at = ts
-            metrics = market._metrics(state, ts)
-            if metrics:
-                await market._maybe_emit(state, metrics, ts, fast=True)
-        if ts - state.last_eval_at >= settings.eval_seconds:
-            state.last_eval_at = ts
-            metrics = market._metrics(state, ts)
-            if metrics:
-                await market._maybe_emit(state, metrics, ts, fast=False)
-        processed += 1
+        for event in events:
+            ts = clock.advance(event.source_ts)
+            if event.event_type != "trade":
+                continue
+            state = market.states.get(event.symbol)
+            if state is None:
+                state = market.states[event.symbol] = SymbolState(event.symbol, settings.bucket_seconds, settings.keep_buckets)
+            price = float(event.payload["price"])
+            size = float(event.payload["size"])
+            state.update_trade(ts, price, size, trading_session_key(ts))
+            market._update_outcomes(event.symbol, ts, price)
+            now_ms = ts * 1000
+            if now_ms - state.last_fast_eval_at * 1000 >= settings.fast_path_min_interval_ms:
+                state.last_fast_eval_at = ts
+                metrics = market._metrics(state, ts)
+                if metrics:
+                    await market._maybe_emit(state, metrics, ts, fast=True)
+            if ts - state.last_eval_at >= settings.eval_seconds:
+                state.last_eval_at = ts
+                metrics = market._metrics(state, ts)
+                if metrics:
+                    await market._maybe_emit(state, metrics, ts, fast=False)
+            processed += 1
 
-    current_bytes, peak_bytes = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
-    wall_seconds = max(0.000001, time.perf_counter() - started_wall)
-    cpu_seconds = max(0.0, time.process_time() - started_cpu)
-    findings = [_finding_dict(item) for item in capture.items]
-    calibration = calibrate_pre_ignition(events, findings)
-    report = {
-        "run_id": run_id,
-        "mode": "SIMULATION",
-        "status": "completed",
-        "schema_version": SCHEMA_VERSION,
-        "replay_engine_version": REPLAY_ENGINE_VERSION,
-        "scout_version": settings.app_version,
-        "dataset": dataset.name,
-        "dataset_sha256": digest,
-        "started_source_ts": events[0].source_ts,
-        "ended_source_ts": events[-1].source_ts,
-        "processed_events": processed,
-        "findings_count": len(findings),
-        "calibration": calibration,
-        "integrity": integrity,
-        "benchmark": {
-            "wall_seconds": wall_seconds,
-            "cpu_seconds": cpu_seconds,
-            "events_per_second": processed / wall_seconds,
-            "peak_memory_bytes": peak_bytes,
-            "current_memory_bytes": current_bytes,
-        },
-        "notifications": {"enabled": False, "attempted": 0},
-        "findings": findings,
-        "completed_at": int(time.time()),
-    }
-    report_path = run_dir / "report.json"
-    report_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
-    latest = {key: value for key, value in report.items() if key != "findings"}
-    latest["calibration"] = {
-        key: value for key, value in calibration.items()
-        if key not in {"outcomes", "missed_expansion_events"}
-    }
-    latest["report_path"] = str(report_path)
-    (output_root / "latest.json").write_text(json.dumps(latest, indent=2), encoding="utf-8")
-    return report
+        current_bytes, peak_bytes = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        wall_seconds = max(0.000001, time.perf_counter() - started_wall)
+        cpu_seconds = max(0.0, time.process_time() - started_cpu)
+        findings = [_finding_dict(item) for item in capture.items]
+        calibration = calibrate_pre_ignition(events, findings)
+        report = {
+            "run_id": run_id,
+            "mode": "SIMULATION",
+            "status": "completed",
+            "schema_version": SCHEMA_VERSION,
+            "replay_engine_version": REPLAY_ENGINE_VERSION,
+            "scout_version": settings.app_version,
+            "dataset": dataset.name,
+            "dataset_sha256": digest,
+            "started_source_ts": events[0].source_ts,
+            "ended_source_ts": events[-1].source_ts,
+            "processed_events": processed,
+            "findings_count": len(findings),
+            "calibration": calibration,
+            "integrity": integrity,
+            "benchmark": {
+                "wall_seconds": wall_seconds,
+                "cpu_seconds": cpu_seconds,
+                "events_per_second": processed / wall_seconds,
+                "peak_memory_bytes": peak_bytes,
+                "current_memory_bytes": current_bytes,
+            },
+            "notifications": {"enabled": False, "attempted": 0},
+            "findings": findings,
+            "completed_at": int(time.time()),
+        }
+        report_path = run_dir / "report.json"
+        report_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+        latest = {key: value for key, value in report.items() if key != "findings"}
+        latest["calibration"] = {
+            key: value for key, value in calibration.items()
+            if key not in {"outcomes", "missed_expansion_events"}
+        }
+        latest["report_path"] = str(report_path)
+        (output_root / "latest.json").write_text(json.dumps(latest, indent=2), encoding="utf-8")
+        return report
+    finally:
+        replay_store.close()
 
 
 def replay_status(output_root: Path | None = None) -> dict[str, Any]:

@@ -25,7 +25,7 @@ def _f(name: str, default: float, minimum: float | None = None) -> float:
 @dataclass(frozen=True)
 class Settings:
     app_name: str = os.getenv("APP_NAME", "StockHunter Scout")
-    app_version: str = os.getenv("APP_VERSION", "6.4.0")
+    app_version: str = os.getenv("APP_VERSION", "6.5.2")
     env: str = os.getenv("APP_ENV", "production")
     timezone: str = os.getenv("APP_TIMEZONE", "America/New_York")
 
@@ -228,6 +228,19 @@ class Settings:
     notification_retry_attempts: int = _i("NOTIFICATION_RETRY_ATTEMPTS", 5, 1)
     notification_retry_base_seconds: float = _f("NOTIFICATION_RETRY_BASE_SECONDS", 2.0, 0.25)
     notification_retry_max_seconds: float = _f("NOTIFICATION_RETRY_MAX_SECONDS", 120.0, 1.0)
+
+    # Hybrid Rust-primary + Python-specialist runtime. These settings affect
+    # integration/routing only; they do not change the frozen v6.4.13 detector
+    # thresholds or replay semantics.
+    hybrid_enabled: bool = _b("HYBRID_ENABLED", True)
+    rust_perception_binary: str = os.getenv("RUST_PERCEPTION_BINARY", "/usr/local/bin/scout-market-replay").strip()
+    rust_bridge_queue_max: int = _i("RUST_BRIDGE_QUEUE_MAX", 50000, 1000)
+    hybrid_merge_window_seconds: float = _f("HYBRID_MERGE_WINDOW_SECONDS", 45.0, 1.0)
+    hybrid_dedupe_seconds: float = _f("HYBRID_DEDUPE_SECONDS", 20.0, 0.0)
+    hybrid_episode_gap_seconds: float = _f("HYBRID_EPISODE_GAP_SECONDS", 900.0, 60.0)
+    hybrid_awakening_min_vol_ratio: float = _f("HYBRID_AWAKENING_MIN_VOL_RATIO", 1.5, 1.0)
+    hybrid_awakening_min_change_15s_pct: float = _f("HYBRID_AWAKENING_MIN_CHANGE_15S_PCT", 0.15, 0.0)
+    hybrid_precision_threshold_pct: float = _f("HYBRID_PRECISION_THRESHOLD_PCT", 5.0, 0.5)
 
     # Health / ops.
     health_port: int = _i("HEALTH_PORT", 8080, 1)

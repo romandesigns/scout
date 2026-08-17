@@ -33,6 +33,9 @@ if (-not (git check-ignore --no-index .env 2>$null)) {
     throw '.env is not protected by .gitignore.'
 }
 
+python -m pytest -q
+if ($LASTEXITCODE -ne 0) { throw 'Python tests failed.' }
+
 cargo test --manifest-path .\rust\market-replay\Cargo.toml
 if ($LASTEXITCODE -ne 0) { throw 'Rust market replay tests failed.' }
 
@@ -46,7 +49,8 @@ try {
 
 $Image = "stockhunter-scout:$Version-test"
 docker build --tag $Image .
-docker run --rm --mount "type=bind,source=$Repo,target=/srv" --workdir /srv $Image python -m unittest discover -s tests -v
+docker run --rm $Image python -c "from app.hybrid import RustPerceptionBridge; from app.config import settings; print('Scout image import OK', settings.app_version)"
+if ($LASTEXITCODE -ne 0) { throw 'Built Scout image smoke test failed.' }
 
 git diff --check
 if ($LASTEXITCODE -ne 0) { throw 'Whitespace validation failed.' }

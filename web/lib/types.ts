@@ -64,9 +64,9 @@ export type Finding = {
   trigger_level?: number | null;
   invalidation_level?: number | null;
   halt_pressure_score?: number;
-  urgency?: "NOW" | "WATCH" | "CONFIRMED" | "EXTENDED" | "RISK";
+  urgency?: "NOW" | "EARLY" | "WATCH" | "CONFIRMED" | "EXTENDED" | "RISK";
   engine_version?: string | null;
-  lifecycle_phase?: "DEVELOPING"|"ARMED"|"IGNITING"|"CONFIRMED"|"REARM"|null;
+  lifecycle_phase?: "DEVELOPING"|"ARMED"|"AWAKENING"|"IGNITING"|"CONFIRMED"|"REARM"|null;
   shadow_mode?: boolean;
   recipe_score?: number;
   recipe_present?: string[];
@@ -75,6 +75,11 @@ export type Finding = {
   base_extension_at_detection_pct?: number|null;
   timeliness_label?: "PRE_IGNITION"|"AT_IGNITION"|"LATE"|null;
   precursor_finding_id?: number|null;
+  engine_source?: "rust"|"python"|string;
+  hybrid_sources?: string[];
+  hybrid_score?: number;
+  hybrid_key?: string|null;
+  notification_reason?: string|null;
   selection_context?: "finding"|"catalyst"|"gainer"|"halt"|"validation";
   selection_title?: string;
   selection_detail?: string;
@@ -243,7 +248,7 @@ export type ScoutStatus = {
   app: string;
   version?: string;
   environment: string;
-  feeds: { sip: boolean; boats: boolean | null; news: boolean };
+  feeds: { sip: boolean; boats: boolean | null; news: boolean; health?:Record<string,unknown> };
   universe: number;
   sip_subscribed: number;
   overnight_subscribed: number;
@@ -263,6 +268,12 @@ export type ScoutStatus = {
     windows_delivery_available?: boolean;
     queues?: Record<string, unknown>;
     delivery?: Record<string, unknown>;
+  };
+  hybrid?: {
+    rust_bridge?: {enabled:boolean;running:boolean;queue_depth?:number;submitted?:number;dropped?:number;candidates?:number;restarts?:number;last_error?:string|null};
+    precision?: {threshold_pct:number;completed_episodes:number;successful_episodes:number;precision:number|null;source_mix:Record<string,number>};
+    notification_latency?: Record<string,{samples:number;median_seconds:number;p95_seconds:number;max_seconds:number}>;
+    architecture?: string;
   };
   engines: Record<string, boolean>;
   catalyst_sources?: {

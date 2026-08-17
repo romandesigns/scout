@@ -1,0 +1,273 @@
+=== Scout v6.5.1 validation ===
+warning: in the working copy of '.dockerignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.env.example', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'Dockerfile', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'VERSION', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'prepare-release.ps1', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'run-calibration.ps1', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'rust/market-replay/src/lib.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'rust/market-replay/src/main.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/src-tauri/Cargo.toml', LF will be replaced by CRLF the next time Git touches it
+
+--- Python tests ---
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\_pytest\unraisableexception.py:67: PytestUnraisableExceptionWarning: Exception ignored while calling deallocator <function _ProactorBasePipeTransport.__del__ at 0x0000022A67D56140>: None
+
+Traceback (most recent call last):
+  File "C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\asyncio\proactor_events.py", line 116, in __del__
+    _warn(f"unclosed transport {self!r}", ResourceWarning, source=self)
+                               ^^^^^^^^
+  File "C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\asyncio\proactor_events.py", line 80, in __repr__
+    info.append(f'fd={self._sock.fileno()}')
+                      ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\asyncio\windows_utils.py", line 109, in fileno
+    raise ValueError("I/O operation on closed pipe")
+ValueError: I/O operation on closed pipe
+
+
+  warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+................................                                         [100%]
+============================== warnings summary ===============================
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:64
+  C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:64: PyparsingDeprecationWarning: 'oneOf' deprecated - use 'one_of'
+    prop = Group((name + Suppress("=") + comma_separated(value)) | oneOf(_CONSTANTS))
+
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+  C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85: PyparsingDeprecationWarning: 'parseString' deprecated - use 'parse_string'
+    parse = parser.parseString(pattern)
+
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+  C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89: PyparsingDeprecationWarning: 'resetCache' deprecated - use 'reset_cache'
+    parser.resetCache()
+
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_mathtext.py:45
+  C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_mathtext.py:45: PyparsingDeprecationWarning: 'enablePackrat' deprecated - use 'enable_packrat'
+    ParserElement.enablePackrat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+32 passed, 14 warnings in 1.36s
+
+--- Rust tests ---
+   Compiling scout-market-replay v0.1.0 (D:\wavystack\scout-v6.2.0-repo\rust\market-replay)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.69s
+     Running unittests src\lib.rs (rust\market-replay\target\debug\deps\scout_market_replay-eb560a5da24ad1fb.exe)
+
+running 10 tests
+test tests::empty_replay_is_isolated ... ok
+test tests::pct_is_directional ... ok
+test tests::entering_overnight_resets_bucket_warmup ... ok
+test tests::qualified_state_stays_active_even_when_continuity_subset_flickers ... ok
+test tests::recipe_flicker_does_not_rearm_while_structure_holds ... ok
+test tests::sparse_history_warms_by_closed_buckets_not_trade_count ... ok
+test tests::stream_line_uses_same_market_event_contract ... ok
+test tests::structural_break_allows_a_fresh_episode ... ok
+test tests::stateful_engine_matches_batch_replay_candidate_count ... ok
+test tests::malformed_input_fails_with_counted_integrity ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (rust\market-replay\target\debug\deps\scout_market_replay-19c97b48d303331a.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests scout_market_replay
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+--- Rust release build ---
+   Compiling scout-market-replay v0.1.0 (D:\wavystack\scout-v6.2.0-repo\rust\market-replay)
+    Finished `release` profile [optimized] target(s) in 1.00s
+
+--- Web dependencies/build ---
+bun install v1.3.13 (bf2e2cec)
+
+Checked 102 installs across 171 packages (no changes) [23.00ms]
+$ next build
+Γû▓ Next.js 16.3.0 (Turbopack)
+Γ£ô Running next.config.ts took 22ms
+
+  Creating an optimized production build ...
+Γ£ô Compiled successfully in 945ms
+  Running TypeScript ...
+  Finished TypeScript in 1161ms ...
+  Collecting page data using 4 workers ...
+  Generating static pages using 4 workers (0/3) ...
+Γ£ô Generating static pages using 4 workers (3/3) in 452ms
+  Finalizing page optimization ...
+
+Route (app)
+Γöî Γùï /
+Γöö Γùï /_not-found
+
+
+Γùï  (Static)  prerendered as static content
+
+
+--- Docker build ---
+ Image scout-v620-repo-scout Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 529B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile:
+#2 transferring dockerfile: 1.42kB 1.5s done
+#2 DONE 6.3s
+
+#3 [internal] load metadata for docker.io/library/python:3.12-slim
+#3 ...
+
+#4 [internal] load metadata for docker.io/library/rust:1.88-slim-bookworm
+#4 ...
+
+#5 [internal] load metadata for docker.io/oven/bun:1.3.14
+#5 DONE 22.4s
+
+#3 [internal] load metadata for docker.io/library/python:3.12-slim
+#3 ...
+
+#4 [internal] load metadata for docker.io/library/rust:1.88-slim-bookworm
+#4 DONE 23.3s
+
+#3 [internal] load metadata for docker.io/library/python:3.12-slim
+#3 DONE 27.7s
+
+#6 [internal] load .dockerignore
+#6 transferring context:
+#6 transferring context: 270B 1.5s done
+#6 DONE 4.8s
+
+#7 [internal] load build context
+#7 DONE 0.0s
+
+#8 [web-build 1/7] FROM docker.io/oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+#8 resolve docker.io/oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+#8 ...
+
+#9 [stage-2  1/10] FROM docker.io/library/python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a
+#9 resolve docker.io/library/python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a
+#9 ...
+
+#10 [rust-build 1/5] FROM docker.io/library/rust:1.88-slim-bookworm@sha256:38bc5a86d998772d4aec2348656ed21438d20fcdce2795b56ca434cf21430d89
+#10 resolve docker.io/library/rust:1.88-slim-bookworm@sha256:38bc5a86d998772d4aec2348656ed21438d20fcdce2795b56ca434cf21430d89
+#10 ...
+
+#9 [stage-2  1/10] FROM docker.io/library/python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a
+#9 resolve docker.io/library/python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a 16.1s done
+#9 DONE 17.0s
+
+#7 [internal] load build context
+#7 ...
+
+#8 [web-build 1/7] FROM docker.io/oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+#8 resolve docker.io/oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 15.6s done
+#8 DONE 17.9s
+
+#7 [internal] load build context
+#7 transferring context: 26B
+#7 ...
+
+#10 [rust-build 1/5] FROM docker.io/library/rust:1.88-slim-bookworm@sha256:38bc5a86d998772d4aec2348656ed21438d20fcdce2795b56ca434cf21430d89
+#10 resolve docker.io/library/rust:1.88-slim-bookworm@sha256:38bc5a86d998772d4aec2348656ed21438d20fcdce2795b56ca434cf21430d89 16.1s done
+#10 DONE 19.1s
+
+#7 [internal] load build context
+#7 transferring context: 445.81kB 5.1s done
+#7 DONE 9.2s
+
+#11 [web-build 5/7] RUN bun install
+#11 CACHED
+
+#12 [web-build 3/7] COPY VERSION /VERSION
+#12 CACHED
+
+#13 [web-build 2/7] WORKDIR /web
+#13 CACHED
+
+#14 [web-build 4/7] COPY web/package.json ./package.json
+#14 CACHED
+
+#15 [web-build 6/7] COPY web ./
+#15 CACHED
+
+#16 [stage-2  3/10] RUN apt-get update  && apt-get install -y --no-install-recommends ca-certificates  && rm -rf /var/lib/apt/lists/*
+#16 CACHED
+
+#17 [stage-2  2/10] WORKDIR /srv
+#17 CACHED
+
+#18 [stage-2  4/10] COPY requirements.txt .
+#18 CACHED
+
+#19 [web-build 7/7] RUN bun run build
+#19 CACHED
+
+#20 [stage-2  5/10] RUN pip install --disable-pip-version-check --no-cache-dir -r requirements.txt
+#20 CACHED
+
+#21 [rust-build 3/5] COPY rust/market-replay/Cargo.toml rust/market-replay/Cargo.lock ./
+#21 CACHED
+
+#22 [rust-build 2/5] WORKDIR /rust/market-replay
+#22 CACHED
+
+#23 [rust-build 4/5] COPY rust/market-replay/src ./src
+#23 CACHED
+
+#24 [rust-build 5/5] RUN cargo build --release --locked
+#24 CACHED
+
+#25 [stage-2  6/10] COPY app ./app
+#25 DONE 22.2s
+
+#26 [stage-2  7/10] COPY scripts ./scripts
+#26 DONE 18.2s
+
+#27 [stage-2  8/10] COPY --from=web-build /web/out ./web-out
+#27 DONE 25.8s
+
+#28 [stage-2  9/10] COPY --from=rust-build /rust/market-replay/target/release/scout-market-replay /usr/local/bin/scout-market-replay
+#28 DONE 20.6s
+
+#29 [stage-2 10/10] RUN mkdir -p /data /charts
+#29 DONE 51.0s
+
+#30 exporting to image
+#30 exporting layers
+#30 exporting layers 114.7s done
+#30 exporting manifest sha256:c9941f54faec452255eca1d32f555c5ad2d82ccaa597c26e864871373bc554d6
+#30 exporting manifest sha256:c9941f54faec452255eca1d32f555c5ad2d82ccaa597c26e864871373bc554d6 4.8s done
+#30 exporting config sha256:aa92960981dbd2371bdbb9365455486d275d26e5f6873ea8e1491fb1b1e6fd3a
+#30 exporting config sha256:aa92960981dbd2371bdbb9365455486d275d26e5f6873ea8e1491fb1b1e6fd3a 8.5s done
+#30 exporting attestation manifest sha256:58e846ac4b5f60d326401022a282693e37d6ac5b73a0a71b4788794f072c6c9b
+#30 exporting attestation manifest sha256:58e846ac4b5f60d326401022a282693e37d6ac5b73a0a71b4788794f072c6c9b 9.1s done
+#30 exporting manifest list sha256:106db0d461b0848f9a1d8c8f61fc2f6822e7c7a7e5d45089cd6280bd3d72fb7a
+#30 exporting manifest list sha256:106db0d461b0848f9a1d8c8f61fc2f6822e7c7a7e5d45089cd6280bd3d72fb7a 6.1s done
+#30 naming to docker.io/library/scout-v620-repo-scout:latest
+#30 naming to docker.io/library/scout-v620-repo-scout:latest 1.7s done
+#30 unpacking to docker.io/library/scout-v620-repo-scout:latest
+#30 unpacking to docker.io/library/scout-v620-repo-scout:latest 30.6s done
+#30 DONE 184.9s
+
+#31 resolving provenance for metadata file
+#31 DONE 0.0s
+ Image scout-v620-repo-scout Built 
+
+Local build validation complete.
+After deployment, run the following health checks:
+  Invoke-RestMethod 'https://srv1170872.tail86523.ts.net:8444/healthz' | ConvertTo-Json -Depth 8
+  Invoke-RestMethod 'https://srv1170872.tail86523.ts.net:8444/api/status' | ConvertTo-Json -Depth 12
