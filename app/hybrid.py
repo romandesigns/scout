@@ -105,6 +105,9 @@ class RustPerceptionBridge:
         self.submitted = 0
         self.dropped = 0
         self.candidates = 0
+        self.written = 0
+        self.writer_batches = 0
+        self.max_queue_depth = 0
 
     async def start(self) -> None:
         if not self.enabled or self._tasks:
@@ -139,6 +142,7 @@ class RustPerceptionBridge:
             self.queue.put_nowait(event)
             self.submitted += 1
             self.last_submit_at = time.time()
+            self.max_queue_depth = max(self.max_queue_depth, self.queue.qsize())
             return True
         except asyncio.QueueFull:
             self.dropped += 1
@@ -195,15 +199,41 @@ class RustPerceptionBridge:
             backoff = min(30.0, backoff * 2.0)
 
     async def _writer(self, process: asyncio.subprocess.Process) -> None:
+        """Drain queued market events to Rust in ordered micro-batches.
+
+        The JSONL contract is unchanged: Rust still receives one market-event
+        envelope per line, in original queue order. The optimization is at the
+        pipe boundary: one write/drain per small batch instead of one
+        write/drain syscall pair per trade. Under SIP burst load this prevents
+        Python's asyncio transport overhead from becoming the effective Rust
+        throughput ceiling.
+        """
         assert process.stdin is not None
+        batch_max = max(1, int(settings.rust_bridge_batch_max))
+        batch_bytes = max(4096, int(settings.rust_bridge_batch_bytes))
         while True:
-            event = await self.queue.get()
+            first = await self.queue.get()
+            events = [first]
+            encoded = [json.dumps(first, separators=(",", ":")).encode("utf-8") + b"\n"]
+            size = len(encoded[0])
             try:
-                body = json.dumps(event, separators=(",", ":")).encode("utf-8") + b"\n"
-                process.stdin.write(body)
+                while len(events) < batch_max and size < batch_bytes:
+                    try:
+                        event = self.queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    body = json.dumps(event, separators=(",", ":")).encode("utf-8") + b"\n"
+                    events.append(event)
+                    encoded.append(body)
+                    size += len(body)
+
+                process.stdin.write(b"".join(encoded))
                 await process.stdin.drain()
+                self.written += len(events)
+                self.writer_batches += 1
             finally:
-                self.queue.task_done()
+                for _ in events:
+                    self.queue.task_done()
 
     async def _reader(self, process: asyncio.subprocess.Process) -> None:
         assert process.stdout is not None
@@ -233,13 +263,28 @@ class RustPerceptionBridge:
 
     def status(self) -> dict[str, Any]:
         running = bool(self.process and self.process.returncode is None)
+        queue_depth = self.queue.qsize()
+        queue_capacity = max(1, int(settings.rust_bridge_queue_max))
+        queue_utilization = queue_depth / queue_capacity
+        if queue_utilization >= 0.95:
+            backpressure = "saturated"
+        elif queue_utilization >= 0.75:
+            backpressure = "degraded"
+        else:
+            backpressure = "healthy"
         return {
             "enabled": self.enabled,
             "running": running,
             "binary": str(self.binary),
-            "queue_depth": self.queue.qsize(),
-            "queue_capacity": settings.rust_bridge_queue_max,
+            "queue_depth": queue_depth,
+            "queue_capacity": queue_capacity,
+            "queue_utilization": round(queue_utilization, 4),
+            "backpressure": backpressure,
             "submitted": self.submitted,
+            "written": self.written,
+            "writer_batches": self.writer_batches,
+            "writer_avg_batch": round(self.written / self.writer_batches, 2) if self.writer_batches else 0.0,
+            "max_queue_depth": self.max_queue_depth,
             "dropped": self.dropped,
             "candidates": self.candidates,
             "restarts": self.restarts,

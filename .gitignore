@@ -102,3 +102,5 @@ temp/
 
 # Rust market services
 rust/**/target/
+
+e2e-validation-*.json

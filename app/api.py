@@ -79,9 +79,12 @@ class ScoutApi:
 
     async def health(self, request: web.Request) -> web.Response:
         hybrid_status = self.market.rust_bridge.status() if self.market.rust_bridge else {"enabled": False, "running": False}
+        hybrid_ready = (not hybrid_status.get("enabled", False)) or bool(hybrid_status.get("running", False))
+        hybrid_degraded = bool(hybrid_status.get("enabled", False)) and hybrid_status.get("backpressure") in {"degraded", "saturated"}
         return web.json_response({
             "ok": True,
-            "hybrid_ready": (not hybrid_status.get("enabled", False)) or bool(hybrid_status.get("running", False)),
+            "degraded": hybrid_degraded,
+            "hybrid_ready": hybrid_ready,
             "app": settings.app_name,
             "version": settings.app_version,
             "feed": settings.alpaca_feed,

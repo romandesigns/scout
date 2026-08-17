@@ -182,3 +182,44 @@ def test_market_rust_candidate_becomes_actionable_awakening(tmp_path: Path):
     assert finding.lifecycle_phase == "AWAKENING"
     assert finding.hybrid_key
     store.close()
+
+def test_rust_bridge_microbatches_preserve_burst_without_drops(tmp_path: Path):
+    import asyncio
+    import sys
+    from app.hybrid import RustPerceptionBridge
+
+    fake = tmp_path / "sink-rust.py"
+    fake.write_text(
+        "import sys\n"
+        "for line in sys.stdin:\n"
+        "  pass\n"
+    )
+
+    async def run_test():
+        async def handler(payload):
+            return None
+
+        bridge = RustPerceptionBridge(handler)
+        bridge.binary = Path(sys.executable)
+        bridge.process_args = [str(fake)]
+        bridge.enabled = True
+        await bridge.start()
+        try:
+            total = 5000
+            for i in range(total):
+                assert bridge.submit_trade(symbol="TEST", ts=1000.0 + i / 1000, price=3.0, size=1.0, feed="sip")
+            for _ in range(500):
+                if bridge.written >= total:
+                    break
+                await asyncio.sleep(0.01)
+            status = bridge.status()
+            assert status["written"] == total
+            assert status["dropped"] == 0
+            assert status["queue_depth"] == 0
+            assert status["writer_batches"] < total
+            assert status["writer_avg_batch"] > 1
+            assert status["backpressure"] == "healthy"
+        finally:
+            await bridge.stop()
+
+    asyncio.run(run_test())

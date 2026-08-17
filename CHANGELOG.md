@@ -1,3 +1,10 @@
+# 6.5.8 — Hybrid backpressure throughput
+
+- Micro-batched ordered Python→Rust JSONL writes to remove per-trade pipe drain overhead under SIP bursts.
+- Added queue utilization/backpressure and writer-throughput telemetry.
+- Hardened end-to-end validation so active drops or >=90% queue saturation fail the release check.
+- Preserved detector thresholds, candidate semantics, event ordering, and the `scout.market-event.v1` contract.
+
 # Changelog
 
 ## 6.5.7

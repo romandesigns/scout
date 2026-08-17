@@ -1,0 +1,133 @@
+Release identity: PASS
+
+=== UI PRIMITIVE AUDIT ===
+UI primitive audit: PASS
+
+=== git diff --check ===
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'VERSION', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/src-tauri/Cargo.toml', LF will be replaced by CRLF the next time Git touches it
+
+=== Python tests ===
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\_pytest\unraisableexception.py:67: PytestUnraisableExceptionWarning: Exception ignored while calling deallocator <function _ProactorBasePipeTransport.__del__ at 0x00000277039A6140>: None
+
+Traceback (most recent call last):
+  File "C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\asyncio\proactor_events.py", line 116, in __del__
+    _warn(f"unclosed transport {self!r}", ResourceWarning, source=self)
+                               ^^^^^^^^
+  File "C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\asyncio\proactor_events.py", line 80, in __repr__
+    info.append(f'fd={self._sock.fileno()}')
+                      ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\asyncio\windows_utils.py", line 109, in fileno
+    raise ValueError("I/O operation on closed pipe")
+ValueError: I/O operation on closed pipe
+
+
+  warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+......................................                                   [100%]
+============================== warnings summary ===============================
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:64
+  C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:64: PyparsingDeprecationWarning: 'oneOf' deprecated - use 'one_of'
+    prop = Group((name + Suppress("=") + comma_separated(value)) | oneOf(_CONSTANTS))
+
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+  C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85: PyparsingDeprecationWarning: 'parseString' deprecated - use 'parse_string'
+    parse = parser.parseString(pattern)
+
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+  C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89: PyparsingDeprecationWarning: 'resetCache' deprecated - use 'reset_cache'
+    parser.resetCache()
+
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_mathtext.py:45
+  C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_mathtext.py:45: PyparsingDeprecationWarning: 'enablePackrat' deprecated - use 'enable_packrat'
+    ParserElement.enablePackrat()
+
+tests/test_hybrid.py::test_rust_bridge_microbatches_preserve_burst_without_drops
+  C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\_pytest\unraisableexception.py:67: PytestUnraisableExceptionWarning: Exception ignored while calling deallocator <function _ProactorBasePipeTransport.__del__ at 0x00000277039A6140>: None
+  
+  Traceback (most recent call last):
+    File "C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\asyncio\proactor_events.py", line 116, in __del__
+      _warn(f"unclosed transport {self!r}", ResourceWarning, source=self)
+                                 ^^^^^^^^
+    File "C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\asyncio\proactor_events.py", line 80, in __repr__
+      info.append(f'fd={self._sock.fileno()}')
+                        ~~~~~~~~~~~~~~~~~^^
+    File "C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\asyncio\windows_utils.py", line 109, in fileno
+      raise ValueError("I/O operation on closed pipe")
+  ValueError: I/O operation on closed pipe
+  
+  
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+38 passed, 15 warnings in 3.17s
+
+=== Rust tests ===
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running unittests src\lib.rs (rust\market-replay\target\debug\deps\scout_market_replay-eb560a5da24ad1fb.exe)
+
+running 10 tests
+test tests::empty_replay_is_isolated ... ok
+test tests::entering_overnight_resets_bucket_warmup ... ok
+test tests::pct_is_directional ... ok
+test tests::recipe_flicker_does_not_rearm_while_structure_holds ... ok
+test tests::qualified_state_stays_active_even_when_continuity_subset_flickers ... ok
+test tests::structural_break_allows_a_fresh_episode ... ok
+test tests::stream_line_uses_same_market_event_contract ... ok
+test tests::sparse_history_warms_by_closed_buckets_not_trade_count ... ok
+test tests::stateful_engine_matches_batch_replay_candidate_count ... ok
+test tests::malformed_input_fails_with_counted_integrity ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (rust\market-replay\target\debug\deps\scout_market_replay-19c97b48d303331a.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests scout_market_replay
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+=== WEB INSTALL / BUILD ===
+bun install v1.3.13 (bf2e2cec)
+
+Checked 102 installs across 171 packages (no changes) [22.00ms]
+$ next build
+Γû▓ Next.js 16.3.0 (Turbopack)
+Γ£ô Running next.config.ts took 728ms
+
+  Creating an optimized production build ...
+Γ£ô Compiled successfully in 3.2s
+  Running TypeScript ...
+  Finished TypeScript in 1509ms ...
+  Collecting page data using 4 workers ...
+  Generating static pages using 4 workers (0/3) ...
+Γ£ô Generating static pages using 4 workers (3/3) in 457ms
+  Finalizing page optimization ...
+
+Route (app)
+Γöî Γùï /
+Γöö Γùï /_not-found
+
+
+Γùï  (Static)  prerendered as static content
+
+
+============================================================
+SCOUT v6.5.8 LOCAL VALIDATION PASS
+============================================================

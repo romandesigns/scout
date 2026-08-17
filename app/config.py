@@ -243,6 +243,8 @@ class Settings:
     hybrid_enabled: bool = _b("HYBRID_ENABLED", True)
     rust_perception_binary: str = os.getenv("RUST_PERCEPTION_BINARY", "/usr/local/bin/scout-market-replay").strip()
     rust_bridge_queue_max: int = _i("RUST_BRIDGE_QUEUE_MAX", 50000, 1000)
+    rust_bridge_batch_max: int = _i("RUST_BRIDGE_BATCH_MAX", 256, 1)
+    rust_bridge_batch_bytes: int = _i("RUST_BRIDGE_BATCH_BYTES", 65536, 4096)
     hybrid_merge_window_seconds: float = _f("HYBRID_MERGE_WINDOW_SECONDS", 45.0, 1.0)
     hybrid_dedupe_seconds: float = _f("HYBRID_DEDUPE_SECONDS", 20.0, 0.0)
     hybrid_episode_gap_seconds: float = _f("HYBRID_EPISODE_GAP_SECONDS", 900.0, 60.0)
