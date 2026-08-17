@@ -1,0 +1,62 @@
+{
+  "summary": {
+    "generated_at": "2026-08-17T19:39:46.134727+00:00",
+    "api_base": "https://srv1170872.tail86523.ts.net:8444",
+    "strict_actionable": true,
+    "include_developing": false,
+    "min_age_seconds": 300,
+    "engine_version": "6.6.8",
+    "fetched_count": 0,
+    "selected_count": 0,
+    "excluded": {},
+    "cohorts": {
+      "ACTIONABLE": {
+        "sample_count": 0,
+        "matured_5m_count": 0,
+        "final_15m_count": 0,
+        "final_count": 0,
+        "provisional_count": 0,
+        "unmatured_count": 0,
+        "classifications": {},
+        "averages_5m": {
+          "return_30s_pct": null,
+          "return_60s_pct": null,
+          "return_120s_pct": null,
+          "return_300s_pct": null,
+          "mfe_300s_pct": null,
+          "mae_300s_pct": null
+        },
+        "averages_15m": {
+          "return_30s_pct": null,
+          "return_60s_pct": null,
+          "return_120s_pct": null,
+          "return_300s_pct": null,
+          "return_900s_pct": null,
+          "mfe_300s_pct": null,
+          "mae_300s_pct": null
+        },
+        "averages": {
+          "return_30s_pct": null,
+          "return_60s_pct": null,
+          "return_120s_pct": null,
+          "return_300s_pct": null,
+          "return_900s_pct": null,
+          "mfe_300s_pct": null,
+          "mae_300s_pct": null
+        },
+        "useful_rate_5m": null,
+        "late_rate_5m": null,
+        "false_or_fade_rate_5m": null,
+        "useful_rate_15m": null,
+        "late_rate_15m": null,
+        "false_or_fade_rate_15m": null,
+        "useful_rate": null,
+        "late_rate": null,
+        "false_or_fade_rate": null
+      }
+    },
+    "stages": {},
+    "errors": []
+  },
+  "rows": []
+}

@@ -62,6 +62,65 @@ def should_suppress_late_fresh_promotion(stage: str, m: dict) -> bool:
     return stage in {"SURGE", "BREAKOUT", "IGNITION", "HALT_PRESSURE"} and is_late_promotion_risk(m)
 
 
+
+def evaluate_breakout_continuation_quality(m: dict) -> dict:
+    """Require a BREAKOUT to still be fresh on the immediate 5-second tape.
+
+    v6.6.8 production outcome data showed BREAKOUT dominated the actionable
+    cohort but had negative 5m/15m expectancy. The strongest offline separator
+    available in the captured cohort was immediate persistence: the 5s move
+    should not be weaker than the older 15s/30s move.
+    """
+    enabled = bool(settings.breakout_continuation_gate_enabled)
+    change5 = float(m.get("change5") or 0.0)
+    change15 = float(m.get("change15") or 0.0)
+    change30 = float(m.get("change30") or 0.0)
+    older = max(0.0, change15, change30)
+    persistence_ratio = (change5 / older) if older > 0 else (999.0 if change5 > 0 else 0.0)
+    blockers = []
+    if enabled:
+        if change5 < settings.breakout_min_change_5s_pct:
+            blockers.append("fresh_5s_continuation")
+        if older > 0 and persistence_ratio < settings.breakout_min_persistence_ratio:
+            blockers.append("breakout_deceleration")
+    return {
+        "ready": not blockers,
+        "enabled": enabled,
+        "change5_pct": change5,
+        "change15_pct": change15,
+        "change30_pct": change30,
+        "persistence_ratio": persistence_ratio,
+        "blockers": blockers,
+    }
+
+
+def evaluate_reentry_safety(stage: str, m: dict) -> dict:
+    """Damage-control gate for REARM/RECLAIM alerts.
+
+    Re-entry stages remain structurally distinct from fresh breakouts, but the
+    production audit exposed severe adverse excursions in REARM/VWAP/EMA reclaim.
+    Reject re-entry alerts that are already late-risk or fading immediately.
+    """
+    stage = str(stage or "").upper()
+    enabled = bool(settings.reentry_safety_gate_enabled)
+    change5 = float(m.get("change5") or 0.0)
+    late_risk = is_late_promotion_risk(m)
+    blockers = []
+    if enabled and stage in {"REARM", "VWAP_RECLAIM", "EMA_RECLAIM"}:
+        if late_risk:
+            blockers.append("late_risk")
+        if change5 < settings.reentry_min_change_5s_pct:
+            blockers.append("fresh_5s_continuation")
+    return {
+        "ready": not blockers,
+        "enabled": enabled,
+        "stage": stage,
+        "change5_pct": change5,
+        "late_risk": late_risk,
+        "blockers": blockers,
+    }
+
+
 def evaluate_late_stage_continuation_quality(stage: str, m: dict) -> dict:
     """Validate that a late-stage fresh alert still has immediate continuation.
 
@@ -1749,6 +1808,15 @@ class MarketWatcher:
             and m["ema9"] is not None and m["price"] >= m["ema9"]
         )
 
+        reclaim_stage_candidate = "VWAP_RECLAIM" if m["above_vwap"] else "EMA_RECLAIM"
+        reclaim_safety = evaluate_reentry_safety(reclaim_stage_candidate, m)
+        if reclaim_qualifies and not reclaim_safety["ready"]:
+            reclaim_qualifies = False
+
+        reversal_rearm_safety = evaluate_reentry_safety("REARM", m)
+        if reversal_rearm_qualifies and not reversal_rearm_safety["ready"]:
+            reversal_rearm_qualifies = False
+
         # Preserve early awareness without surfacing noisy activity as an alert.
         # A WATCH finding is persisted/SSE-visible but is silent by default and
         # does not advance the ticker's actionable episode rank.
@@ -1825,9 +1893,11 @@ class MarketWatcher:
             )
         )
         surge_qualifies = bool(m["surge"] and quality_actionable and surge_structure_ok)
+        breakout_continuation = evaluate_breakout_continuation_quality(m)
         breakout_qualifies = bool(
             m["breakout"] and quality_actionable
             and fresh_velocity >= settings.breakout_min_fresh_velocity_pct
+            and breakout_continuation["ready"]
         )
 
         ignition_participation = m["dollar30"] >= settings.ignition_min_30s_dollar_volume and m["trades30"] >= settings.ignition_min_30s_trades
@@ -1868,6 +1938,10 @@ class MarketWatcher:
                 and s.continuation_pullback_low is not None
                 and pct_change(s.continuation_pullback_low, m["price"]) >= settings.reversal_rearm_min_bounce_pct
             )
+
+        rearm_safety = evaluate_reentry_safety("REARM", m)
+        if rearm_qualifies and not rearm_safety["ready"]:
+            rearm_qualifies = False
 
         if not any((early_signal_qualifies, early_release_qualifies, first_leg_qualifies, early_qualifies, surge_qualifies, breakout_qualifies, ignition_qualifies, rearm_qualifies, reclaim_qualifies, reversal_rearm_qualifies)):
             return
@@ -1975,6 +2049,12 @@ class MarketWatcher:
             "early_release_used": bool(early_release_qualifies),
             "early_signal": early_signal_decision,
             "early_signal_used": bool(early_signal_qualifies),
+            "breakout_continuation": breakout_continuation,
+            "reentry_safety": (
+                rearm_safety if stage == "REARM"
+                else reclaim_safety if stage in {"VWAP_RECLAIM", "EMA_RECLAIM"}
+                else None
+            ),
             "late_stage_continuation": (
                 ignition_continuation if stage == "IGNITION"
                 else halt_pressure_continuation if stage == "HALT_PRESSURE"

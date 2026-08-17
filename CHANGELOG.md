@@ -1,3 +1,9 @@
+## 6.6.9
+
+- Added BREAKOUT immediate-persistence gate.
+- Added re-entry/reclaim late-risk and immediate-fade protection.
+- Preserved EARLY and anti-late behavior from v6.6.8.
+
 ## 6.6.8
 
 - Added targeted late-stage continuation guard for fresh IGNITION/HALT_PRESSURE.

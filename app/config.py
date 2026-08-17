@@ -200,6 +200,13 @@ class Settings:
     breakout_min_dollar_30s: float = _f("BREAKOUT_MIN_DOLLAR_30S", 1500.0, 0.0)
     breakout_min_trades_30s: int = _i("BREAKOUT_MIN_TRADES_30S", 4, 1)
     breakout_min_fresh_velocity_pct: float = _f("BREAKOUT_MIN_FRESH_VELOCITY_PCT", 0.20, 0.05)
+    # v6.6.9: BREAKOUT must still be accelerating on the immediate tape.
+    breakout_continuation_gate_enabled: bool = _b("BREAKOUT_CONTINUATION_GATE_ENABLED", True)
+    breakout_min_change_5s_pct: float = _f("BREAKOUT_MIN_CHANGE_5S_PCT", 0.10, 0.0)
+    breakout_min_persistence_ratio: float = _f("BREAKOUT_MIN_PERSISTENCE_RATIO", 1.0, 0.0)
+    # Re-entry/reclaim safety: block late/chasing or immediately fading re-entry alerts.
+    reentry_safety_gate_enabled: bool = _b("REENTRY_SAFETY_GATE_ENABLED", True)
+    reentry_min_change_5s_pct: float = _f("REENTRY_MIN_CHANGE_5S_PCT", 0.05, 0.0)
     ignition_min_fresh_velocity_pct: float = _f("IGNITION_MIN_FRESH_VELOCITY_PCT", 0.50, 0.10)
     # V6.6.8 late-stage continuation guard. This is intentionally scoped to
     # fresh IGNITION/HALT_PRESSURE promotions so EARLY/BREAKOUT timing remains

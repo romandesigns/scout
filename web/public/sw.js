@@ -1,4 +1,4 @@
-const VERSION="6.6.8";
+const VERSION="6.6.9";
 const SHELL=`scout-shell-${VERSION}`;
 const APP_SHELL=["/","/manifest.webmanifest","/icons/scout-192.png","/icons/scout-512.png"];
 
