@@ -170,6 +170,8 @@ def evaluate_early_signal(
         "bullish_confirmed": bool(bullish_confirmed),
         "not_bearish_short": not bool(bearish_short),
         "no_structural_failure": not bool(structural_failure),
+        # v6.6.4: EARLY_SIGNAL cannot override Scout's canonical late-risk rule.
+        "not_late_risk": not is_late_promotion_risk(m),
         "not_extended": extension <= settings.early_signal_max_extension_pct,
         "near_trigger": bool(
             trigger_distance_pct is not None

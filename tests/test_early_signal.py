@@ -63,3 +63,31 @@ def test_early_signal_blocks_extension():
     )
     assert d["ready"] is False
     assert "not_extended" in d["hard_blockers"]
+
+
+def test_early_signal_blocks_eypt_style_canonical_late_risk():
+    m = metrics()
+    m["base_extension_pct"] = 0.815
+    m["extension"] = 1.084
+    d = evaluate_early_signal(
+        m, first_leg_candidate=True, quality_actionable=True,
+        participation_ok=True, structure_ok=True, bullish_confirmed=True,
+        bearish_short=False, structural_failure=False, relative_activity=True,
+        trigger_distance_pct=0.05, candidate_age_seconds=0.0,
+    )
+    assert d["ready"] is False
+    assert "not_late_risk" in d["hard_blockers"]
+
+
+def test_early_signal_preserves_fresh_non_late_candidate():
+    m = metrics()
+    m["base_extension_pct"] = 0.347
+    m["extension"] = 0.347
+    d = evaluate_early_signal(
+        m, first_leg_candidate=True, quality_actionable=True,
+        participation_ok=True, structure_ok=True, bullish_confirmed=True,
+        bearish_short=False, structural_failure=False, relative_activity=True,
+        trigger_distance_pct=0.12, candidate_age_seconds=0.0,
+    )
+    assert d["ready"] is True
+    assert "not_late_risk" not in d["hard_blockers"]

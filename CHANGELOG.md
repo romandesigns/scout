@@ -1,3 +1,10 @@
+## 6.6.4
+
+- Made canonical late-risk a hard blocker for EARLY_SIGNAL.
+- Closed the production EYPT-style +0.815% fast-path escape.
+- Preserved fresh non-late EARLY candidates and existing re-entry behavior.
+- Added direct regression coverage for both rejection and preservation.
+
 # Changelog
 
 ## 6.6.3 - Late fresh-promotion suppression
