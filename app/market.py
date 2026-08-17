@@ -126,6 +126,49 @@ def build_promotion_trace(
     return trace
 
 
+
+def evaluate_early_continuation_quality(
+    *,
+    first_leg_candidate: bool,
+    relative_activity: bool,
+    quality_score: int,
+    velocity_pct: float,
+    acceleration_pct: float,
+) -> dict:
+    """Conservative continuation-quality filter for the EARLY_SIGNAL fast path.
+
+    Production forward-outcome audits showed that many weak fast-path releases had
+    neither relative activity nor first-leg context and were already decelerating.
+    We preserve those context-backed signals, plus genuinely reaccelerating impulse
+    cases, without changing confirmed BREAKOUT/IGNITION or re-entry paths.
+    """
+    contextual = bool(first_leg_candidate or relative_activity)
+    impulse_reacceleration = bool(
+        velocity_pct >= settings.early_signal_continuation_min_velocity_pct
+        and acceleration_pct >= settings.early_signal_continuation_min_accel_pct
+    )
+    pristine_reacceleration = bool(
+        quality_score >= 100
+        and velocity_pct >= settings.early_signal_pristine_min_velocity_pct
+        and acceleration_pct > 0.0
+    )
+    enabled = bool(settings.early_signal_continuation_gate_enabled)
+    ready = (not enabled) or contextual or impulse_reacceleration or pristine_reacceleration
+    return {
+        "ready": ready,
+        "enabled": enabled,
+        "contextual": contextual,
+        "first_leg_candidate": bool(first_leg_candidate),
+        "relative_activity": bool(relative_activity),
+        "impulse_reacceleration": impulse_reacceleration,
+        "pristine_reacceleration": pristine_reacceleration,
+        "quality_score": int(quality_score),
+        "velocity_pct": float(velocity_pct),
+        "acceleration_pct": float(acceleration_pct),
+        "blockers": [] if ready else ["continuation_quality"],
+    }
+
+
 def evaluate_early_signal(
     m: dict,
     *,
@@ -149,6 +192,13 @@ def evaluate_early_signal(
     accel = float(m.get("change5") or 0.0) - float(m.get("change15") or 0.0)
     quality_score = int(m.get("quality_score") or 0)
     extension = float(m.get("base_extension_pct") or 0.0)
+    continuation_quality = evaluate_early_continuation_quality(
+        first_leg_candidate=first_leg_candidate,
+        relative_activity=relative_activity,
+        quality_score=quality_score,
+        velocity_pct=velocity,
+        acceleration_pct=accel,
+    )
     evidence = {
         "first_leg_candidate": bool(first_leg_candidate),
         "full_warmup": bool(m.get("full_warmup")),
@@ -170,6 +220,9 @@ def evaluate_early_signal(
         "bullish_confirmed": bool(bullish_confirmed),
         "not_bearish_short": not bool(bearish_short),
         "no_structural_failure": not bool(structural_failure),
+        # v6.6.6: fast-path release must have continuation evidence beyond the
+        # baseline CLEAN/bullish checks. This is intentionally EARLY_SIGNAL-only.
+        "continuation_quality": bool(continuation_quality["ready"]),
         # v6.6.4: EARLY_SIGNAL cannot override Scout's canonical late-risk rule.
         "not_late_risk": not is_late_promotion_risk(m),
         "not_extended": extension <= settings.early_signal_max_extension_pct,
@@ -186,6 +239,7 @@ def evaluate_early_signal(
         "min_score": settings.early_signal_min_evidence_score,
         "evidence": evidence,
         "hard_blockers": hard_blockers,
+        "continuation_quality": continuation_quality,
         "velocity_pct": velocity,
         "acceleration_pct": accel,
         "extension_pct": extension,

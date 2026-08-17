@@ -1,3 +1,11 @@
+## 6.6.6
+
+- Added a continuation-quality hard gate to the EARLY_SIGNAL fast path.
+- Preserves first-leg/relative-activity context and genuine reacceleration.
+- Filters weak uncontextual/decelerating early releases observed in forward audits.
+- Leaves BREAKOUT/IGNITION/re-entry, late-risk suppression, and v6.6.5 quality auditing unchanged.
+- Added production-pattern regression tests for preserved and rejected cases.
+
 ## 6.6.5
 
 - Fixed detection-quality ACTIONABLE cohort starvation under high finding throughput.

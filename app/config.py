@@ -144,6 +144,12 @@ class Settings:
     early_signal_max_trigger_distance_pct: float = _f("EARLY_SIGNAL_MAX_TRIGGER_DISTANCE_PCT", 0.65, 0.0)
     early_signal_max_candidate_age_seconds: float = _f("EARLY_SIGNAL_MAX_CANDIDATE_AGE_SECONDS", 20.0, 1.0)
     early_signal_cooldown_seconds: float = _f("EARLY_SIGNAL_COOLDOWN_SECONDS", 45.0, 5.0)
+    # V6.6.6 continuation-quality selectivity. These do not delay the legacy
+    # confirmation paths; they only stop weak EARLY_SIGNAL fast-path releases.
+    early_signal_continuation_gate_enabled: bool = _b("EARLY_SIGNAL_CONTINUATION_GATE_ENABLED", True)
+    early_signal_continuation_min_velocity_pct: float = _f("EARLY_SIGNAL_CONTINUATION_MIN_VELOCITY_PCT", 0.18, 0.01)
+    early_signal_continuation_min_accel_pct: float = _f("EARLY_SIGNAL_CONTINUATION_MIN_ACCEL_PCT", 0.05, 0.0)
+    early_signal_pristine_min_velocity_pct: float = _f("EARLY_SIGNAL_PRISTINE_MIN_VELOCITY_PCT", 0.12, 0.01)
 
     # Multi-timescale price velocity.
     # 15s = primary wake-up sensor

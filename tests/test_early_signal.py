@@ -1,4 +1,4 @@
-from app.market import evaluate_early_signal
+from app.market import evaluate_early_signal, evaluate_early_continuation_quality
 
 
 def metrics():
@@ -91,3 +91,77 @@ def test_early_signal_preserves_fresh_non_late_candidate():
     )
     assert d["ready"] is True
     assert "not_late_risk" not in d["hard_blockers"]
+
+
+def test_continuation_quality_preserves_context_backed_signal():
+    d = evaluate_early_continuation_quality(
+        first_leg_candidate=False,
+        relative_activity=True,
+        quality_score=82,
+        velocity_pct=0.10,
+        acceleration_pct=-0.02,
+    )
+    assert d["ready"] is True
+    assert d["contextual"] is True
+
+
+def test_continuation_quality_preserves_snwv_style_reacceleration_without_relative_activity():
+    # Production USEFUL example: no first-leg/relative-activity context, but the
+    # fast tape was genuinely reaccelerating.
+    d = evaluate_early_continuation_quality(
+        first_leg_candidate=False,
+        relative_activity=False,
+        quality_score=82,
+        velocity_pct=0.2037,
+        acceleration_pct=0.2037,
+    )
+    assert d["ready"] is True
+    assert d["impulse_reacceleration"] is True
+
+
+def test_continuation_quality_blocks_rskd_style_weak_decelerating_fast_path():
+    d = evaluate_early_continuation_quality(
+        first_leg_candidate=False,
+        relative_activity=False,
+        quality_score=82,
+        velocity_pct=0.1486,
+        acceleration_pct=-0.0679,
+    )
+    assert d["ready"] is False
+    assert d["blockers"] == ["continuation_quality"]
+
+
+def test_continuation_quality_blocks_eypt_style_weak_unbacked_fast_path():
+    d = evaluate_early_continuation_quality(
+        first_leg_candidate=False,
+        relative_activity=False,
+        quality_score=100,
+        velocity_pct=0.1064,
+        acceleration_pct=0.0021,
+    )
+    assert d["ready"] is False
+
+
+def test_early_signal_surfaces_continuation_quality_blocker():
+    m = metrics()
+    m["quality_score"] = 82
+    m["change3"] = 0.10
+    m["change5"] = 0.1486
+    m["change15"] = 0.2165
+    m["base_extension_pct"] = 0.08
+    d = evaluate_early_signal(
+        m,
+        first_leg_candidate=False,
+        quality_actionable=True,
+        participation_ok=True,
+        structure_ok=True,
+        bullish_confirmed=True,
+        bearish_short=False,
+        structural_failure=False,
+        relative_activity=False,
+        trigger_distance_pct=0.0,
+        candidate_age_seconds=0.0,
+    )
+    assert d["ready"] is False
+    assert "continuation_quality" in d["hard_blockers"]
+    assert d["continuation_quality"]["ready"] is False
