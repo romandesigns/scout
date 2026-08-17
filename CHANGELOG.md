@@ -1,3 +1,13 @@
+# Changelog
+
+## 6.6.3 - Late fresh-promotion suppression
+
+- Preserves the v6.6.2 optimized EARLY_SIGNAL / EARLY_RELEASE architecture unchanged.
+- Suppresses fresh SURGE, BREAKOUT, and IGNITION promotion when Scout already classifies the candidate as late-risk.
+- Keeps non-late expansion stages eligible and preserves explicit REARM/VWAP_RECLAIM/EMA_RECLAIM continuation paths.
+- Shares one late-risk predicate between promotion tracing and promotion policy to prevent diagnostic/policy drift.
+- Adds regression coverage for late suppression, fresh eligibility, re-entry exemptions, boundary parity, and EARLY preservation.
+
 ## 6.6.2
 
 - Added evidence-scored `EARLY_SIGNAL` notification path separate from confirmed promotion.
@@ -20,7 +30,6 @@
 - Extends actionable findings with promotion-delay context so the next calibration can compare first awareness with actual notification time.
 - This is an observability release: promotion thresholds and notification rules are intentionally unchanged.
 
-# Changelog
 
 ## 6.5.9 - Detection-quality audit correctness
 

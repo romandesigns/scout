@@ -46,6 +46,22 @@ def _chunks(seq: list[str], size: int):
         yield seq[i:i + size]
 
 
+def is_late_promotion_risk(m: dict) -> bool:
+    """Return True when a candidate is already too extended for a fresh alert.
+
+    This deliberately shares the same boundary used by promotion tracing so
+    diagnostics and promotion policy cannot drift apart.
+    """
+    base_extension = float(m.get("base_extension_pct") or 0.0)
+    extension = float(m.get("extension") or 0.0)
+    return bool(base_extension > 0.75 or extension > 2.0)
+
+
+def should_suppress_late_fresh_promotion(stage: str, m: dict) -> bool:
+    """Block chase-prone fresh expansion alerts while preserving re-entry paths."""
+    return stage in {"SURGE", "BREAKOUT", "IGNITION"} and is_late_promotion_risk(m)
+
+
 def build_promotion_trace(
     m: dict,
     *,
@@ -97,7 +113,7 @@ def build_promotion_trace(
         "base_extension_pct": base_extension,
         "extension_pct": extension,
         "trigger_distance_pct": None,
-        "late_risk": bool(base_extension > 0.75 or extension > 2.0),
+        "late_risk": is_late_promotion_risk(m),
         "fresh_velocity_pct": max(
             float(m.get("change3") or 0.0), float(m.get("change5") or 0.0),
             float(m.get("change15") or 0.0), float(m.get("change30") or 0.0),
@@ -1789,6 +1805,12 @@ class MarketWatcher:
         elif early_qualifies:
             stage, rank = "EARLY", 2
         else:
+            return
+
+        # v6.6.3: do not turn an already-extended expansion into a fresh
+        # actionable chase alert. Explicit continuation/re-entry stages remain
+        # eligible because they require their own pullback/reclaim structure.
+        if should_suppress_late_fresh_promotion(stage, m):
             return
 
         if stage in {"EMA_RECLAIM", "VWAP_RECLAIM"}:
