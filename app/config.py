@@ -201,6 +201,14 @@ class Settings:
     breakout_min_trades_30s: int = _i("BREAKOUT_MIN_TRADES_30S", 4, 1)
     breakout_min_fresh_velocity_pct: float = _f("BREAKOUT_MIN_FRESH_VELOCITY_PCT", 0.20, 0.05)
     ignition_min_fresh_velocity_pct: float = _f("IGNITION_MIN_FRESH_VELOCITY_PCT", 0.50, 0.10)
+    # V6.6.8 late-stage continuation guard. This is intentionally scoped to
+    # fresh IGNITION/HALT_PRESSURE promotions so EARLY/BREAKOUT timing remains
+    # unchanged. It rejects stale 15s/30s impulse when the last 5s no longer
+    # show positive continuation.
+    late_stage_continuation_gate_enabled: bool = _b("LATE_STAGE_CONTINUATION_GATE_ENABLED", True)
+    ignition_min_change_5s_pct: float = _f("IGNITION_MIN_CHANGE_5S_PCT", 0.10, 0.0)
+    halt_pressure_min_change_5s_pct: float = _f("HALT_PRESSURE_MIN_CHANGE_5S_PCT", 0.25, 0.0)
+    halt_pressure_min_change_15s_pct: float = _f("HALT_PRESSURE_MIN_CHANGE_15S_PCT", 0.75, 0.0)
     surge_weak_structure_min_dollar_15s: float = _f("SURGE_WEAK_STRUCTURE_MIN_DOLLAR_15S", 10000.0, 0.0)
     surge_weak_structure_min_trades_15s: int = _i("SURGE_WEAK_STRUCTURE_MIN_TRADES_15S", 20, 1)
     signal_stage_cooldown_seconds: int = _i("SIGNAL_STAGE_COOLDOWN_SECONDS", 60, 5)

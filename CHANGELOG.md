@@ -1,3 +1,13 @@
+## 6.6.8
+
+- Added targeted late-stage continuation guard for fresh IGNITION/HALT_PRESSURE.
+- Added HALT_PRESSURE to canonical late-risk fresh-promotion suppression.
+- Fresh IGNITION now requires live 5-second continuation.
+- HALT_PRESSURE requires live 5s + 15s continuation and must not be late-risk.
+- Preserved v6.6.7 EARLY/BREAKOUT/re-entry behavior.
+- Bundled detection-quality audit v5 for separate 5m and 15m performance reporting.
+- Added late-stage regression coverage.
+
 ## 6.6.7
 
 - Reserve fresh EARLY actionable notifications for A-rank candidates by default.

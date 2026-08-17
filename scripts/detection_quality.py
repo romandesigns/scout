@@ -164,34 +164,59 @@ def fmt(v: Any) -> str:
 
 
 def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    final_rows = [r for r in rows if r.get("coverage") == "FINAL_15M"]
-    provisional_rows = [r for r in rows if r.get("coverage") == "PROVISIONAL_5M"]
+    matured5 = [r for r in rows if r.get("coverage") in {"PROVISIONAL_5M", "FINAL_15M"}]
+    final15 = [r for r in rows if r.get("coverage") == "FINAL_15M"]
     classifications = Counter(str(r.get("classification")) for r in rows)
+
+    def normalized_label(r: dict[str, Any]) -> str:
+        label = str(r.get("classification") or "")
+        return label.removeprefix("PROVISIONAL_")
+
     summary: dict[str, Any] = {
         "sample_count": len(rows),
-        "final_count": len(final_rows),
-        "provisional_count": len(provisional_rows),
+        "matured_5m_count": len(matured5),
+        "final_15m_count": len(final15),
+        # Backward-compatible names.
+        "final_count": len(final15),
+        "provisional_count": sum(1 for r in rows if r.get("coverage") == "PROVISIONAL_5M"),
         "unmatured_count": sum(1 for r in rows if r.get("coverage") == "UNMATURED"),
         "classifications": dict(sorted(classifications.items())),
-        "averages": {},
+        "averages_5m": {},
+        "averages_15m": {},
     }
+    for field in ("return_30s_pct", "return_60s_pct", "return_120s_pct", "return_300s_pct", "mfe_300s_pct", "mae_300s_pct"):
+        vals = [safe_float(r.get(field)) for r in matured5]
+        summary["averages_5m"][field] = mean([v for v in vals if v is not None])
     for field in ("return_30s_pct", "return_60s_pct", "return_120s_pct", "return_300s_pct", "return_900s_pct", "mfe_300s_pct", "mae_300s_pct"):
-        vals = [safe_float(r.get(field)) for r in final_rows]
-        summary["averages"][field] = mean([v for v in vals if v is not None])
-    if final_rows:
-        useful = sum(1 for r in final_rows if r["classification"] in {"EARLY", "USEFUL"})
-        late = sum(1 for r in final_rows if r["classification"] == "LATE")
-        falsey = sum(1 for r in final_rows if r["classification"] in {"FALSE_POSITIVE", "FADE"})
-        summary["useful_rate"] = useful / len(final_rows)
-        summary["late_rate"] = late / len(final_rows)
-        summary["false_or_fade_rate"] = falsey / len(final_rows)
+        vals = [safe_float(r.get(field)) for r in final15]
+        summary["averages_15m"][field] = mean([v for v in vals if v is not None])
+    # Backward-compatible averages remain the 15m-final cohort.
+    summary["averages"] = dict(summary["averages_15m"])
+
+    if matured5:
+        labels = [normalized_label(r) for r in matured5]
+        summary["useful_rate_5m"] = sum(x in {"EARLY", "USEFUL"} for x in labels) / len(labels)
+        summary["late_rate_5m"] = sum(x == "LATE" for x in labels) / len(labels)
+        summary["false_or_fade_rate_5m"] = sum(x in {"FALSE_POSITIVE", "FADE"} for x in labels) / len(labels)
     else:
-        summary["useful_rate"] = summary["late_rate"] = summary["false_or_fade_rate"] = None
+        summary["useful_rate_5m"] = summary["late_rate_5m"] = summary["false_or_fade_rate_5m"] = None
+
+    if final15:
+        labels = [normalized_label(r) for r in final15]
+        summary["useful_rate_15m"] = sum(x in {"EARLY", "USEFUL"} for x in labels) / len(labels)
+        summary["late_rate_15m"] = sum(x == "LATE" for x in labels) / len(labels)
+        summary["false_or_fade_rate_15m"] = sum(x in {"FALSE_POSITIVE", "FADE"} for x in labels) / len(labels)
+    else:
+        summary["useful_rate_15m"] = summary["late_rate_15m"] = summary["false_or_fade_rate_15m"] = None
+    # Backward compatibility.
+    summary["useful_rate"] = summary["useful_rate_15m"]
+    summary["late_rate"] = summary["late_rate_15m"]
+    summary["false_or_fade_rate"] = summary["false_or_fade_rate_15m"]
     return summary
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Scout forward detection-quality audit v4")
+    p = argparse.ArgumentParser(description="Scout forward detection-quality audit v5")
     p.add_argument("--api-base", default=os.getenv("SCOUT_API_BASE", "https://srv1170872.tail86523.ts.net:8444"))
     p.add_argument("--limit", type=int, default=100)
     p.add_argument("--include-developing", action="store_true")
@@ -236,7 +261,7 @@ def main() -> int:
     rows_out: list[dict[str, Any]] = []
     errors: list[str] = []
     print("=" * 126)
-    print("SCOUT FORWARD DETECTION-QUALITY AUDIT v4")
+    print("SCOUT FORWARD DETECTION-QUALITY AUDIT v5")
     print(f"API={base} version={engine_version or 'ANY'} fetched={len(findings)} selected={len(selected)} strict_actionable=A/B include_developing={args.include_developing} min_age={args.min_age_seconds}s")
     print("=" * 126)
     print(f"{'COHORT':11} {'TICKER':7} {'STAGE':18} {'RANK':5} {'PRICE':9} {'30s':8} {'1m':8} {'2m':8} {'5m':8} {'15m':8} {'MFE5':8} {'MAE5':8} {'COVERAGE':15} LABEL")
@@ -288,11 +313,16 @@ def main() -> int:
     print("\n" + "=" * 126 + "\nSUMMARY")
     print(f"fetched={len(findings)} selected={len(selected)} excluded={dict(sorted(excluded.items()))}")
     for name, s in cohorts.items():
-        print(f"{name}: sample={s['sample_count']} final15m={s['final_count']} provisional5m={s['provisional_count']} unmatured={s['unmatured_count']} classes={s['classifications']}")
-        if s["final_count"]:
-            print(f"  useful/early={s['useful_rate']:.1%} late={s['late_rate']:.1%} false/fade={s['false_or_fade_rate']:.1%}; "
-                  f"avg 30s={fmt(s['averages']['return_30s_pct'])} 1m={fmt(s['averages']['return_60s_pct'])} 2m={fmt(s['averages']['return_120s_pct'])} "
-                  f"5m={fmt(s['averages']['return_300s_pct'])} 15m={fmt(s['averages']['return_900s_pct'])}")
+        print(f"{name}: sample={s['sample_count']} matured5m={s['matured_5m_count']} final15m={s['final_15m_count']} provisional5m={s['provisional_count']} unmatured={s['unmatured_count']} classes={s['classifications']}")
+        if s["matured_5m_count"]:
+            a = s["averages_5m"]
+            print(f"  5M: useful/early={s['useful_rate_5m']:.1%} late={s['late_rate_5m']:.1%} false/fade={s['false_or_fade_rate_5m']:.1%}; "
+                  f"avg 30s={fmt(a['return_30s_pct'])} 1m={fmt(a['return_60s_pct'])} 2m={fmt(a['return_120s_pct'])} "
+                  f"5m={fmt(a['return_300s_pct'])} MFE5={fmt(a['mfe_300s_pct'])} MAE5={fmt(a['mae_300s_pct'])}")
+        if s["final_15m_count"]:
+            a = s["averages_15m"]
+            print(f"  15M FINAL: useful/early={s['useful_rate_15m']:.1%} late={s['late_rate_15m']:.1%} false/fade={s['false_or_fade_rate_15m']:.1%}; "
+                  f"avg 5m={fmt(a['return_300s_pct'])} 15m={fmt(a['return_900s_pct'])}")
     if errors: print(f"errors={len(errors)} (see JSON)")
     print("=" * 126)
 

@@ -7,13 +7,13 @@ def metrics(base_extension=0.25, extension=0.25):
 
 def test_fresh_expansion_stages_are_suppressed_when_late():
     late = metrics(base_extension=0.85, extension=0.85)
-    for stage in ("SURGE", "BREAKOUT", "IGNITION"):
+    for stage in ("SURGE", "BREAKOUT", "IGNITION", "HALT_PRESSURE"):
         assert should_suppress_late_fresh_promotion(stage, late) is True
 
 
 def test_fresh_expansion_stages_remain_eligible_when_not_late():
     fresh = metrics(base_extension=0.22, extension=0.22)
-    for stage in ("SURGE", "BREAKOUT", "IGNITION"):
+    for stage in ("SURGE", "BREAKOUT", "IGNITION", "HALT_PRESSURE"):
         assert should_suppress_late_fresh_promotion(stage, fresh) is False
 
 

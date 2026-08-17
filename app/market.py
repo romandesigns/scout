@@ -59,7 +59,52 @@ def is_late_promotion_risk(m: dict) -> bool:
 
 def should_suppress_late_fresh_promotion(stage: str, m: dict) -> bool:
     """Block chase-prone fresh expansion alerts while preserving re-entry paths."""
-    return stage in {"SURGE", "BREAKOUT", "IGNITION"} and is_late_promotion_risk(m)
+    return stage in {"SURGE", "BREAKOUT", "IGNITION", "HALT_PRESSURE"} and is_late_promotion_risk(m)
+
+
+def evaluate_late_stage_continuation_quality(stage: str, m: dict) -> dict:
+    """Validate that a late-stage fresh alert still has immediate continuation.
+
+    v6.6.7 production audits showed the EARLY/BREAKOUT cohorts were relatively
+    stable while the tiny IGNITION/HALT_PRESSURE cohorts had materially worse
+    adverse excursion. This guard does not change EARLY/BREAKOUT qualification.
+    It only prevents a fresh later-stage promotion from relying on stale 15s/30s
+    momentum after the last 5s impulse has already faded.
+    """
+    enabled = bool(settings.late_stage_continuation_gate_enabled)
+    stage = str(stage or "").upper()
+    change5 = float(m.get("change5") or 0.0)
+    change15 = float(m.get("change15") or 0.0)
+    late_risk = is_late_promotion_risk(m)
+
+    if not enabled or stage not in {"IGNITION", "HALT_PRESSURE"}:
+        return {
+            "ready": True, "enabled": enabled, "stage": stage,
+            "change5_pct": change5, "change15_pct": change15,
+            "late_risk": late_risk, "blockers": [],
+        }
+
+    blockers: list[str] = []
+    if late_risk:
+        blockers.append("late_risk")
+    if stage == "IGNITION":
+        if change5 < settings.ignition_min_change_5s_pct:
+            blockers.append("fresh_5s_continuation")
+    else:
+        if change5 < settings.halt_pressure_min_change_5s_pct:
+            blockers.append("fresh_5s_continuation")
+        if change15 < settings.halt_pressure_min_change_15s_pct:
+            blockers.append("fresh_15s_continuation")
+
+    return {
+        "ready": not blockers,
+        "enabled": enabled,
+        "stage": stage,
+        "change5_pct": change5,
+        "change15_pct": change15,
+        "late_risk": late_risk,
+        "blockers": blockers,
+    }
 
 
 def build_promotion_trace(
@@ -1800,6 +1845,13 @@ class MarketWatcher:
             and fresh_velocity >= settings.ignition_min_fresh_velocity_pct
             and quality_actionable
         )
+        ignition_continuation = evaluate_late_stage_continuation_quality("IGNITION", m)
+        if ignition_qualifies and not ignition_continuation["ready"]:
+            ignition_qualifies = False
+
+        halt_pressure_continuation = evaluate_late_stage_continuation_quality("HALT_PRESSURE", m)
+        if halt_pressure_qualifies and not halt_pressure_continuation["ready"]:
+            halt_pressure_qualifies = False
 
         if s.continuation_started_at and s.continuation_peak is not None:
             s.continuation_peak = max(s.continuation_peak, m["price"])
@@ -1923,6 +1975,11 @@ class MarketWatcher:
             "early_release_used": bool(early_release_qualifies),
             "early_signal": early_signal_decision,
             "early_signal_used": bool(early_signal_qualifies),
+            "late_stage_continuation": (
+                ignition_continuation if stage == "IGNITION"
+                else halt_pressure_continuation if stage == "HALT_PRESSURE"
+                else None
+            ),
         })
         promoted_profile["promotion_trace"] = promoted_trace
 

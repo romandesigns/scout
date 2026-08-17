@@ -8,8 +8,8 @@ warning: in the working copy of 'VERSION', LF will be replaced by CRLF the next 
 warning: in the working copy of 'web/src-tauri/Cargo.toml', LF will be replaced by CRLF the next time Git touches it
 
 === Python tests ===
-........................................................................ [ 98%]
-C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\_pytest\unraisableexception.py:67: PytestUnraisableExceptionWarning: Exception ignored while calling deallocator <function _ProactorBasePipeTransport.__del__ at 0x000002976D166140>: None
+........................................................................ [ 91%]
+C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\_pytest\unraisableexception.py:67: PytestUnraisableExceptionWarning: Exception ignored while calling deallocator <function _ProactorBasePipeTransport.__del__ at 0x0000021CF6156140>: None
 
 Traceback (most recent call last):
   File "C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\asyncio\proactor_events.py", line 116, in __del__
@@ -24,7 +24,7 @@ ValueError: I/O operation on closed pipe
 
 
   warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
-.                                                                        [100%]
+.......                                                                  [100%]
 ============================== warnings summary ===============================
 C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:64
   C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplotlib\_fontconfig_pattern.py:64: PyparsingDeprecationWarning: 'oneOf' deprecated - use 'one_of'
@@ -53,7 +53,7 @@ C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\matplot
     ParserElement.enablePackrat()
 
 tests/test_hybrid.py::test_rust_bridge_microbatches_preserve_burst_without_drops
-  C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\_pytest\unraisableexception.py:67: PytestUnraisableExceptionWarning: Exception ignored while calling deallocator <function _ProactorBasePipeTransport.__del__ at 0x000002976D166140>: None
+  C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\site-packages\_pytest\unraisableexception.py:67: PytestUnraisableExceptionWarning: Exception ignored while calling deallocator <function _ProactorBasePipeTransport.__del__ at 0x0000021CF6156140>: None
   
   Traceback (most recent call last):
     File "C:\Users\trfm1\AppData\Local\Programs\Python\Python314\Lib\asyncio\proactor_events.py", line 116, in __del__
@@ -70,7 +70,7 @@ tests/test_hybrid.py::test_rust_bridge_microbatches_preserve_burst_without_drops
     warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-73 passed, 15 warnings in 2.62s
+79 passed, 15 warnings in 2.92s
 
 === Rust tests ===
     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.04s
@@ -79,12 +79,12 @@ tests/test_hybrid.py::test_rust_bridge_microbatches_preserve_burst_without_drops
 running 10 tests
 test tests::empty_replay_is_isolated ... ok
 test tests::entering_overnight_resets_bucket_warmup ... ok
+test tests::recipe_flicker_does_not_rearm_while_structure_holds ... ok
 test tests::pct_is_directional ... ok
 test tests::qualified_state_stays_active_even_when_continuity_subset_flickers ... ok
 test tests::structural_break_allows_a_fresh_episode ... ok
-test tests::stream_line_uses_same_market_event_contract ... ok
-test tests::recipe_flicker_does_not_rearm_while_structure_holds ... ok
 test tests::sparse_history_warms_by_closed_buckets_not_trade_count ... ok
+test tests::stream_line_uses_same_market_event_contract ... ok
 test tests::stateful_engine_matches_batch_replay_candidate_count ... ok
 test tests::malformed_input_fails_with_counted_integrity ... ok
 
@@ -106,18 +106,18 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 === WEB INSTALL / BUILD ===
 bun install v1.3.13 (bf2e2cec)
 
-Checked 102 installs across 171 packages (no changes) [21.00ms]
+Checked 102 installs across 171 packages (no changes) [20.00ms]
 $ next build
 Γû▓ Next.js 16.3.0 (Turbopack)
-Γ£ô Running next.config.ts took 34ms
+Γ£ô Running next.config.ts took 35ms
 
   Creating an optimized production build ...
-Γ£ô Compiled successfully in 1927ms
+Γ£ô Compiled successfully in 1884ms
   Running TypeScript ...
-  Finished TypeScript in 1299ms ...
+  Finished TypeScript in 1347ms ...
   Collecting page data using 4 workers ...
   Generating static pages using 4 workers (0/3) ...
-Γ£ô Generating static pages using 4 workers (3/3) in 439ms
+Γ£ô Generating static pages using 4 workers (3/3) in 442ms
   Finalizing page optimization ...
 
 Route (app)
@@ -129,5 +129,5 @@ Route (app)
 
 
 ============================================================
-SCOUT v6.6.7 LOCAL VALIDATION PASS
+SCOUT v6.6.8 LOCAL VALIDATION PASS
 ============================================================
