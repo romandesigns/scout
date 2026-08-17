@@ -1,3 +1,11 @@
+# 6.6.0 - Promotion Gate Trace
+
+- Adds persistent promotion-gate traces to Developing/PRE_IGNITION findings without changing production detection thresholds.
+- Records the exact boolean gates blocking A/B promotion, candidate age, extension/timeliness risk, and the next blocker.
+- Adds `validate-promotion-trace.ps1` / `scripts/promotion_trace.py` to summarize the most common promotion blockers and identify candidates at risk of being promoted late.
+- Extends actionable findings with promotion-delay context so the next calibration can compare first awareness with actual notification time.
+- This is an observability release: promotion thresholds and notification rules are intentionally unchanged.
+
 # Changelog
 
 ## 6.5.9 - Detection-quality audit correctness

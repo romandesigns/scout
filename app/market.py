@@ -46,6 +46,70 @@ def _chunks(seq: list[str], size: int):
         yield seq[i:i + size]
 
 
+def build_promotion_trace(
+    m: dict,
+    *,
+    relative_activity: bool,
+    fast_single_bucket: bool,
+    regular_participation: bool,
+    sudden_impulse: bool,
+    bearish_short: bool,
+    structural_failure: bool,
+    structure_ok: bool,
+    quality_actionable: bool,
+    first_leg_candidate: bool,
+    candidate_age_seconds: float | None = None,
+) -> dict:
+    """Return an auditable snapshot of the gates between awareness and promotion.
+
+    This function is deliberately observational. It mirrors the existing gates
+    without changing thresholds or promotion decisions.
+    """
+    participation_ok = bool(regular_participation or fast_single_bucket or m.get("staircase"))
+    activity_ok = bool(relative_activity or fast_single_bucket or m.get("staircase"))
+    impulse_ok = bool(sudden_impulse or m.get("staircase"))
+    gates = {
+        "full_warmup": bool(m.get("full_warmup")),
+        "relative_activity": activity_ok,
+        "participation": participation_ok,
+        "fresh_impulse": impulse_ok,
+        "not_bearish_short": not bearish_short,
+        "no_structural_failure": not structural_failure,
+        "structure_ok": bool(structure_ok),
+        "quality_clean": str(m.get("quality_label") or "") == "CLEAN",
+        "bullish_confirmed": bool(m.get("bullish_confirmed")),
+        "quality_actionable": bool(quality_actionable),
+        "first_leg_candidate": bool(first_leg_candidate),
+        "first_leg_release": bool(m.get("first_leg_release")),
+    }
+    blockers = [name for name, passed in gates.items() if not passed]
+    base_extension = float(m.get("base_extension_pct") or 0.0)
+    extension = float(m.get("extension") or 0.0)
+    trace = {
+        "gates": gates,
+        "blockers": blockers,
+        "next_blocker": blockers[0] if blockers else None,
+        "candidate_age_seconds": round(float(candidate_age_seconds or 0.0), 3),
+        "quality_label": m.get("quality_label"),
+        "quality_score": int(m.get("quality_score") or 0),
+        "rejection_reasons": list(m.get("rejection_reasons") or []),
+        "score": int(m.get("score") or 0),
+        "base_extension_pct": base_extension,
+        "extension_pct": extension,
+        "trigger_distance_pct": None,
+        "late_risk": bool(base_extension > 0.75 or extension > 2.0),
+        "fresh_velocity_pct": max(
+            float(m.get("change3") or 0.0), float(m.get("change5") or 0.0),
+            float(m.get("change15") or 0.0), float(m.get("change30") or 0.0),
+        ),
+    }
+    trigger = m.get("micro_resistance")
+    price = float(m.get("price") or 0.0)
+    if trigger is not None and price > 0:
+        trace["trigger_distance_pct"] = round((float(trigger) - price) / price * 100.0, 4)
+    return trace
+
+
 class Universe:
     def __init__(self):
         self.symbols: set[str] = set()
@@ -1302,7 +1366,17 @@ class MarketWatcher:
             if not s.first_leg_candidate_at:
                 s.first_leg_candidate_at = ts
                 s.first_leg_context = str(m.get("leg_context") or "BASE_RELEASE")
+            candidate_age_seconds = max(0.0, ts - s.first_leg_candidate_at)
+            promotion_trace = build_promotion_trace(
+                m, relative_activity=relative_activity, fast_single_bucket=fast_single_bucket,
+                regular_participation=regular_participation, sudden_impulse=sudden_impulse,
+                bearish_short=bearish_short, structural_failure=structural_failure, structure_ok=structure_ok,
+                quality_actionable=quality_actionable, first_leg_candidate=first_leg_candidate,
+                candidate_age_seconds=candidate_age_seconds,
+            )
             if pre_ignition_recipe_qualifies and not s.pre_ignition_finding_id:
+                watch_profile = dict(m["candidate_profile"])
+                watch_profile["promotion_trace"] = promotion_trace
                 watch = Finding(
                     ticker=s.symbol, stage="PRE_IGNITION", detected_at=ts, price=m["price"],
                     score=min(10, int(m["score"])), vol_ratio_15s=m["vol15"], vol_ratio_30s=m["vol30"],
@@ -1319,7 +1393,7 @@ class MarketWatcher:
                     active_bucket_ratio=m["active_bucket_ratio"], direction_reversals=m["direction_reversals"],
                     previous_close=m["previous_close"], gap_pct=m["gap_pct"], day_volume=m["day_volume"],
                     projected_session_volume=m["projected_session_volume"], volume_rate_per_minute=m["volume_rate_per_minute"],
-                    candidate_profile=dict(m["candidate_profile"]), episode_id=s.episode_id,
+                    candidate_profile=watch_profile, episode_id=s.episode_id,
                     leg_context=s.first_leg_context, ross_match=m["ross_match"], ross_score=m["ross_score"],
                     detection_timeframe_seconds=settings.bucket_seconds,
                     formation_start_at=(ts - settings.first_leg_base_buckets * settings.bucket_seconds),
@@ -1414,6 +1488,14 @@ class MarketWatcher:
                         f"local-low bounce +{m['reversal_bounce_pct']:.2f}% from ${m['reversal_low']:.4f}",
                         "reversal developing; structural reclaim not confirmed",
                     ])
+                watch_profile = dict(m["candidate_profile"])
+                watch_profile["promotion_trace"] = build_promotion_trace(
+                    m, relative_activity=relative_activity, fast_single_bucket=fast_single_bucket,
+                    regular_participation=regular_participation, sudden_impulse=sudden_impulse,
+                    bearish_short=bearish_short, structural_failure=structural_failure, structure_ok=structure_ok,
+                    quality_actionable=quality_actionable, first_leg_candidate=first_leg_candidate,
+                    candidate_age_seconds=(max(0.0, ts - s.first_leg_candidate_at) if s.first_leg_candidate_at else 0.0),
+                )
                 watch = Finding(
                     ticker=s.symbol, stage=watch_stage, detected_at=ts, price=m["price"], score=min(10, int(m["score"])),
                     vol_ratio_15s=m["vol15"], vol_ratio_30s=m["vol30"], change_60s_pct=m["change60"], extension_pct=m["extension"],
@@ -1427,7 +1509,7 @@ class MarketWatcher:
                     active_bucket_ratio=m["active_bucket_ratio"], direction_reversals=m["direction_reversals"],
                     previous_close=m["previous_close"], gap_pct=m["gap_pct"], day_volume=m["day_volume"],
                     projected_session_volume=m["projected_session_volume"], volume_rate_per_minute=m["volume_rate_per_minute"],
-                    float_shares=m["float_shares"], float_turnover=m["float_turnover"], candidate_profile=dict(m["candidate_profile"]),
+                    float_shares=m["float_shares"], float_turnover=m["float_turnover"], candidate_profile=watch_profile,
                     episode_id=s.episode_id, reversal_phase="WATCH" if reversal_watch else None,
                     reversal_low=m["reversal_low"] if reversal_watch else None,
                     reversal_drawdown_pct=m["reversal_drawdown_pct"] if reversal_watch else None,
@@ -1571,6 +1653,21 @@ class MarketWatcher:
             signals.append("CATALYST")
         signals = list(dict.fromkeys(signals))
 
+        promoted_profile = dict(m["candidate_profile"])
+        promoted_trace = build_promotion_trace(
+            m, relative_activity=relative_activity, fast_single_bucket=fast_single_bucket,
+            regular_participation=regular_participation, sudden_impulse=sudden_impulse,
+            bearish_short=bearish_short, structural_failure=structural_failure, structure_ok=structure_ok,
+            quality_actionable=quality_actionable, first_leg_candidate=first_leg_candidate,
+            candidate_age_seconds=(max(0.0, ts - s.first_leg_candidate_at) if s.first_leg_candidate_at else 0.0),
+        )
+        promoted_trace.update({
+            "promoted": True,
+            "selected_stage": stage,
+            "promotion_delay_seconds": (round(max(0.0, ts - s.first_leg_candidate_at), 3) if s.first_leg_candidate_at else None),
+        })
+        promoted_profile["promotion_trace"] = promoted_trace
+
         f = Finding(
             ticker=s.symbol,
             stage=stage,
@@ -1615,7 +1712,7 @@ class MarketWatcher:
             volume_rate_per_minute=m["volume_rate_per_minute"],
             float_shares=m["float_shares"],
             float_turnover=m["float_turnover"],
-            candidate_profile=dict(m["candidate_profile"]),
+            candidate_profile=promoted_profile,
             episode_id=s.episode_id,
             reversal_phase="REARM" if reversal_rearm_qualifies else "RECLAIM" if reclaim_qualifies else s.reversal_phase if s.reversal_phase != "IDLE" else None,
             reversal_low=s.reversal_low or (m["reversal_low"] if reclaim_qualifies else None),

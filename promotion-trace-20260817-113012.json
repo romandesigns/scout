@@ -1,0 +1,17 @@
+{
+  "generated_at": "2026-08-17T15:30:12.107817+00:00",
+  "api_base": "https://srv1170872.tail86523.ts.net:8444",
+  "summary": {
+    "rows": 300,
+    "traced": 0,
+    "untraced": 300,
+    "promoted": 0,
+    "late_risk": 0,
+    "average_promotion_delay_seconds": null,
+    "top_blockers": [],
+    "top_rejection_reasons": [],
+    "stages": {},
+    "quality_labels": {}
+  },
+  "rows": []
+}
