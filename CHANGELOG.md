@@ -1,3 +1,12 @@
+## 6.6.5
+
+- Fixed detection-quality ACTIONABLE cohort starvation under high finding throughput.
+- Added aged/actionable filtering to `/api/findings`.
+- Detection-quality audit v3 now requests mature A/B findings directly.
+- Added fetched/selected/exclusion diagnostics instead of silent zero-sample reports.
+- Added regression tests for cohort selection and measurable synthetic EARLY outcomes.
+- No detector, promotion, notification, or late-risk threshold changes.
+
 ## 6.6.4
 
 - Made canonical late-risk a hard blocker for EARLY_SIGNAL.

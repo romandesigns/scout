@@ -188,14 +188,25 @@ class ScoutApi:
         limit = _int(request.query.get("limit"), 100, 1, 500)
         ticker = request.query.get("ticker")
         stage = request.query.get("stage")
+        before_raw = request.query.get("before")
+        before = None
+        if before_raw not in (None, ""):
+            try:
+                before = float(before_raw)
+            except (TypeError, ValueError):
+                raise web.HTTPBadRequest(text="before must be a Unix timestamp")
+        actionable_only = str(request.query.get("actionable_only", "0")).lower() in {"1", "true", "yes"}
         episodes = str(request.query.get("episodes", "0")).lower() in {"1", "true", "yes"}
         async def load():
-            if episodes and not ticker and not stage:
+            if episodes and not ticker and not stage and before is None and not actionable_only:
                 rows = await asyncio.to_thread(self.store.list_episodes, limit)
             else:
-                rows = await asyncio.to_thread(self.store.list_findings, limit, ticker, stage)
+                rows = await asyncio.to_thread(
+                    self.store.list_findings, limit, ticker, stage, before, actionable_only
+                )
             return [row for row in rows if self.market.min_price <= float(row.get("price") or 0) <= self.market.max_price]
-        return await self._cached_items(f"findings:{limit}:{ticker or ''}:{stage or ''}:{int(episodes)}", load)
+        cache_key = f"findings:{limit}:{ticker or ''}:{stage or ''}:{before or ''}:{int(actionable_only)}:{int(episodes)}"
+        return await self._cached_items(cache_key, load)
 
     async def finding(self, request: web.Request) -> web.Response:
         finding_id = _int(request.match_info.get("finding_id"), 0, 1, 2_147_483_647)

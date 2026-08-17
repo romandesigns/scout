@@ -48,6 +48,35 @@ def developing(f: dict[str, Any]) -> bool:
     return rank == "C" or label in {"DEVELOPING", "ILLIQUID"}
 
 
+def select_findings(
+    findings: list[dict[str, Any]],
+    *,
+    now: float,
+    min_age_seconds: float,
+    include_developing: bool,
+) -> tuple[list[tuple[str, dict[str, Any]]], Counter[str]]:
+    selected: list[tuple[str, dict[str, Any]]] = []
+    excluded: Counter[str] = Counter()
+    for f in findings:
+        cohort = "ACTIONABLE" if actionable(f) else ("DEVELOPING" if include_developing and developing(f) else None)
+        if cohort is None:
+            excluded["not_in_requested_cohort"] += 1
+            continue
+        detected_at = safe_float(f.get("detected_at"))
+        price = safe_float(f.get("price"))
+        if detected_at is None:
+            excluded["missing_detected_at"] += 1
+            continue
+        if price is None or price <= 0:
+            excluded["invalid_price"] += 1
+            continue
+        if now - detected_at < min_age_seconds:
+            excluded["too_young"] += 1
+            continue
+        selected.append((cohort, f))
+    return selected, excluded
+
+
 def nearest_index(rows: list[dict[str, Any]], target: float, tolerance: float = 45.0) -> int | None:
     if not rows:
         return None
@@ -162,7 +191,7 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Scout forward detection-quality audit v2")
+    p = argparse.ArgumentParser(description="Scout forward detection-quality audit v3")
     p.add_argument("--api-base", default=os.getenv("SCOUT_API_BASE", "https://srv1170872.tail86523.ts.net:8444"))
     p.add_argument("--limit", type=int, default=100)
     p.add_argument("--include-developing", action="store_true")
@@ -173,26 +202,33 @@ def main() -> int:
     base = args.api_base.rstrip("/")
     now = time.time()
     limit = max(20, min(500, args.limit))
-    data = fetch_json(f"{base}/api/findings?limit={limit}&episodes=1", timeout=40)
+    # v3: ask production for rows that are already old enough to evaluate.
+    # This avoids the former starvation bug where the latest 100/500 findings were
+    # dominated by fresh C-rank observations and every A/B finding was filtered out.
+    before = now - args.min_age_seconds
+    query = {
+        "limit": limit,
+        "before": f"{before:.6f}",
+    }
+    if not args.include_developing:
+        query["actionable_only"] = "1"
+    data = fetch_json(f"{base}/api/findings?{urllib.parse.urlencode(query)}", timeout=40)
     findings = data.get("items", data if isinstance(data, list) else [])
     validation_data = fetch_json(f"{base}/api/validation?limit=500", timeout=40)
     validations = {int(x["id"]): x for x in validation_data.get("items", []) if x.get("id") is not None}
 
-    selected: list[tuple[str, dict[str, Any]]] = []
-    for f in findings:
-        cohort = "ACTIONABLE" if actionable(f) else ("DEVELOPING" if args.include_developing and developing(f) else None)
-        if cohort is None:
-            continue
-        detected_at = safe_float(f.get("detected_at")); price = safe_float(f.get("price"))
-        if detected_at is None or price is None or price <= 0 or now - detected_at < args.min_age_seconds:
-            continue
-        selected.append((cohort, f))
+    selected, excluded = select_findings(
+        findings,
+        now=now,
+        min_age_seconds=args.min_age_seconds,
+        include_developing=args.include_developing,
+    )
 
     rows_out: list[dict[str, Any]] = []
     errors: list[str] = []
     print("=" * 126)
-    print("SCOUT FORWARD DETECTION-QUALITY AUDIT v2")
-    print(f"API={base} selected={len(selected)} strict_actionable=A/B include_developing={args.include_developing}")
+    print("SCOUT FORWARD DETECTION-QUALITY AUDIT v3")
+    print(f"API={base} fetched={len(findings)} selected={len(selected)} strict_actionable=A/B include_developing={args.include_developing} min_age={args.min_age_seconds}s")
     print("=" * 126)
     print(f"{'COHORT':11} {'TICKER':7} {'STAGE':18} {'RANK':5} {'PRICE':9} {'30s':8} {'1m':8} {'2m':8} {'5m':8} {'15m':8} {'MFE5':8} {'MAE5':8} {'COVERAGE':15} LABEL")
 
@@ -234,9 +270,13 @@ def main() -> int:
 
     summary = {
         "generated_at": datetime.now(timezone.utc).isoformat(), "api_base": base, "strict_actionable": True,
-        "include_developing": args.include_developing, "cohorts": cohorts, "stages": stages, "errors": errors,
+        "include_developing": args.include_developing, "min_age_seconds": args.min_age_seconds,
+        "fetched_count": len(findings), "selected_count": len(selected),
+        "excluded": dict(sorted(excluded.items())),
+        "cohorts": cohorts, "stages": stages, "errors": errors,
     }
     print("\n" + "=" * 126 + "\nSUMMARY")
+    print(f"fetched={len(findings)} selected={len(selected)} excluded={dict(sorted(excluded.items()))}")
     for name, s in cohorts.items():
         print(f"{name}: sample={s['sample_count']} final15m={s['final_count']} provisional5m={s['provisional_count']} unmatured={s['unmatured_count']} classes={s['classifications']}")
         if s["final_count"]:
