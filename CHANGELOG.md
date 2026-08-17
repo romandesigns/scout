@@ -1,3 +1,13 @@
+# Changelog
+
+## 6.5.9 - Detection-quality audit correctness
+
+- Makes the default detection-quality cohort strictly actionable ranks A/B; Developing/C findings are excluded unless explicitly requested.
+- Adds a forced historical market-snapshot mode so forward 30s/1m/2m/5m/15m measurements are not accidentally computed from a short live-memory window.
+- Separates final, provisional, and unmatured evaluation states and refuses to assign false-positive/early/late labels without sufficient 5-minute coverage.
+- Cross-checks independently recomputed excursions against Scout's persisted outcome tracker and reports stage/cohort summaries.
+- Adds regression tests for strict actionable selection, snapshot forcing, coverage rules, and classification maturity.
+
 # 6.5.8 — Hybrid backpressure throughput
 
 - Micro-batched ordered Python→Rust JSONL writes to remove per-trade pipe drain overhead under SIP bursts.

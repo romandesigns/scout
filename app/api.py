@@ -257,13 +257,14 @@ class ScoutApi:
             finding_id = int(finding_id_raw) if finding_id_raw else None
         except (TypeError, ValueError):
             raise web.HTTPBadRequest(text="invalid chart window")
-        payload = self.market.snapshot_payload(ticker)
+        force_historical = str(request.query.get("historical", "")).strip().lower() in {"1", "true", "yes"}
+        payload = None if force_historical else self.market.snapshot_payload(ticker)
         live_rows = payload.get("buckets", []) if payload else []
         live_covers_detection = bool(
             detected_at and live_rows
             and float(live_rows[0]["start_ts"]) - bucket_seconds <= detected_at <= float(live_rows[-1]["start_ts"]) + bucket_seconds
         )
-        if detected_at and not live_covers_detection:
+        if detected_at and (force_historical or not live_covers_detection):
             try:
                 payload = await asyncio.to_thread(self.market.historical_snapshot_sync, ticker, detected_at, bucket_seconds)
             except Exception as exc:
