@@ -10,7 +10,7 @@ from .config import settings
 from .db import Store
 from .models import Bucket, Finding
 from .events import EventHub
-from .notifiers import notification_allowed, send_ntfy, send_ntfy_chart, send_resend_email, send_web_push_all
+from .notifiers import channel_rate_limited, notification_allowed, send_ntfy, send_ntfy_chart, send_resend_email, send_web_push_all
 
 log = logging.getLogger("scout.dispatch")
 
@@ -51,6 +51,9 @@ class Dispatcher:
         asyncio.create_task(self._notification_worker("webpush"), name="scout-webpush-worker")
 
     async def _queue(self, channel: str, finding_id: int, f: Finding, prefs: dict) -> None:
+        if channel == "ntfy" and channel_rate_limited("ntfy"):
+            await asyncio.to_thread(self.store.record_delivery, finding_id, channel, "suppressed", "provider circuit breaker active")
+            return
         queue = self._ntfy_queue if channel == "ntfy" else self._webpush_queue if channel == "webpush" else self._email_queue
         # Stage urgency must dominate evidence score. A score-10 watch can no
         # longer crowd out a FIRST_LEG, ignition, catalyst, or halt.

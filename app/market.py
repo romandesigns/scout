@@ -139,6 +139,14 @@ class MarketWatcher:
             "sip": {"connected": False, "connections": 0, "disconnects": 0, "last_connected_at": None, "last_disconnected_at": None, "last_error": None},
             "boats": {"connected": False, "connections": 0, "disconnects": 0, "last_connected_at": None, "last_disconnected_at": None, "last_error": None},
         }
+        self._reconcile_locks = {"sip": asyncio.Lock(), "boats": asyncio.Lock()}
+        self.reconcile_status: dict[str, dict[str, object]] = {
+            "sip": {"in_progress": False, "last_started_at": None, "last_completed_at": None, "last_error": None},
+            "boats": {"in_progress": False, "last_started_at": None, "last_completed_at": None, "last_error": None},
+        }
+        self.last_market_event_at: float | None = None
+        self.last_market_event_by_feed: dict[str, float | None] = {"sip": None, "boats": None}
+        self.runtime_watchdog = None
 
     def set_quality_profile(self, profile: str) -> None:
         normalized = str(profile).lower()
@@ -664,24 +672,44 @@ class MarketWatcher:
     async def _reconcile(self, ws, subscribed: set[str], label: str):
         if not ws:
             return
-        desired = set(self._desired)
-        if "*" in desired:
-            if subscribed != {"*"}:
-                await ws.send(json.dumps({"action": "subscribe", "trades": ["*"]}))
-                subscribed.clear()
-                subscribed.add("*")
-            return
-        add = sorted(desired - subscribed)
-        remove = sorted(subscribed - desired)
-        # Chunk subscription messages to avoid giant frames.
-        for chunk in _chunks(remove, 1000):
-            await ws.send(json.dumps({"action": "unsubscribe", "trades": chunk}))
-        for chunk in _chunks(add, 1000):
-            await ws.send(json.dumps({"action": "subscribe", "trades": chunk}))
-        subscribed.difference_update(remove)
-        subscribed.update(add)
-        if add or remove:
-            log.info("%s subscriptions updated: +%d -%d total=%d", label, len(add), len(remove), len(subscribed))
+        key = "boats" if str(label).upper() == "BOATS" else "sip"
+        lock = self._reconcile_locks[key]
+        status = self.reconcile_status[key]
+        async with lock:
+            status["in_progress"] = True
+            status["last_started_at"] = int(time.time())
+            status["last_error"] = None
+            try:
+                desired = set(self._desired)
+                async def send(payload: dict) -> None:
+                    await asyncio.wait_for(
+                        ws.send(json.dumps(payload)),
+                        timeout=settings.reconcile_send_timeout_seconds,
+                    )
+                if "*" in desired:
+                    if subscribed != {"*"}:
+                        await send({"action": "subscribe", "trades": ["*"]})
+                        subscribed.clear()
+                        subscribed.add("*")
+                    return
+                add = sorted(desired - subscribed)
+                remove = sorted(subscribed - desired)
+                # Chunk and bound every send. Reconnect and universe-refresh
+                # reconciliation can no longer overlap indefinitely.
+                for chunk in _chunks(remove, 1000):
+                    await send({"action": "unsubscribe", "trades": chunk})
+                for chunk in _chunks(add, 1000):
+                    await send({"action": "subscribe", "trades": chunk})
+                subscribed.difference_update(remove)
+                subscribed.update(add)
+                if add or remove:
+                    log.info("%s subscriptions updated: +%d -%d total=%d", label, len(add), len(remove), len(subscribed))
+            except Exception as exc:
+                status["last_error"] = str(exc)
+                raise
+            finally:
+                status["in_progress"] = False
+                status["last_completed_at"] = int(time.time())
 
     def _metrics(self, s: SymbolState, now: float) -> dict | None:
         if not s.current or len(s.buckets) < 4:
@@ -1687,6 +1715,9 @@ class MarketWatcher:
             return
         if price <= 0:
             return
+        ingest_now = time.time()
+        self.last_market_event_at = ingest_now
+        self.last_market_event_by_feed["boats" if str(feed).lower() == "boats" else "sip"] = ingest_now
         # Keep guard-band symbols warm even while just outside the alert price range.
         # _maybe_emit() enforces MIN_PRICE/MAX_PRICE when deciding whether to alert.
         raw_ts = msg.get("t")

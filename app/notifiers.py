@@ -34,6 +34,11 @@ def delivery_health() -> dict[str, dict[str, Any]]:
     with _health_lock:
         return {channel: dict(values) for channel, values in _delivery_health.items()}
 
+def channel_rate_limited(channel: str) -> bool:
+    with _health_lock:
+        until = _delivery_health.get(channel, {}).get("rate_limited_until")
+    return bool(until and float(until) > time.time())
+
 
 def _health(channel: str, **values: Any) -> None:
     with _health_lock:
@@ -66,6 +71,8 @@ def _post_with_backoff(
     configuration errors and fail immediately. The lock intentionally spans
     retry waits so parallel findings cannot stampede the provider.
     """
+    if channel_rate_limited(channel):
+        raise RuntimeError(f"{channel} temporarily suppressed by provider circuit breaker")
     attempts = max(1, settings.notification_retry_attempts)
     with _channel_locks[channel]:
         for attempt in range(attempts):
@@ -97,6 +104,13 @@ def _post_with_backoff(
             retryable = response.status_code == 429 or response.status_code >= 500
             detail = response.text[:300].replace("\n", " ")
             error = f"HTTP {response.status_code}: {detail}".strip()
+            quota_exhausted = response.status_code == 429 and ("daily message quota" in detail.lower() or "limit reached" in detail.lower())
+            if quota_exhausted:
+                cooldown = settings.ntfy_quota_cooldown_seconds if channel == "ntfy" else settings.notification_retry_max_seconds
+                _channel_next_at[channel] = time.monotonic() + cooldown
+                _health(channel, last_error=error, rate_limited_until=int(time.time() + cooldown))
+                log.error("%s quota exhausted; circuit breaker open for %ss", channel, int(cooldown))
+                response.raise_for_status()
             if not retryable or attempt + 1 >= attempts:
                 _health(channel, last_error=error)
                 response.raise_for_status()

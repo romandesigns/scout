@@ -228,6 +228,14 @@ class Settings:
     notification_retry_attempts: int = _i("NOTIFICATION_RETRY_ATTEMPTS", 5, 1)
     notification_retry_base_seconds: float = _f("NOTIFICATION_RETRY_BASE_SECONDS", 2.0, 0.25)
     notification_retry_max_seconds: float = _f("NOTIFICATION_RETRY_MAX_SECONDS", 120.0, 1.0)
+    ntfy_quota_cooldown_seconds: int = _i("NTFY_QUOTA_COOLDOWN_SECONDS", 21600, 300)
+
+    # Runtime reliability. The watchdog is process-local so Docker restart policy
+    # can recover an event-loop stall without privileged Docker socket access.
+    event_loop_watchdog_seconds: int = _i("EVENT_LOOP_WATCHDOG_SECONDS", 45, 15)
+    event_loop_watchdog_grace_seconds: int = _i("EVENT_LOOP_WATCHDOG_GRACE_SECONDS", 90, 15)
+    api_cache_ttl_seconds: float = _f("API_CACHE_TTL_SECONDS", 1.5, 0.1)
+    reconcile_send_timeout_seconds: float = _f("RECONCILE_SEND_TIMEOUT_SECONDS", 5.0, 1.0)
 
     # Hybrid Rust-primary + Python-specialist runtime. These settings affect
     # integration/routing only; they do not change the frozen v6.4.13 detector

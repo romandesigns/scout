@@ -38,6 +38,14 @@ else
   printf '\nNTFY_MIN_INTERVAL_SECONDS=8\n' >> "$env_file"
 fi
 
+# v6.5.6: use the bundled ntfy server instead of ntfy.sh quotas. Existing
+# custom/self-hosted NTFY_SERVER values are preserved.
+if grep -Eq '^NTFY_SERVER=https?://ntfy\.sh/?$' "$env_file"; then
+  sed -i 's#^NTFY_SERVER=.*#NTFY_SERVER=http://ntfy:80#' "$env_file"
+elif ! grep -q '^NTFY_SERVER=' "$env_file"; then
+  printf 'NTFY_SERVER=http://ntfy:80\n' >> "$env_file"
+fi
+
 cd "$app_dir"
 if [[ "$use_cache" == "1" ]]; then
   docker compose build scout
@@ -54,6 +62,13 @@ if ! grep -q '^VAPID_SUBJECT=.' "$env_file"; then
   sed -i '/^VAPID_SUBJECT=/d' "$env_file"
   printf 'VAPID_SUBJECT=mailto:scout@localhost\n' >> "$env_file"
 fi
+docker compose up -d --force-recreate ntfy
+for _ in $(seq 1 20); do
+  if curl -fsS http://127.0.0.1:18082/v1/health 2>/dev/null | grep -q '"healthy"'; then
+    break
+  fi
+  sleep 1
+done
 docker compose up -d --force-recreate scout
 
 healthy=0

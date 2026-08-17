@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
+
+import orjson
 
 from aiohttp import web
 
@@ -51,6 +54,28 @@ class ScoutApi:
         self.events = events
         self.catalyst_watcher = catalysts
         self.dispatcher = dispatcher
+        self._response_cache: dict[str, tuple[float, bytes]] = {}
+        self._response_cache_lock = asyncio.Lock()
+
+    async def _cached_items(self, key: str, loader, ttl: float | None = None) -> web.Response:
+        ttl = settings.api_cache_ttl_seconds if ttl is None else ttl
+        now = time.monotonic()
+        cached = self._response_cache.get(key)
+        if cached and now - cached[0] <= ttl:
+            return web.Response(body=cached[1], content_type="application/json")
+        async with self._response_cache_lock:
+            now = time.monotonic()
+            cached = self._response_cache.get(key)
+            if cached and now - cached[0] <= ttl:
+                return web.Response(body=cached[1], content_type="application/json")
+            rows = await loader()
+            body = await asyncio.to_thread(orjson.dumps, {"items": rows})
+            self._response_cache[key] = (time.monotonic(), body)
+            if len(self._response_cache) > 64:
+                oldest = sorted(self._response_cache.items(), key=lambda item: item[1][0])[:16]
+                for old_key, _ in oldest:
+                    self._response_cache.pop(old_key, None)
+            return web.Response(body=body, content_type="application/json")
 
     async def health(self, request: web.Request) -> web.Response:
         hybrid_status = self.market.rust_bridge.status() if self.market.rust_bridge else {"enabled": False, "running": False}
@@ -69,6 +94,13 @@ class ScoutApi:
             "dashboard": settings.web_out_dir.exists(),
             "hybrid": hybrid_status,
             "feed_health": self.market.feed_health,
+            "ingest": {
+                "last_market_event_at": self.market.last_market_event_at,
+                "last_market_event_age_seconds": (round(time.time() - self.market.last_market_event_at, 3) if self.market.last_market_event_at else None),
+                "by_feed": self.market.last_market_event_by_feed,
+                "reconcile": self.market.reconcile_status,
+            },
+            "watchdog": self.market.runtime_watchdog.status() if self.market.runtime_watchdog else {"enabled": False},
             "engines": ["RUST_PRIMARY", "AWAKENING", "PRE_IGNITION_SHADOW", "FIRST_LEG", "EARLY", "SURGE", "BREAKOUT", "STAIRCASE", "IGNITION", "REVERSAL_WATCH", "EMA_RECLAIM", "VWAP_RECLAIM", "REARM", "HALT_PRESSURE", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT"],
         })
 
@@ -154,12 +186,13 @@ class ScoutApi:
         ticker = request.query.get("ticker")
         stage = request.query.get("stage")
         episodes = str(request.query.get("episodes", "0")).lower() in {"1", "true", "yes"}
-        if episodes and not ticker and not stage:
-            rows = await asyncio.to_thread(self.store.list_episodes, limit)
-        else:
-            rows = await asyncio.to_thread(self.store.list_findings, limit, ticker, stage)
-        rows = [row for row in rows if self.market.min_price <= float(row.get("price") or 0) <= self.market.max_price]
-        return web.json_response({"items": rows})
+        async def load():
+            if episodes and not ticker and not stage:
+                rows = await asyncio.to_thread(self.store.list_episodes, limit)
+            else:
+                rows = await asyncio.to_thread(self.store.list_findings, limit, ticker, stage)
+            return [row for row in rows if self.market.min_price <= float(row.get("price") or 0) <= self.market.max_price]
+        return await self._cached_items(f"findings:{limit}:{ticker or ''}:{stage or ''}:{int(episodes)}", load)
 
     async def finding(self, request: web.Request) -> web.Response:
         finding_id = _int(request.match_info.get("finding_id"), 0, 1, 2_147_483_647)
@@ -194,8 +227,9 @@ class ScoutApi:
     async def catalysts(self, request: web.Request) -> web.Response:
         limit = _int(request.query.get("limit"), 100, 1, 500)
         ticker = request.query.get("ticker")
-        rows = await asyncio.to_thread(self.store.list_catalysts, limit, ticker)
-        return web.json_response({"items": rows})
+        async def load():
+            return await asyncio.to_thread(self.store.list_catalysts, limit, ticker)
+        return await self._cached_items(f"catalysts:{limit}:{ticker or ''}", load, ttl=2.0)
 
     async def gainers(self, request: web.Request) -> web.Response:
         top = _int(request.query.get("top"), 20, 1, 50)
@@ -276,8 +310,9 @@ class ScoutApi:
     async def attention(self, request: web.Request) -> web.Response:
         limit = _int(request.query.get("limit"), 100, 1, 300)
         status = request.query.get("status")
-        rows = await asyncio.to_thread(self.store.list_attention, limit, status)
-        return web.json_response({"items": rows})
+        async def load():
+            return await asyncio.to_thread(self.store.list_attention, limit, status)
+        return await self._cached_items(f"attention:{limit}:{status or ''}", load, ttl=2.0)
 
     async def update_attention(self, request: web.Request) -> web.Response:
         attention_id = _int(request.match_info.get("attention_id"), 0, 1, 2_147_483_647)

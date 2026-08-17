@@ -14,6 +14,7 @@ from .dispatch import Dispatcher
 from .events import EventHub
 from .market import MarketWatcher
 from .hybrid import RustPerceptionBridge
+from .watchdog import EventLoopWatchdog
 
 
 async def serve_http(store: Store, market: MarketWatcher, events: EventHub, catalysts: CatalystWatcher, dispatcher: Dispatcher):
@@ -35,6 +36,9 @@ async def amain():
     events = EventHub()
     dispatcher = Dispatcher(store, events)
     market = MarketWatcher(store, dispatcher, events)
+    watchdog = EventLoopWatchdog()
+    watchdog.start()
+    market.runtime_watchdog = watchdog
     rust_bridge = RustPerceptionBridge(market.handle_rust_candidate)
     market.set_rust_bridge(rust_bridge)
     await rust_bridge.start()
@@ -56,6 +60,7 @@ async def amain():
         asyncio.create_task(catalysts.sec_loop(), name="sec"),
         asyncio.create_task(catalysts.alpaca_news_loop(), name="alpaca-news"),
         asyncio.create_task(serve_http(store, market, events, catalysts, dispatcher), name="http"),
+        asyncio.create_task(watchdog.heartbeat(), name="event-loop-heartbeat"),
     ]
 
     if settings.rss_feeds:
@@ -79,6 +84,7 @@ async def amain():
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        watchdog.stop()
         await rust_bridge.stop()
         store.close()
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import {
   IconActivity,
@@ -918,6 +918,8 @@ export default function ScoutPage() {
   const [scannerBusy,setScannerBusy]=useState(false);
   const [scannerMessage,setScannerMessage]=useState("");
   const [attention,setAttention]=useState<AttentionItem[]>([]);
+  const refreshInFlight=useRef<Promise<void>|null>(null);
+  const lastRefreshAt=useRef(0);
 
   const setSelected=useCallback((finding:Finding)=>{
     setSelectedState(finding);
@@ -948,33 +950,46 @@ export default function ScoutPage() {
   },[findings]);
 
   const refresh=useCallback(async(heavy=true)=>{
-    if (!API_CONFIGURED) return;
-    const results = await Promise.allSettled([
-      getStatus(),getFindings(300),getCatalysts(120),getHalts(),getScannerSettings(),getAttention(120),
-    ]);
-    const [statusResult,findingsResult,catalystsResult,haltsResult,scannerResult,attentionResult]=results;
-    let anySuccess=false;
-    if(statusResult.status==='fulfilled'){setStatus(statusResult.value);anySuccess=true;}
-    if(findingsResult.status==='fulfilled'){
-      const fresh=findingsResult.value;setFindings(fresh);anySuccess=true;
-      setSelectedState(current=>current?fresh.find(f=>f.id===current.id)??fresh.find(f=>f.ticker===current.ticker)??current:current);
-    }
-    if(catalystsResult.status==='fulfilled')setCatalysts(catalystsResult.value);
-    if(haltsResult.status==='fulfilled')setHalts(haltsResult.value.active);
-    if(scannerResult.status==='fulfilled')setScanner(scannerResult.value);
-    if(attentionResult.status==='fulfilled')setAttention(attentionResult.value);
-    if(heavy){
-      const extra=await Promise.allSettled([getGainers(30),getNotificationPreferences(),getValidation(120),getTimeline(undefined,160)]);
-      const [gainersResult,prefsResult,validationResult,timelineResult]=extra;
-      if(gainersResult.status==='fulfilled')setGainers(gainersResult.value);
-      if(prefsResult.status==='fulfilled'){setPrefs(prefsResult.value);}
-      if(validationResult.status==='fulfilled')setValidation(validationResult.value);
-      if(timelineResult.status==='fulfilled')setTimeline(timelineResult.value);
-    }
-    setConnected(anySuccess);
+    if (!API_CONFIGURED || (typeof document!=="undefined" && document.hidden)) return;
+    if(refreshInFlight.current)return refreshInFlight.current;
+    const job=(async()=>{
+      const results = await Promise.allSettled([
+        getStatus(),getFindings(180),getCatalysts(80),getHalts(),getScannerSettings(),getAttention(80),
+      ]);
+      const [statusResult,findingsResult,catalystsResult,haltsResult,scannerResult,attentionResult]=results;
+      let anySuccess=false;
+      if(statusResult.status==='fulfilled'){setStatus(statusResult.value);anySuccess=true;}
+      if(findingsResult.status==='fulfilled'){
+        const fresh=findingsResult.value;setFindings(fresh);anySuccess=true;
+        setSelectedState(current=>current?fresh.find(f=>f.id===current.id)??fresh.find(f=>f.ticker===current.ticker)??current:current);
+      }
+      if(catalystsResult.status==='fulfilled')setCatalysts(catalystsResult.value);
+      if(haltsResult.status==='fulfilled')setHalts(haltsResult.value.active);
+      if(scannerResult.status==='fulfilled')setScanner(scannerResult.value);
+      if(attentionResult.status==='fulfilled')setAttention(attentionResult.value);
+      if(heavy){
+        const extra=await Promise.allSettled([getGainers(30),getNotificationPreferences(),getValidation(120),getTimeline(undefined,160)]);
+        const [gainersResult,prefsResult,validationResult,timelineResult]=extra;
+        if(gainersResult.status==='fulfilled')setGainers(gainersResult.value);
+        if(prefsResult.status==='fulfilled'){setPrefs(prefsResult.value);}
+        if(validationResult.status==='fulfilled')setValidation(validationResult.value);
+        if(timelineResult.status==='fulfilled')setTimeline(timelineResult.value);
+      }
+      lastRefreshAt.current=Date.now();
+      setConnected(anySuccess);
+    })();
+    refreshInFlight.current=job;
+    try{await job;}finally{if(refreshInFlight.current===job)refreshInFlight.current=null;}
   },[]);
 
-  useEffect(()=>{void refresh(true);const core=window.setInterval(()=>void refresh(false),30000);const heavy=window.setInterval(()=>void refresh(true),120000);return()=>{window.clearInterval(core);window.clearInterval(heavy);};},[refresh]);
+  useEffect(()=>{
+    void refresh(true);
+    const core=window.setInterval(()=>void refresh(false),45000);
+    const heavy=window.setInterval(()=>void refresh(true),180000);
+    const visible=()=>{if(!document.hidden && Date.now()-lastRefreshAt.current>15000)void refresh(false);};
+    document.addEventListener("visibilitychange",visible);
+    return()=>{window.clearInterval(core);window.clearInterval(heavy);document.removeEventListener("visibilitychange",visible);};
+  },[refresh]);
   useEffect(()=>{applyUiPreferences(readUiPreferences());},[]);
   useEffect(()=>{const count=attention.filter(item=>item.status==='unread').length;const nav=navigator as Navigator&{setAppBadge?:(value?:number)=>Promise<void>;clearAppBadge?:()=>Promise<void>};if(count)void nav.setAppBadge?.(count);else void nav.clearAppBadge?.();},[attention]);
 
@@ -1002,16 +1017,15 @@ export default function ScoutPage() {
           setSelectedState(current=>current?.ticker===finding.ticker?finding:current);
         }
       }catch{}
-      void refresh(false);
     });
-    source.addEventListener('chart',()=>void refresh(false));
+    source.addEventListener('chart',()=>{});
     ['halt','resume'].forEach(name=>source.addEventListener(name,()=>void refresh(false)));
     source.addEventListener('notification-preferences',()=>void refresh(true));
     source.addEventListener('scanner-settings',()=>void refresh(true));
     source.addEventListener('attention',()=>void refresh(false));
     source.onerror=()=>setConnected(false);
     return()=>source.close();
-  },[refresh,prefs]);
+  },[refresh]);
 
   async function savePrefs(){
     if(!API_CONFIGURED){setNotificationOpen(false);return;}

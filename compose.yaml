@@ -1,4 +1,24 @@
 services:
+  ntfy:
+    image: binwiederhier/ntfy:v2.26.3
+    container_name: stockhunter-ntfy
+    command:
+      - serve
+      - --cache-file
+      - /var/cache/ntfy/cache.db
+    restart: unless-stopped
+    init: true
+    volumes:
+      - ./data/ntfy:/var/cache/ntfy
+    ports:
+      - "127.0.0.1:18082:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--tries=1", "http://localhost:80/v1/health", "-O", "-"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
   scout:
     build: .
     container_name: stockhunter-scout
