@@ -64,12 +64,49 @@ export async function getHalts(): Promise<{ active: Halt[]; recent: Halt[] }> {
   return getJson("/api/market/halts");
 }
 
-export async function getMarketSnapshot(ticker: string, detectedAt?: number, bucketSeconds = 15, findingId?:number): Promise<MarketSnapshot> {
+const marketSnapshotCache = new Map<string, { value: MarketSnapshot; at: number }>();
+const marketSnapshotInflight = new Map<string, Promise<MarketSnapshot>>();
+const MARKET_SNAPSHOT_TTL_MS = 4_000;
+const MARKET_SNAPSHOT_MAX = 48;
+
+function marketSnapshotKey(ticker:string, detectedAt?:number, bucketSeconds=15, findingId?:number) {
+  return [ticker.toUpperCase(), detectedAt||0, bucketSeconds, findingId||0].join(":");
+}
+
+function rememberMarketSnapshot(key:string, value:MarketSnapshot) {
+  marketSnapshotCache.delete(key);
+  marketSnapshotCache.set(key,{value,at:Date.now()});
+  while(marketSnapshotCache.size>MARKET_SNAPSHOT_MAX){
+    const oldest=marketSnapshotCache.keys().next().value as string|undefined;
+    if(!oldest)break;
+    marketSnapshotCache.delete(oldest);
+  }
+}
+
+export function peekMarketSnapshot(ticker:string, detectedAt?:number, bucketSeconds=15, findingId?:number):MarketSnapshot|null {
+  const item=marketSnapshotCache.get(marketSnapshotKey(ticker,detectedAt,bucketSeconds,findingId));
+  return item?.value||null;
+}
+
+export async function getMarketSnapshot(ticker: string, detectedAt?: number, bucketSeconds = 15, findingId?:number, force=false): Promise<MarketSnapshot> {
+  const key=marketSnapshotKey(ticker,detectedAt,bucketSeconds,findingId);
+  const cached=marketSnapshotCache.get(key);
+  if(!force&&cached&&Date.now()-cached.at<MARKET_SNAPSHOT_TTL_MS)return cached.value;
+  const pending=marketSnapshotInflight.get(key);
+  if(pending)return pending;
   const query = new URLSearchParams();
   if (detectedAt) query.set("detected_at", String(detectedAt));
   query.set("bucket_seconds", String(bucketSeconds));
   if(findingId)query.set("finding_id",String(findingId));
-  return getJson<MarketSnapshot>(`/api/market/snapshot/${encodeURIComponent(ticker)}?${query.toString()}`);
+  const request=getJson<MarketSnapshot>(`/api/market/snapshot/${encodeURIComponent(ticker)}?${query.toString()}`)
+    .then(value=>{rememberMarketSnapshot(key,value);return value;})
+    .finally(()=>marketSnapshotInflight.delete(key));
+  marketSnapshotInflight.set(key,request);
+  return request;
+}
+
+export function prefetchMarketSnapshot(ticker:string, detectedAt?:number, bucketSeconds=15, findingId?:number) {
+  void getMarketSnapshot(ticker,detectedAt,bucketSeconds,findingId).catch(()=>undefined);
 }
 
 export async function getDiagnostic(ticker: string): Promise<Diagnostic> {

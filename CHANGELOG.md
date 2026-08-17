@@ -1,5 +1,14 @@
 # Changelog
 
+## 6.5.3 — Fast symbol switching + chart workspace hardening
+
+- Added a shared short-lived market-snapshot cache with in-flight request deduplication so repeated panes and recently viewed symbols reuse live data.
+- Removed the initial per-pane polling delay from symbol changes; staggered timing now applies only to background refreshes.
+- Prefetches a selected ticker immediately and never paints deterministic demo candles while a configured live API is loading.
+- Prevents duplicate ticker assignment across chart panes and focuses an existing pane when the selected ticker is already open.
+- Replaced stale-chart ambiguity with an explicit symbol loading state and reduced persistent chart annotation/help text.
+- Preserves the v6.5.2 shadcn/Base UI, ntfy-first notification, mobile Inspector, and hybrid-engine behavior without detector threshold changes.
+
 ## 6.5.2
 
 - Standardized Scout interaction overlays on shadcn/Base UI primitives; removed native browser select and native title-tooltip usage from event/icon controls.

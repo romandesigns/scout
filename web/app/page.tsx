@@ -62,6 +62,7 @@ import {
   getValidation,
   getAttention,
   getFindingVerification,
+  prefetchMarketSnapshot,
   saveFindingReview,
   updateAttention,
   saveNotificationPreferences,
@@ -604,29 +605,35 @@ function ChartWorkspace({ findings, selected, onSelect }: { findings:Finding[]; 
   const [maximized,setMaximized]=useState<string|undefined>();
   const [activeGroup,setActiveGroup]=useState("g1");
   const [refreshNonce,setRefreshNonce]=useState(0);
+  const uniqueFindings=useMemo(()=>Array.from(new Map(findings.map(f=>[f.ticker,f])).values()),[findings]);
   const [groups,setGroups]=useState<ChartGroupState[]>([
-    {id:"g1",ticker:findings[0]?.ticker},{id:"g2",ticker:findings[1]?.ticker},{id:"g3",ticker:findings[2]?.ticker},{id:"g4",ticker:findings[3]?.ticker},
+    {id:"g1",ticker:uniqueFindings[0]?.ticker},{id:"g2",ticker:uniqueFindings[1]?.ticker},{id:"g3",ticker:uniqueFindings[2]?.ticker},{id:"g4",ticker:uniqueFindings[3]?.ticker},
   ]);
 
   useEffect(()=>{
     if (!selected) return;
-    setGroups(current => current.map(g=>g.id===activeGroup&&!g.pinned?{...g,ticker:selected.ticker}:g));
-  },[selected?.id,activeGroup]);
+    const existing=groups.find(g=>g.ticker===selected.ticker);
+    if(existing){if(activeGroup!==existing.id)setActiveGroup(existing.id);return;}
+    const target=groups.find(g=>g.id===activeGroup&&!g.pinned) ?? groups.find(g=>!g.pinned);
+    if(!target)return;
+    if(activeGroup!==target.id)setActiveGroup(target.id);
+    setGroups(current=>current.map(g=>g.id===target.id?{...g,ticker:selected.ticker}:g));
+  },[selected?.id,activeGroup,groups]);
 
-  useEffect(()=>{setGroups(current=>current.map((group,index)=>group.ticker?group:{...group,ticker:findings[index]?.ticker}));},[findings]);
+  useEffect(()=>{setGroups(current=>current.map((group,index)=>group.ticker?group:{...group,ticker:uniqueFindings[index]?.ticker}));},[uniqueFindings]);
 
   function resolve(group:ChartGroupState){return findings.find(f=>f.ticker===group.ticker);}
   function ensureMode(next:GroupMode){
     setMode(next); setMaximized(undefined);
     setGroups(current=>{
       const copy=[...current];
-      while(copy.length<next){const f=findings[copy.length%Math.max(1,findings.length)]; copy.push({id:`g${copy.length+1}`,ticker:f?.ticker});}
+      while(copy.length<next){const f=uniqueFindings[copy.length%Math.max(1,uniqueFindings.length)]; copy.push({id:`g${copy.length+1}`,ticker:f?.ticker});}
       return copy.slice(0,next);
     });
   }
   function setGroupTicker(id:string,f:Finding){setGroups(current=>current.map(g=>g.id===id?{...g,ticker:f.ticker}:g)); onSelect(f);}
   function togglePin(id:string){setGroups(current=>current.map(g=>g.id===id?{...g,pinned:!g.pinned}:g));}
-  function closeGroup(id:string){setGroups(current=>{const next=current.filter(g=>g.id!==id); const m=(next.length<=1?1:next.length<=2?2:4) as GroupMode; setMode(m); return next.length?next:[{id:"g1",ticker:findings[0]?.ticker}];}); setMaximized(undefined);}
+  function closeGroup(id:string){setGroups(current=>{const next=current.filter(g=>g.id!==id); const m=(next.length<=1?1:next.length<=2?2:4) as GroupMode; setMode(m); return next.length?next:[{id:"g1",ticker:uniqueFindings[0]?.ticker}];}); setMaximized(undefined);}
 
   const visible = maximized ? groups.filter(g=>g.id===maximized) : groups.slice(0,mode);
   const render = (g:ChartGroupState, closable=true)=><ChartGroup key={g.id} finding={resolve(g)} allFindings={findings} onSelectFinding={f=>setGroupTicker(g.id,f)} onClose={closable?()=>closeGroup(g.id):undefined} onMaximize={()=>setMaximized(maximized===g.id?undefined:g.id)} maximized={maximized===g.id} active={activeGroup===g.id} pinned={Boolean(g.pinned)} onTogglePin={()=>togglePin(g.id)} onActivate={()=>setActiveGroup(g.id)} pollOffsetMs={Math.max(0,groups.findIndex(x=>x.id===g.id))*650} refreshNonce={refreshNonce} tabLimit={mode===4?5:mode===2?7:10}/>;
@@ -752,7 +759,7 @@ function NotificationSheet({ open, prefs, status, onClose, onChange, onSave, onT
       {notificationTab==="platforms"&&<>
       <div className="settings-section-title">PLATFORMS</div>
       <div className="notice-box"><b>Primary alert channel: Scout → ntfy</b><div>Desktop OS toasts are suppressed by default to avoid duplicate alerts. The in-app Attention center remains active.</div></div>
-      <PlatformRow title="Windows native toast" subtitle="Paused in v6.5.2 · use Scout/ntfy to avoid duplicate OS alerts" enabled={false} available={false} onToggle={()=>{}} onTest={()=>onTest("windows")}/>
+      <PlatformRow title="Windows native toast" subtitle="Paused in v6.5.3 · use Scout/ntfy to avoid duplicate OS alerts" enabled={false} available={false} onToggle={()=>{}} onTest={()=>onTest("windows")}/>
       <PlatformRow title="Mobile / ntfy" subtitle={status?.notifications.android_delivery_configured===false?"ntfy server channel not configured":"Primary background alert channel"} enabled={prefs.platforms.android.enabled} available={status?.notifications.android_delivery_configured!==false} onToggle={v=>setPlatform("android",v)} onTest={()=>onTest("android")}/>
       <div className="push-enrollment"><div><b>Optional PWA Web Push</b><small>{pushState?.message||"Checking this device…"} · leave disabled if ntfy is already installed on this phone.</small></div><Button disabled={pushBusy||!pushState?.supported||!pushState?.configured} onClick={()=>void togglePush()}>{pushBusy?"Working…":pushState?.subscribed?"Disable PWA push":"Enable PWA push"}</Button></div>
       <div className="settings-subgrid"><ToggleRow label="Sound preference" checked={prefs.platforms.android.sound} onChange={v=>onChange({...prefs,platforms:{...prefs.platforms,android:{...prefs.platforms.android,sound:v}}})}/><ToggleRow label="Vibration" checked={prefs.platforms.android.vibration} onChange={v=>onChange({...prefs,platforms:{...prefs.platforms,android:{...prefs.platforms.android,vibration:v}}})}/><PriorityRow label="Alert priority" value={prefs.platforms.android.priority} onChange={value=>onChange({...prefs,platforms:{...prefs.platforms,android:{...prefs.platforms.android,priority:value}}})}/></div>
@@ -890,6 +897,7 @@ export default function ScoutPage() {
 
   const setSelected=useCallback((finding:Finding)=>{
     setSelectedState(finding);
+    if(API_CONFIGURED)prefetchMarketSnapshot(finding.ticker,finding.detected_at,15,finding.id);
     if(typeof window!=="undefined"){
       const url=new URL(window.location.href);
       url.searchParams.set("finding",String(finding.id));

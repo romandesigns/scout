@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { API_BASE, API_CONFIGURED, getMarketSnapshot } from "@/lib/api";
+import { API_BASE, API_CONFIGURED, getMarketSnapshot, peekMarketSnapshot } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import type { Bucket, Finding, MarketSnapshot } from "@/lib/types";
 
@@ -93,7 +93,8 @@ function markerTone(stage: string) {
 
 export type ChartAnnotations = { formation?:boolean; detection?:boolean; trigger?:boolean; invalidation?:boolean };
 export function LiveChart({ finding, frozen = false, active = true, pollOffsetMs = 0, refreshNonce = 0, timeframeSeconds = 15, showAnnotations = true, annotations = {}, onSnapshot, onSelectFinding }: { finding?: Finding; frozen?: boolean; active?: boolean; pollOffsetMs?: number; refreshNonce?: number; timeframeSeconds?: 15|30|60|300; showAnnotations?:boolean; annotations?:ChartAnnotations; onSnapshot?: (snapshot: MarketSnapshot | null) => void; onSelectFinding?: (finding: Finding) => void }) {
-  const [snapshot, setSnapshot] = useState<MarketSnapshot | null>(finding ? demoSnapshot(finding) : null);
+  const [snapshot, setSnapshot] = useState<MarketSnapshot | null>(() => finding ? (API_CONFIGURED ? peekMarketSnapshot(finding.ticker,finding.detected_at,timeframeSeconds,finding.id) : demoSnapshot(finding)) : null);
+  const [loading,setLoading]=useState(Boolean(finding&&API_CONFIGURED&&!snapshot));
   const [error, setError] = useState<string>("");
 
   useEffect(() => {
@@ -109,29 +110,37 @@ export function LiveChart({ finding, frozen = false, active = true, pollOffsetMs
       return;
     }
     let disposed = false;
-    async function load() {
+    const cached=peekMarketSnapshot(finding.ticker,finding.detected_at,timeframeSeconds,finding.id);
+    if(cached){setSnapshot(cached);setLoading(false);onSnapshot?.(cached);}
+    else { setSnapshot(null); setLoading(true); }
+    async function load(force=false) {
       try {
-        const next = await getMarketSnapshot(finding!.ticker, finding!.detected_at, timeframeSeconds, finding!.id);
+        const next = await getMarketSnapshot(finding!.ticker, finding!.detected_at, timeframeSeconds, finding!.id, force);
         if (!disposed) {
           setSnapshot(next);
+          setLoading(false);
           setError("");
           onSnapshot?.(next);
         }
       } catch (err) {
-        if (!disposed) setError(err instanceof Error ? err.message : "Live chart unavailable");
+        if (!disposed) { setLoading(false); setError(err instanceof Error ? err.message : "Live chart unavailable"); }
       }
     }
-    const initial = window.setTimeout(load, pollOffsetMs);
+    // Symbol changes must feel immediate. Stagger only background refreshes, never the first paint.
+    void load(false);
     const followsLiveEdge = Date.now() / 1000 - finding.detected_at < 30 * 60;
-    const timer = followsLiveEdge ? window.setInterval(() => { if (!document.hidden) void load(); }, active ? 3000 : 9000) : null;
-    return () => { disposed = true; window.clearTimeout(initial); if(timer!=null)window.clearInterval(timer); };
+    const intervalMs=active?3000:9000;
+    let timer:number|null=null;
+    const arm=()=>{timer=followsLiveEdge?window.setInterval(()=>{if(!document.hidden)void load(true);},intervalMs):null;};
+    const stagger=window.setTimeout(arm,Math.max(0,pollOffsetMs));
+    return () => { disposed = true; window.clearTimeout(stagger); if(timer!=null)window.clearInterval(timer); };
   }, [finding?.ticker, finding?.detected_at, timeframeSeconds, onSnapshot, active, pollOffsetMs, refreshNonce]);
 
   if (!finding) return <div className="chart-empty">Select a ticker</div>;
   if (frozen && finding.chart_url && API_CONFIGURED) {
     return <div className="chart-stage"><img src={`${API_BASE}${finding.chart_url}`} alt={`${finding.ticker} frozen detection chart`} className="chart-image"/></div>;
   }
-  if (!snapshot?.buckets?.length) return <div className="chart-empty">{error || "Waiting for live buckets…"}</div>;
+  if (!snapshot?.buckets?.length) return <div className="chart-empty"><span>{error || (loading ? `Loading ${finding.ticker}…` : "Waiting for live buckets…")}</span></div>;
 
   return <SvgChart snapshot={snapshot} selectedFinding={finding} error={error} timeframeSeconds={timeframeSeconds} showAnnotations={showAnnotations} annotations={annotations} onSelectFinding={onSelectFinding}/>;
 }
@@ -261,7 +270,6 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
         <rect x={markerX(selectedFinding.formation_start_at)} y={layout.top} width={Math.max(4,markerX(selectedFinding.formation_end_at)-markerX(selectedFinding.formation_start_at))} height={layout.priceBottom-layout.top} fill="var(--blue)" opacity=".08"/>
         <line x1={markerX(selectedFinding.formation_start_at)} x2={markerX(selectedFinding.formation_start_at)} y1={layout.top} y2={layout.priceBottom} stroke="var(--blue)" strokeDasharray="3 4" opacity=".5"/>
         <line x1={markerX(selectedFinding.formation_end_at)} x2={markerX(selectedFinding.formation_end_at)} y1={layout.top} y2={layout.priceBottom} stroke="var(--blue)" strokeDasharray="3 4" opacity=".5"/>
-        <text x={markerX(selectedFinding.formation_start_at)+5} y={layout.top+13} className="chart-event-label" fill="var(--blue)">{selectedFinding.stage} FORMATION</text>
       </g>}
       {showAnnotations && annotations.trigger !== false && selectedFinding.trigger_level && <line x1={layout.left} x2={layout.width-layout.right} y1={layout.y(selectedFinding.trigger_level)} y2={layout.y(selectedFinding.trigger_level)} stroke="var(--green)" strokeDasharray="5 4" opacity=".5"/>}
       {showAnnotations && annotations.invalidation !== false && selectedFinding.invalidation_level && <line x1={layout.left} x2={layout.width-layout.right} y1={layout.y(selectedFinding.invalidation_level)} y2={layout.y(selectedFinding.invalidation_level)} stroke="var(--red)" strokeDasharray="5 4" opacity=".42"/>}
@@ -312,7 +320,6 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
       <span className="ml-auto flex gap-1 pointer-events-auto"><Button variant="ghost" className="h-6 px-1.5 text-[10px]" aria-label="Zoom in" onClick={()=>zoom(-8)}>＋</Button><Button variant="ghost" className="h-6 px-1.5 text-[10px]" aria-label="Zoom out" onClick={()=>zoom(8)}>−</Button><Button variant="ghost" className="h-6 px-1.5 text-[10px]" onClick={resetViewport}>Fit</Button></span>
     </div>
     {hovered&&<div className="chart-crosshair-readout"><b>{etTime(hovered.start_ts)} ET</b><span>O {moneyPrice(hovered.open)}</span><span>H {moneyPrice(hovered.high)}</span><span>L {moneyPrice(hovered.low)}</span><span>C {moneyPrice(hovered.close)}</span><span>V {hovered.volume.toLocaleString()}</span></div>}
-    <div className="chart-gesture-hint">drag pan · wheel/pinch zoom · double-click Fit · tap marker for Inspector</div>
     {detectionCandle&&<div className="detection-audit"><b>Detected {exactEtTime(selectedFinding.detected_at)}</b><span>{detectionOffset?.toFixed(3)}s into candle</span><span>{moneyPrice(selectedFinding.price)} detection</span><span>{moneyPrice(detectionCandle.low)}–{moneyPrice(detectionCandle.high)} candle</span></div>}
     {error && <div className="chart-connection-note">{error}</div>}
   </div>;
