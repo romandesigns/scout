@@ -575,7 +575,7 @@ class Store:
         item["chart_url"] = f"/charts/{Path(item['chart_path']).name}" if item.get("chart_path") else None
         return item
 
-    def list_findings(self, limit: int = 100, ticker: str | None = None, stage: str | None = None, before: float | None = None, actionable_only: bool = False) -> list[dict[str, Any]]:
+    def list_findings(self, limit: int = 100, ticker: str | None = None, stage: str | None = None, before: float | None = None, actionable_only: bool = False, engine_version: str | None = None) -> list[dict[str, Any]]:
         limit = max(1, min(500, int(limit)))
         where = []
         params: list[Any] = []
@@ -590,6 +590,9 @@ class Store:
             params.append(float(before))
         if actionable_only:
             where.append("UPPER(COALESCE(actionable_rank,'')) IN ('A','B')")
+        if engine_version:
+            where.append("engine_version=?")
+            params.append(str(engine_version))
         clause = f"WHERE {' AND '.join(where)}" if where else ""
         keys = [
             "id","ticker","stage","detected_at","price","score","vol_ratio_15s","vol_ratio_30s","change_60s_pct",

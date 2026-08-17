@@ -165,3 +165,11 @@ def test_early_signal_surfaces_continuation_quality_blocker():
     assert d["ready"] is False
     assert "continuation_quality" in d["hard_blockers"]
     assert d["continuation_quality"]["ready"] is False
+
+
+def test_v667_fresh_early_actionable_requires_a_rank_by_default():
+    from app.market import should_allow_fresh_early_actionable
+    assert should_allow_fresh_early_actionable("A") is True
+    assert should_allow_fresh_early_actionable("B") is False
+    assert should_allow_fresh_early_actionable("C") is False
+    assert should_allow_fresh_early_actionable(None) is False

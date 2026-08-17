@@ -191,17 +191,24 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Scout forward detection-quality audit v3")
+    p = argparse.ArgumentParser(description="Scout forward detection-quality audit v4")
     p.add_argument("--api-base", default=os.getenv("SCOUT_API_BASE", "https://srv1170872.tail86523.ts.net:8444"))
     p.add_argument("--limit", type=int, default=100)
     p.add_argument("--include-developing", action="store_true")
     p.add_argument("--min-age-seconds", type=int, default=300)
     p.add_argument("--output-prefix", default="detection-quality")
+    p.add_argument("--engine-version", default=None, help="Only audit findings produced by this Scout version; defaults to /healthz version")
     args = p.parse_args()
 
     base = args.api_base.rstrip("/")
     now = time.time()
     limit = max(20, min(500, args.limit))
+    engine_version = args.engine_version
+    if not engine_version:
+        try:
+            engine_version = str(fetch_json(f"{base}/healthz", timeout=20).get("version") or "").strip() or None
+        except Exception:
+            engine_version = None
     # v3: ask production for rows that are already old enough to evaluate.
     # This avoids the former starvation bug where the latest 100/500 findings were
     # dominated by fresh C-rank observations and every A/B finding was filtered out.
@@ -212,6 +219,8 @@ def main() -> int:
     }
     if not args.include_developing:
         query["actionable_only"] = "1"
+    if engine_version:
+        query["engine_version"] = engine_version
     data = fetch_json(f"{base}/api/findings?{urllib.parse.urlencode(query)}", timeout=40)
     findings = data.get("items", data if isinstance(data, list) else [])
     validation_data = fetch_json(f"{base}/api/validation?limit=500", timeout=40)
@@ -227,8 +236,8 @@ def main() -> int:
     rows_out: list[dict[str, Any]] = []
     errors: list[str] = []
     print("=" * 126)
-    print("SCOUT FORWARD DETECTION-QUALITY AUDIT v3")
-    print(f"API={base} fetched={len(findings)} selected={len(selected)} strict_actionable=A/B include_developing={args.include_developing} min_age={args.min_age_seconds}s")
+    print("SCOUT FORWARD DETECTION-QUALITY AUDIT v4")
+    print(f"API={base} version={engine_version or 'ANY'} fetched={len(findings)} selected={len(selected)} strict_actionable=A/B include_developing={args.include_developing} min_age={args.min_age_seconds}s")
     print("=" * 126)
     print(f"{'COHORT':11} {'TICKER':7} {'STAGE':18} {'RANK':5} {'PRICE':9} {'30s':8} {'1m':8} {'2m':8} {'5m':8} {'15m':8} {'MFE5':8} {'MAE5':8} {'COVERAGE':15} LABEL")
 
@@ -271,6 +280,7 @@ def main() -> int:
     summary = {
         "generated_at": datetime.now(timezone.utc).isoformat(), "api_base": base, "strict_actionable": True,
         "include_developing": args.include_developing, "min_age_seconds": args.min_age_seconds,
+        "engine_version": engine_version,
         "fetched_count": len(findings), "selected_count": len(selected),
         "excluded": dict(sorted(excluded.items())),
         "cohorts": cohorts, "stages": stages, "errors": errors,

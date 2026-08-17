@@ -150,6 +150,7 @@ class Settings:
     early_signal_continuation_min_velocity_pct: float = _f("EARLY_SIGNAL_CONTINUATION_MIN_VELOCITY_PCT", 0.18, 0.01)
     early_signal_continuation_min_accel_pct: float = _f("EARLY_SIGNAL_CONTINUATION_MIN_ACCEL_PCT", 0.05, 0.0)
     early_signal_pristine_min_velocity_pct: float = _f("EARLY_SIGNAL_PRISTINE_MIN_VELOCITY_PCT", 0.12, 0.01)
+    early_actionable_require_rank_a: bool = _b("EARLY_ACTIONABLE_REQUIRE_RANK_A", True)
 
     # Multi-timescale price velocity.
     # 15s = primary wake-up sensor

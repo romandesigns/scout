@@ -1,3 +1,11 @@
+## 6.6.7
+
+- Reserve fresh EARLY actionable notifications for A-rank candidates by default.
+- Keep B-rank EARLY candidates tracked so later confirmed stages remain eligible.
+- Detection-quality audit v4 isolates findings by deployed engine version.
+- Add API/DB engine-version filtering for findings.
+- Preserve v6.6.4 late-risk guard and v6.6.6 continuation-quality gate.
+
 ## 6.6.6
 
 - Added a continuation-quality hard gate to the EARLY_SIGNAL fast path.

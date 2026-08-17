@@ -169,6 +169,14 @@ def evaluate_early_continuation_quality(
     }
 
 
+
+def should_allow_fresh_early_actionable(actionable_rank: str | None) -> bool:
+    """Return whether a fresh EARLY event may become actionable in v6.6.7."""
+    if not settings.early_actionable_require_rank_a:
+        return True
+    return str(actionable_rank or "").upper() == "A"
+
+
 def evaluate_early_signal(
     m: dict,
     *,
@@ -1867,6 +1875,14 @@ class MarketWatcher:
         # actionable chase alert. Explicit continuation/re-entry stages remain
         # eligible because they require their own pullback/reclaim structure.
         if should_suppress_late_fresh_promotion(stage, m):
+            return
+
+        # v6.6.7: forward-outcome audits showed B-rank EARLY alerts had
+        # materially worse 5-minute return/adverse excursion and contained all
+        # observed EARLY false positives in the captured mature cohort. Keep B
+        # candidates tracked internally so they can still confirm into BREAKOUT/
+        # IGNITION, but reserve fresh EARLY notifications for A-rank setups.
+        if stage == "EARLY" and not should_allow_fresh_early_actionable(m.get("actionable_rank")):
             return
 
         if stage in {"EMA_RECLAIM", "VWAP_RECLAIM"}:

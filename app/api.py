@@ -196,16 +196,17 @@ class ScoutApi:
             except (TypeError, ValueError):
                 raise web.HTTPBadRequest(text="before must be a Unix timestamp")
         actionable_only = str(request.query.get("actionable_only", "0")).lower() in {"1", "true", "yes"}
+        engine_version = str(request.query.get("engine_version") or "").strip() or None
         episodes = str(request.query.get("episodes", "0")).lower() in {"1", "true", "yes"}
         async def load():
             if episodes and not ticker and not stage and before is None and not actionable_only:
                 rows = await asyncio.to_thread(self.store.list_episodes, limit)
             else:
                 rows = await asyncio.to_thread(
-                    self.store.list_findings, limit, ticker, stage, before, actionable_only
+                    self.store.list_findings, limit, ticker, stage, before, actionable_only, engine_version
                 )
             return [row for row in rows if self.market.min_price <= float(row.get("price") or 0) <= self.market.max_price]
-        cache_key = f"findings:{limit}:{ticker or ''}:{stage or ''}:{before or ''}:{int(actionable_only)}:{int(episodes)}"
+        cache_key = f"findings:{limit}:{ticker or ''}:{stage or ''}:{before or ''}:{int(actionable_only)}:{engine_version or ''}:{int(episodes)}"
         return await self._cached_items(cache_key, load)
 
     async def finding(self, request: web.Request) -> web.Response:
