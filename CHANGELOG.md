@@ -1,11 +1,12 @@
 # Changelog
 
-## 6.5.4 — Radar lifecycle correctness + candidate retention
+## 6.5.5
 
-- Fixed Developing/Actionable scope classification so AWAKENING and shadow/watch lifecycle findings remain in Developing until confirmed expansion.
-- Removed the backend's global 500-finding episode truncation by ranking latest findings per ticker in SQLite.
-- Increased the live Radar working set to 300 symbols to reduce candidate disappearance during high event churn.
-- Preserved v6.5.3 fast chart switching, snapshot prefetching, and live refresh behavior.
+- Added live count badges to Actionable, Developing, and All Radar tabs.
+- Added explicit live-Radar freshness windows: 45 minutes for Actionable and 2 hours for Developing.
+- Changed Radar ordering to deterministic priority-first sorting with freshness as the final tie-breaker.
+- Prevented multi-hour/day-old persisted findings from occupying the top of the live decision surface.
+- Preserved v6.5.4 lifecycle classification and v6.5.3 chart responsiveness changes.
 
 ## 6.5.3 — Fast symbol switching + chart workspace hardening
 

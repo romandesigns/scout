@@ -445,26 +445,45 @@ function HaltRows({ halts, findings, onSelect }: { halts:Halt[]; findings:Findin
 
 function MarketPulse({ findings, gainers, halts, selectedId, onSelect }: { findings: Finding[]; gainers: Gainer[]; halts: Halt[]; selectedId?: number; onSelect: (f: Finding)=>void }) {
   const [scope,setScope]=useState<"actionable"|"developing"|"all">("actionable");
-  const [stableOrder,setStableOrder]=useState<string[]>([]);
-  useEffect(()=>setStableOrder(current=>{
-    const present=new Set(findings.map(f=>f.ticker));
-    return [...current.filter(ticker=>present.has(ticker)),...findings.map(f=>f.ticker).filter(ticker=>!current.includes(ticker))];
-  }),[findings]);
-  const visibleFindings=useMemo(()=>{
-    // Radar scope follows lifecycle intent, not only the market-quality label.
-    // AWAKENING is intentionally still a developing setup: it may notify early,
-    // but it has not yet graduated into a confirmed expansion stage.
+
+  // Radar is a live decision surface, not historical storage. Old persisted
+  // lifecycle records remain available in Inspector/history, but they should
+  // not outrank fresh opportunities in the active radar.
+  const radarBuckets=useMemo(()=>{
+    const now=Date.now()/1000;
     const developingStages=new Set(["ACTIVITY_WATCH","PRE_IGNITION","AWAKENING","FIRST_LEG_WATCH","REVERSAL_WATCH","CATALYST_WATCH"]);
     const isDeveloping=(f:Finding)=>Boolean(f.shadow_mode)||developingStages.has(f.stage)||f.quality_label!=="CLEAN";
-    const rows=findings.filter(f=>scope==="all"?true:scope==="actionable"?!isDeveloping(f):isDeveloping(f));
     const rankValue=(value?:string)=>value==="A"?3:value==="B"?2:1;
-    return rows.slice().sort((a,b)=>rankValue(b.actionable_rank)-rankValue(a.actionable_rank)||(b.quality_score||0)-(a.quality_score||0)||stableOrder.indexOf(a.ticker)-stableOrder.indexOf(b.ticker));
-  },[findings,scope,stableOrder]);
+    const stageValue=(f:Finding)=>{
+      const weights:Record<string,number>={IGNITION:8,BREAKOUT:7,SURGE:6,EARLY:5,FIRST_LEG:4,AWAKENING:3,PRE_IGNITION:2,ACTIVITY_WATCH:1};
+      return weights[f.stage]??0;
+    };
+    const freshness=(f:Finding)=>Math.max(0,now-(f.detected_at||0));
+    const withinLiveWindow=(f:Finding,developing:boolean)=>freshness(f) <= (developing ? 2*60*60 : 45*60);
+    const sortRows=(rows:Finding[])=>rows.slice().sort((a,b)=>{
+      const priorityDelta=rankValue(b.actionable_rank)-rankValue(a.actionable_rank);
+      if(priorityDelta) return priorityDelta;
+      const stageDelta=stageValue(b)-stageValue(a);
+      if(stageDelta) return stageDelta;
+      const qualityDelta=(b.quality_score||0)-(a.quality_score||0);
+      if(qualityDelta) return qualityDelta;
+      const evidenceDelta=(b.score||0)-(a.score||0);
+      if(evidenceDelta) return evidenceDelta;
+      // For otherwise comparable rows, freshest detection wins.
+      return (b.detected_at||0)-(a.detected_at||0);
+    });
+    const actionable=sortRows(findings.filter(f=>!isDeveloping(f)&&withinLiveWindow(f,false)));
+    const developing=sortRows(findings.filter(f=>isDeveloping(f)&&withinLiveWindow(f,true)));
+    const all=sortRows([...actionable,...developing]);
+    return {actionable,developing,all};
+  },[findings]);
+
+  const visibleFindings=radarBuckets[scope];
   return <div className="flex h-full min-h-0 flex-col">
     <PanelTitle icon={<IconActivity size={14}/>} title="RADAR" actions={<IconButton label="Radar filters"><IconAdjustmentsFilled size={14}/></IconButton>}/>
-    <div className="radar-scope">{(["actionable","developing","all"] as const).map(value=><button key={value} data-active={scope===value||undefined} onClick={()=>setScope(value)}>{value}</button>)}</div>
+    <div className="radar-scope">{(["actionable","developing","all"] as const).map(value=><button key={value} data-active={scope===value||undefined} onClick={()=>setScope(value)}><span>{value}</span><span className="radar-scope-count" aria-label={`${radarBuckets[value].length} ${value}`}>{radarBuckets[value].length}</span></button>)}</div>
     <div className="min-h-0 flex-1 overflow-y-auto">
-      {visibleFindings.length ? visibleFindings.map(f => <FindingRow key={f.ticker} finding={f} selected={selectedId===f.id} onSelect={()=>onSelect(f)}/>) : <EmptyPane text={scope==="actionable"?"No clean actionable setups":"No candidates in this view"}/>}
+      {visibleFindings.length ? visibleFindings.map(f => <FindingRow key={f.ticker} finding={f} selected={selectedId===f.id} onSelect={()=>onSelect(f)}/>) : <EmptyPane text={scope==="actionable"?"No fresh actionable setups":"No fresh candidates in this view"}/>}
     </div>
   </div>;
 }
