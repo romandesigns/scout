@@ -110,6 +110,72 @@ def build_promotion_trace(
     return trace
 
 
+def evaluate_early_signal(
+    m: dict,
+    *,
+    first_leg_candidate: bool,
+    quality_actionable: bool,
+    participation_ok: bool,
+    structure_ok: bool,
+    bullish_confirmed: bool,
+    bearish_short: bool,
+    structural_failure: bool,
+    relative_activity: bool,
+    trigger_distance_pct: float | None,
+    candidate_age_seconds: float,
+) -> dict:
+    """Score an early heads-up without bypassing hard safety gates."""
+    velocity = max(
+        float(m.get("change3") or 0.0),
+        float(m.get("change5") or 0.0),
+        float(m.get("change15") or 0.0),
+    )
+    accel = float(m.get("change5") or 0.0) - float(m.get("change15") or 0.0)
+    quality_score = int(m.get("quality_score") or 0)
+    extension = float(m.get("base_extension_pct") or 0.0)
+    evidence = {
+        "first_leg_candidate": bool(first_leg_candidate),
+        "full_warmup": bool(m.get("full_warmup")),
+        "relative_activity": bool(relative_activity),
+        "velocity": velocity >= settings.early_signal_min_velocity_pct,
+        "acceleration": accel >= settings.early_signal_min_accel_pct,
+        "quality_score": quality_score >= settings.early_signal_min_quality_score,
+        "quality_actionable": bool(quality_actionable),
+        "participation": bool(participation_ok),
+        "structure_ok": bool(structure_ok),
+        "bullish_confirmed": bool(bullish_confirmed),
+    }
+    score = sum(1 for passed in evidence.values() if passed)
+    hard = {
+        "enabled": bool(settings.early_signal_enabled),
+        "quality_actionable": bool(quality_actionable),
+        "participation": bool(participation_ok),
+        "structure_ok": bool(structure_ok),
+        "bullish_confirmed": bool(bullish_confirmed),
+        "not_bearish_short": not bool(bearish_short),
+        "no_structural_failure": not bool(structural_failure),
+        "not_extended": extension <= settings.early_signal_max_extension_pct,
+        "near_trigger": bool(
+            trigger_distance_pct is not None
+            and settings.early_signal_min_trigger_distance_pct <= float(trigger_distance_pct) <= settings.early_signal_max_trigger_distance_pct
+        ),
+        "fresh_candidate": candidate_age_seconds <= settings.early_signal_max_candidate_age_seconds,
+    }
+    hard_blockers = [name for name, passed in hard.items() if not passed]
+    return {
+        "ready": not hard_blockers and score >= settings.early_signal_min_evidence_score,
+        "score": score,
+        "min_score": settings.early_signal_min_evidence_score,
+        "evidence": evidence,
+        "hard_blockers": hard_blockers,
+        "velocity_pct": velocity,
+        "acceleration_pct": accel,
+        "extension_pct": extension,
+        "trigger_distance_pct": trigger_distance_pct,
+        "candidate_age_seconds": round(float(candidate_age_seconds), 3),
+    }
+
+
 def evaluate_early_release(
     m: dict,
     *,
@@ -1487,6 +1553,24 @@ class MarketWatcher:
             and ts - s.last_stage_alert_at.get("EARLY", 0.0) >= settings.first_leg_cooldown_seconds
         )
 
+        early_signal_decision = evaluate_early_signal(
+            m,
+            first_leg_candidate=first_leg_candidate,
+            quality_actionable=quality_actionable,
+            participation_ok=bool(regular_participation or fast_single_bucket or m.get("staircase")),
+            structure_ok=bool(structure_ok),
+            bullish_confirmed=bool(m.get("bullish_confirmed")),
+            bearish_short=bearish_short,
+            structural_failure=structural_failure,
+            relative_activity=bool(relative_activity or fast_single_bucket or m.get("staircase")),
+            trigger_distance_pct=trigger_distance_pct,
+            candidate_age_seconds=candidate_age_seconds,
+        )
+        early_signal_qualifies = bool(
+            early_signal_decision["ready"]
+            and ts - s.last_stage_alert_at.get("EARLY", 0.0) >= settings.early_signal_cooldown_seconds
+        )
+
         reversal_context = bool(
             m["reversal_drawdown_pct"] >= settings.reversal_min_drawdown_pct
             and m["reversal_low_age_seconds"] <= settings.reversal_max_low_age_seconds
@@ -1653,13 +1737,15 @@ class MarketWatcher:
                 and pct_change(s.continuation_pullback_low, m["price"]) >= settings.reversal_rearm_min_bounce_pct
             )
 
-        if not any((early_release_qualifies, first_leg_qualifies, early_qualifies, surge_qualifies, breakout_qualifies, ignition_qualifies, rearm_qualifies, reclaim_qualifies, reversal_rearm_qualifies)):
+        if not any((early_signal_qualifies, early_release_qualifies, first_leg_qualifies, early_qualifies, surge_qualifies, breakout_qualifies, ignition_qualifies, rearm_qualifies, reclaim_qualifies, reversal_rearm_qualifies)):
             return
 
         signals: list[str] = []
         if first_leg_qualifies:
             signals.extend(["FIRST_LEG", str(s.first_leg_context or m["leg_context"])])
-        if early_release_qualifies:
+        if early_signal_qualifies:
+            signals.extend(["EARLY", "EARLY_SIGNAL", str(s.first_leg_context or m["leg_context"])])
+        elif early_release_qualifies:
             signals.extend(["EARLY", "EARLY_RELEASE", str(s.first_leg_context or m["leg_context"])])
         elif early_qualifies:
             signals.append("EARLY")
@@ -1692,6 +1778,8 @@ class MarketWatcher:
             stage, rank = "BREAKOUT", 4
         elif surge_qualifies:
             stage, rank = "SURGE", 3
+        elif early_signal_qualifies:
+            stage, rank = "EARLY", 2
         elif early_release_qualifies:
             stage, rank = "EARLY", 2
         elif first_leg_qualifies:
@@ -1739,6 +1827,8 @@ class MarketWatcher:
             "promotion_delay_seconds": (round(max(0.0, ts - s.first_leg_candidate_at), 3) if s.first_leg_candidate_at else None),
             "early_release": early_release_decision,
             "early_release_used": bool(early_release_qualifies),
+            "early_signal": early_signal_decision,
+            "early_signal_used": bool(early_signal_qualifies),
         })
         promoted_profile["promotion_trace"] = promoted_trace
 
@@ -1791,7 +1881,7 @@ class MarketWatcher:
             reversal_phase="REARM" if reversal_rearm_qualifies else "RECLAIM" if reclaim_qualifies else s.reversal_phase if s.reversal_phase != "IDLE" else None,
             reversal_low=s.reversal_low or (m["reversal_low"] if reclaim_qualifies else None),
             reversal_drawdown_pct=m["reversal_drawdown_pct"] if (reclaim_qualifies or reversal_rearm_qualifies) else None,
-            leg_context=str(s.first_leg_context or m["leg_context"]) if (first_leg_qualifies or early_release_qualifies) else None,
+            leg_context=str(s.first_leg_context or m["leg_context"]) if (first_leg_qualifies or early_release_qualifies or early_signal_qualifies) else None,
             ross_match=m["ross_match"],
             ross_score=m["ross_score"],
             detection_timeframe_seconds=settings.bucket_seconds,
@@ -1809,7 +1899,14 @@ class MarketWatcher:
             trigger_distance_pct=trigger_distance_pct, base_extension_at_detection_pct=base_extension,
             timeliness_label=timeliness_label(base_extension), precursor_finding_id=s.pre_ignition_finding_id,
         )
-        if early_release_qualifies:
+        if early_signal_qualifies:
+            f.evidence.extend([
+                f"early signal evidence {early_signal_decision['score']}/{early_signal_decision['min_score']}",
+                f"velocity {early_signal_decision['velocity_pct']:+.2f}% · acceleration {early_signal_decision['acceleration_pct']:+.2f}%",
+                f"base extension {early_signal_decision['extension_pct']:+.2f}%",
+                f"trigger distance {trigger_distance_pct:+.2f}%" if trigger_distance_pct is not None else "trigger distance unavailable",
+            ])
+        elif early_release_qualifies:
             f.evidence.extend([
                 "early release: clean structure + participation before full impulse confirmation",
                 f"fresh velocity {early_release_decision['fresh_velocity_pct']:+.2f}% while base extension is {base_extension:+.2f}%",

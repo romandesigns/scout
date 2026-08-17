@@ -1,0 +1,32 @@
+{
+  "summary": {
+    "generated_at": "2026-08-17T15:55:05.570545+00:00",
+    "api_base": "https://srv1170872.tail86523.ts.net:8444",
+    "strict_actionable": true,
+    "include_developing": false,
+    "cohorts": {
+      "ACTIONABLE": {
+        "sample_count": 0,
+        "final_count": 0,
+        "provisional_count": 0,
+        "unmatured_count": 0,
+        "classifications": {},
+        "averages": {
+          "return_30s_pct": null,
+          "return_60s_pct": null,
+          "return_120s_pct": null,
+          "return_300s_pct": null,
+          "return_900s_pct": null,
+          "mfe_300s_pct": null,
+          "mae_300s_pct": null
+        },
+        "useful_rate": null,
+        "late_rate": null,
+        "false_or_fade_rate": null
+      }
+    },
+    "stages": {},
+    "errors": []
+  },
+  "rows": []
+}

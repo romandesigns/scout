@@ -133,6 +133,18 @@ class Settings:
     early_release_max_trigger_distance_pct: float = _f("EARLY_RELEASE_MAX_TRIGGER_DISTANCE_PCT", 0.50, 0.0)
     early_release_max_candidate_age_seconds: float = _f("EARLY_RELEASE_MAX_CANDIDATE_AGE_SECONDS", 15.0, 1.0)
 
+    # V6.6.2 optimized evidence-score notification path.
+    early_signal_enabled: bool = _b("EARLY_SIGNAL_ENABLED", True)
+    early_signal_min_evidence_score: int = _i("EARLY_SIGNAL_MIN_EVIDENCE_SCORE", 7, 4)
+    early_signal_min_quality_score: int = _i("EARLY_SIGNAL_MIN_QUALITY_SCORE", 76, 60)
+    early_signal_min_velocity_pct: float = _f("EARLY_SIGNAL_MIN_VELOCITY_PCT", 0.08, 0.01)
+    early_signal_min_accel_pct: float = _f("EARLY_SIGNAL_MIN_ACCEL_PCT", -0.03, -0.25)
+    early_signal_max_extension_pct: float = _f("EARLY_SIGNAL_MAX_EXTENSION_PCT", 0.90, 0.10)
+    early_signal_min_trigger_distance_pct: float = _f("EARLY_SIGNAL_MIN_TRIGGER_DISTANCE_PCT", -0.45, -2.0)
+    early_signal_max_trigger_distance_pct: float = _f("EARLY_SIGNAL_MAX_TRIGGER_DISTANCE_PCT", 0.65, 0.0)
+    early_signal_max_candidate_age_seconds: float = _f("EARLY_SIGNAL_MAX_CANDIDATE_AGE_SECONDS", 20.0, 1.0)
+    early_signal_cooldown_seconds: float = _f("EARLY_SIGNAL_COOLDOWN_SECONDS", 45.0, 5.0)
+
     # Multi-timescale price velocity.
     # 15s = primary wake-up sensor
     # 30s = confirmation

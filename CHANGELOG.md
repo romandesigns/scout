@@ -1,3 +1,10 @@
+## 6.6.2
+
+- Added evidence-scored `EARLY_SIGNAL` notification path separate from confirmed promotion.
+- Preserved hard quality, participation, bullish structure, extension, trigger proximity, and freshness safeguards.
+- Allows qualified heads-up notifications before legacy `fresh_impulse` / `first_leg_release` confirmation.
+- Persists early-signal score and blocker telemetry for post-deploy precision and late-risk validation.
+
 ## 6.6.1
 
 - Added evidence-driven EARLY release path based on v6.6.0 promotion tracing.
