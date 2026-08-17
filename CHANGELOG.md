@@ -1,12 +1,12 @@
-## 6.5.6
-
-- Hardened runtime against the observed event-loop/CPU stall.
-- Coalesced frontend polling and cached repeated high-volume API responses.
-- Serialized websocket reconciliation with bounded sends and added ingest/reconcile health telemetry.
-- Added an event-loop watchdog that forces process restart when aiohttp becomes wedged.
-- Added ntfy quota circuit breaker and bundled self-hosted ntfy Docker service.
-
 # Changelog
+
+## 6.5.7
+
+- Isolated Alpaca news SQLite dedupe work from the asyncio event loop.
+- Added atomic catalyst dedupe claims to reduce Store lock churn.
+- Added a `hybrid_key` findings index based on production SQLite query-plan evidence.
+- Rewrote hybrid precision aggregation to remove the correlated findings-table scan.
+- Preserved v6.5.6 watchdog recovery and self-hosted ntfy.
 
 ## 6.5.5
 

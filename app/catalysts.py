@@ -127,9 +127,8 @@ class CatalystWatcher:
         for entry in reversed(feed.entries):
             eid = str(getattr(entry, "id", "") or getattr(entry, "link", "") or getattr(entry, "title", ""))
             k = _key("sec", eid)
-            if self.store.seen(k):
+            if not self.store.claim_seen(k, "sec"):
                 continue
-            self.store.mark_seen(k, "sec")
             form = self._sec_form(entry).upper()
             if form not in HIGH_SIGNAL_FORMS:
                 continue
@@ -180,9 +179,8 @@ class CatalystWatcher:
             summary = clean_text(getattr(entry, "summary", ""))
             eid = str(getattr(entry, "id", "") or link or title)
             k = _key("rss", url, eid)
-            if self.store.seen(k):
+            if not self.store.claim_seen(k, "rss"):
                 continue
-            self.store.mark_seen(k, "rss")
             score, cats, _, _, bullish = classify_bullish(title + " " + summary)
             if not bullish:
                 continue
@@ -238,9 +236,8 @@ class CatalystWatcher:
                                 continue
                             eid = str(msg.get("id", ""))
                             k = _key("alpaca-news", eid)
-                            if self.store.seen(k):
+                            if not await asyncio.to_thread(self.store.claim_seen, k, "alpaca-news"):
                                 continue
-                            self.store.mark_seen(k, "alpaca-news")
                             headline = clean_text(str(msg.get("headline", "")))
                             summary = clean_text(str(msg.get("summary", "")))
                             content = clean_text(str(msg.get("content", "")))

@@ -229,6 +229,12 @@ class Store:
                 """
             )
             self._ensure_columns("findings", FINDING_COLUMNS)
+            # hybrid_key is a migrated column, so create its index only after
+            # _ensure_columns has guaranteed that the column exists on older DBs.
+            self.db.execute(
+                "CREATE INDEX IF NOT EXISTS ix_findings_hybrid_key_time "
+                "ON findings(hybrid_key, detected_at, id)"
+            )
             self.db.commit()
 
     def upsert_web_push_subscription(self, endpoint: str, p256dh: str, auth: str, user_agent: str = "") -> dict[str, Any]:
@@ -263,6 +269,20 @@ class Store:
     def seen(self, key: str) -> bool:
         with self.lock:
             return self.db.execute("SELECT 1 FROM seen WHERE key=?", (key,)).fetchone() is not None
+
+    def claim_seen(self, key: str, source: str) -> bool:
+        """Atomically claim a dedupe key. Return True only for the first caller.
+
+        This replaces the hot seen()+mark_seen() two-lock sequence in catalyst
+        ingestion and cuts both lock contention and SQLite round trips.
+        """
+        with self.lock:
+            cursor = self.db.execute(
+                "INSERT OR IGNORE INTO seen(key,source,seen_at) VALUES(?,?,?)",
+                (key, source, int(time.time())),
+            )
+            self.db.commit()
+            return cursor.rowcount > 0
 
     def mark_seen(self, key: str, source: str) -> None:
         with self.lock:
@@ -645,12 +665,17 @@ class Store:
                            ROW_NUMBER() OVER (PARTITION BY f.hybrid_key ORDER BY f.detected_at, f.id) AS rn
                     FROM findings f
                     WHERE f.hybrid_key IS NOT NULL
+                ),
+                sources AS (
+                    SELECT hybrid_key,
+                           GROUP_CONCAT(DISTINCT COALESCE(engine_source,'python')) AS source_mix
+                    FROM findings
+                    WHERE hybrid_key IS NOT NULL
+                    GROUP BY hybrid_key
                 )
-                SELECT r.hybrid_key,
-                       (SELECT GROUP_CONCAT(DISTINCT COALESCE(f2.engine_source,'python'))
-                          FROM findings f2 WHERE f2.hybrid_key=r.hybrid_key),
-                       o.max_15m_pct
+                SELECT r.hybrid_key, s.source_mix, o.max_15m_pct
                 FROM ranked r
+                JOIN sources s ON s.hybrid_key=r.hybrid_key
                 JOIN outcomes o ON o.finding_id=r.id
                 WHERE r.rn=1 AND o.max_15m_pct IS NOT NULL
                 """
