@@ -451,7 +451,12 @@ function MarketPulse({ findings, gainers, halts, selectedId, onSelect }: { findi
     return [...current.filter(ticker=>present.has(ticker)),...findings.map(f=>f.ticker).filter(ticker=>!current.includes(ticker))];
   }),[findings]);
   const visibleFindings=useMemo(()=>{
-    const rows=findings.filter(f=>scope==="all"?true:scope==="actionable"?(f.quality_label==="CLEAN"&&f.stage!=="ACTIVITY_WATCH"):f.stage==="ACTIVITY_WATCH"||f.quality_label!=="CLEAN");
+    // Radar scope follows lifecycle intent, not only the market-quality label.
+    // AWAKENING is intentionally still a developing setup: it may notify early,
+    // but it has not yet graduated into a confirmed expansion stage.
+    const developingStages=new Set(["ACTIVITY_WATCH","PRE_IGNITION","AWAKENING","FIRST_LEG_WATCH","REVERSAL_WATCH","CATALYST_WATCH"]);
+    const isDeveloping=(f:Finding)=>Boolean(f.shadow_mode)||developingStages.has(f.stage)||f.quality_label!=="CLEAN";
+    const rows=findings.filter(f=>scope==="all"?true:scope==="actionable"?!isDeveloping(f):isDeveloping(f));
     const rankValue=(value?:string)=>value==="A"?3:value==="B"?2:1;
     return rows.slice().sort((a,b)=>rankValue(b.actionable_rank)-rankValue(a.actionable_rank)||(b.quality_score||0)-(a.quality_score||0)||stableOrder.indexOf(a.ticker)-stableOrder.indexOf(b.ticker));
   },[findings,scope,stableOrder]);
@@ -926,7 +931,7 @@ export default function ScoutPage() {
   const refresh=useCallback(async(heavy=true)=>{
     if (!API_CONFIGURED) return;
     const results = await Promise.allSettled([
-      getStatus(),getFindings(120),getCatalysts(120),getHalts(),getScannerSettings(),getAttention(120),
+      getStatus(),getFindings(300),getCatalysts(120),getHalts(),getScannerSettings(),getAttention(120),
     ]);
     const [statusResult,findingsResult,catalystsResult,haltsResult,scannerResult,attentionResult]=results;
     let anySuccess=false;
@@ -974,7 +979,7 @@ export default function ScoutPage() {
         const envelope=JSON.parse((event as MessageEvent).data);
         if(envelope?.payload){
           const finding=envelope.payload as Finding;
-          setFindings(current=>[finding,...current.filter(f=>f.ticker!==finding.ticker)].slice(0,120));
+          setFindings(current=>[finding,...current.filter(f=>f.ticker!==finding.ticker)].slice(0,300));
           setSelectedState(current=>current?.ticker===finding.ticker?finding:current);
         }
       }catch{}

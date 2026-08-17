@@ -1,5 +1,12 @@
 # Changelog
 
+## 6.5.4 — Radar lifecycle correctness + candidate retention
+
+- Fixed Developing/Actionable scope classification so AWAKENING and shadow/watch lifecycle findings remain in Developing until confirmed expansion.
+- Removed the backend's global 500-finding episode truncation by ranking latest findings per ticker in SQLite.
+- Increased the live Radar working set to 300 symbols to reduce candidate disappearance during high event churn.
+- Preserved v6.5.3 fast chart switching, snapshot prefetching, and live refresh behavior.
+
 ## 6.5.3 — Fast symbol switching + chart workspace hardening
 
 - Added a shared short-lived market-snapshot cache with in-flight request deduplication so repeated panes and recently viewed symbols reuse live data.

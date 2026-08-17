@@ -675,19 +675,39 @@ class Store:
         }
 
     def list_episodes(self, limit: int = 100) -> list[dict[str, Any]]:
-        """Return one current lifecycle row per ticker, newest episode first."""
-        rows = self.list_findings(500)
-        episodes: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for row in rows:
-            ticker = str(row.get("ticker", "")).upper()
-            if not ticker or ticker in seen:
-                continue
-            seen.add(ticker)
-            episodes.append(row)
-            if len(episodes) >= max(1, min(500, int(limit))):
-                break
-        return episodes
+        """Return the latest lifecycle row per ticker without truncating the source history.
+
+        The previous implementation first loaded only 500 global findings. During a busy
+        session a valid ticker could therefore disappear from Radar simply because 500
+        newer findings existed for other symbols. Rank in SQLite first, then apply limit.
+        """
+        limit = max(1, min(500, int(limit)))
+        keys = [
+            "id","ticker","stage","detected_at","price","score","vol_ratio_15s","vol_ratio_30s","change_60s_pct",
+            "extension_pct","ema9","ema21","ema9_slope","vwap","above_vwap","quiet_break","evidence_json",
+            "catalyst_headline","catalyst_category","catalyst_score","catalyst_url","chart_path",
+            "change_3s_pct","change_5s_pct","change_10s_pct","change_15s_pct","change_30s_pct","accel_15s_pp",
+            "dollar_volume_15s","dollar_volume_30s","trades_15s","trades_30s","breakout_level","breakout_window","signals_json",
+            "quality_label","quality_score","actionable_rank","rejection_reasons_json","directional_efficiency","active_bucket_ratio","direction_reversals",
+            "previous_close","gap_pct","day_volume","projected_session_volume","volume_rate_per_minute","float_shares","float_turnover","candidate_profile_json",
+            "episode_id","reversal_phase","reversal_low","reversal_drawdown_pct","leg_context","ross_match","ross_score",
+            "detection_timeframe_seconds","formation_start_at","formation_end_at","formation_low","formation_high","trigger_level","invalidation_level","halt_pressure_score","urgency","engine_version",
+            "lifecycle_phase","shadow_mode","recipe_score","recipe_present_json","recipe_missing_json","trigger_distance_pct","base_extension_at_detection_pct","timeliness_label","precursor_finding_id",
+            "engine_source","hybrid_sources_json","hybrid_score","hybrid_key","notification_reason",
+        ]
+        columns = ",".join(keys)
+        sql = f"""
+            SELECT {columns} FROM (
+                SELECT {columns}, ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY detected_at DESC, id DESC) AS rn
+                FROM findings
+            ) ranked
+            WHERE rn=1
+            ORDER BY detected_at DESC, id DESC
+            LIMIT ?
+        """
+        with self.lock:
+            rows = self.db.execute(sql, (limit,)).fetchall()
+        return [self._decode_finding(row, keys) for row in rows]
 
     def latest_findings_by_ticker(self, tickers: list[str]) -> dict[str, dict[str, Any]]:
         if not tickers:
