@@ -1,3 +1,8 @@
+## 6.7.1
+
+- Added momentum-intensity and entry-state UI.
+- Detector/promotion behavior unchanged.
+
 ## 6.7.0
 
 - Added BOATS-verified 24H Stocks panel/category.

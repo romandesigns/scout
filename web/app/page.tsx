@@ -378,13 +378,49 @@ function PanelTitle({ icon, title, subtitle, actions }: { icon?: React.ReactNode
   </div>;
 }
 
+
+type MomentumTier = "NORMAL" | "STRONG" | "EXTREME";
+type MomentumState = "FRESH" | "EXTENDED" | "LATE_RISK" | "FADING";
+
+function momentumProfile(finding: Finding) {
+  const c5=finding.change_5s_pct??0;
+  const c15=finding.change_15s_pct??0;
+  const c30=finding.change_30s_pct??0;
+  const rv=finding.vol_ratio_15s??0;
+  const extension=finding.extension_pct??finding.base_extension_at_detection_pct??0;
+  let score=0;
+  if(finding.actionable_rank==="A")score+=2; else if(finding.actionable_rank==="B")score+=1;
+  if(finding.quality_label==="CLEAN")score+=2; else if(finding.quality_label==="DEVELOPING")score+=1;
+  if(rv>=10)score+=3; else if(rv>=5)score+=2; else if(rv>=2.5)score+=1;
+  if(c5>=1)score+=3; else if(c5>=0.4)score+=2; else if(c5>=0.15)score+=1;
+  if(c15>=2)score+=3; else if(c15>=0.8)score+=2; else if(c15>=0.3)score+=1;
+  if(["IGNITION","BREAKOUT","SURGE","FIRST_LEG","HALT_PRESSURE"].includes(finding.stage))score+=2;
+  else if(finding.stage==="EARLY")score+=1;
+  if(c5>0&&c15>0&&c30>0)score+=1;
+  const tier:MomentumTier=score>=10?"EXTREME":score>=6?"STRONG":"NORMAL";
+  const timeliness=(finding.timeliness_label||"").toUpperCase();
+  const state:MomentumState=timeliness==="LATE"?"LATE_RISK":extension>=8?"EXTENDED":c5<0&&c15>0?"FADING":"FRESH";
+  return {tier,state,score};
+}
+
+function MomentumBadges({finding}:{finding:Finding}) {
+  const momentum=momentumProfile(finding);
+  if(momentum.tier==="NORMAL")return null;
+  const momentumTone=momentum.tier==="EXTREME"?"orange":"green";
+  const stateTone=momentum.state==="FRESH"?"green":momentum.state==="FADING"?"red":"orange";
+  const stateLabel=momentum.state==="FRESH"?"FRESH ENTRY":momentum.state==="FADING"?"MOMENTUM FADING":momentum.state==="EXTENDED"?"EXTENDED · DON'T CHASE":"LATE-RISK · DON'T CHASE";
+  const momentumLabel=momentum.tier==="EXTREME"?"EXTREME MOMENTUM":"STRONG MOMENTUM";
+  return <span className="flex flex-wrap items-center gap-1"><Badge data-tone={momentumTone}><IconFlame size={10}/>{momentumLabel}</Badge><Badge data-tone={stateTone}>{stateLabel}</Badge></span>;
+}
+
 function FindingRow({ finding, selected, onSelect }: { finding: Finding; selected: boolean; onSelect: () => void }) {
   const [menu,setMenu]=useState<{x:number;y:number}|null>(null);
   const signals = Array.from(new Set([finding.stage, ...(finding.signals || [])])).slice(0, 3);
   const quality=finding.quality_label || (finding.stage==="ACTIVITY_WATCH"?"DEVELOPING":"CLEAN");
   const qualityTone=quality==="CLEAN"?"green":quality==="DEVELOPING"?"blue":quality==="CHOPPY"?"orange":"red";
   const urgency=finding.urgency||(finding.extension_pct!=null&&finding.extension_pct>=8?"EXTENDED":finding.stage==="FIRST_LEG"?"NOW":finding.quality_label==="CLEAN"?"CONFIRMED":"WATCH");
-  const priority=urgency==="NOW"||finding.stage==="HALT_PRESSURE";
+  const momentum=momentumProfile(finding);
+  const priority=urgency==="NOW"||finding.stage==="HALT_PRESSURE"||momentum.tier==="EXTREME";
   return <><button className="market-row" data-selected={selected || undefined} data-priority={priority||undefined} onClick={onSelect} onContextMenu={event=>{event.preventDefault();setMenu({x:event.clientX,y:event.clientY});}}>
     <div className="flex items-center justify-between gap-2">
       <div className="flex min-w-0 items-center gap-1.5">
@@ -394,6 +430,7 @@ function FindingRow({ finding, selected, onSelect }: { finding: Finding; selecte
         <Badge data-tone={qualityTone}>{finding.actionable_rank || "C"} · {quality}</Badge>
         {finding.catalyst_headline && !signals.includes("CATALYST") && <EventIcon event="CATALYST"/>}
         {finding.ross_match && <Badge data-tone="green">ROSS {finding.ross_score ?? ""}</Badge>}
+        <MomentumBadges finding={finding}/>
       </div>
       <span className="scout-muted metric text-[10px]">{age(finding.detected_at)}</span>
     </div>
@@ -407,6 +444,7 @@ function FindingRow({ finding, selected, onSelect }: { finding: Finding; selecte
       <span><b>30s</b> {pct(finding.change_30s_pct,1)}</span>
       <span><b>RV15</b> {finding.vol_ratio_15s?.toFixed(1) ?? "—"}×</span>
     </div>
+    {momentum.tier!=="NORMAL"&&<div className="mt-1 flex items-center gap-2 text-[9px] font-semibold"><span className="text-[var(--orange)]">🔥 POWER {momentum.score}/13</span><span className={momentum.state==="FRESH"?"text-[var(--green)]":"text-[var(--orange)]"}>{momentum.state==="FRESH"?"ENTRY WINDOW ACTIVE":momentum.state.replaceAll("_"," ")}</span></div>}
     {finding.leg_context && <div className="mt-1 text-[9px] font-semibold tracking-wide text-[var(--green)]">{finding.leg_context.replaceAll("_"," ")} · {age(finding.detected_at)} AGO</div>}
     {finding.rejection_reasons?.length ? <div className="mt-1 truncate text-[9px] text-[var(--orange)]">{finding.rejection_reasons.slice(0,2).join(" · ")}</div> : null}
   </button>{menu&&<div className="stock-context-menu" style={{left:menu.x,top:menu.y}} onMouseLeave={()=>setMenu(null)}><Button variant="ghost" onClick={()=>{onSelect();setMenu(null);}}>Open in active chart</Button><Button variant="ghost" onClick={()=>{onSelect();setMenu(null);}}>Inspect event</Button><Button variant="ghost" onClick={()=>{void navigator.clipboard.writeText(finding.ticker);setMenu(null);}}>Copy ticker</Button><Button variant="ghost" onClick={()=>{void navigator.clipboard.writeText(`${finding.ticker} ${finding.stage} ${money(finding.price)} ${clock(finding.detected_at)}`);setMenu(null);}}>Copy alert summary</Button><Button variant="ghost" onClick={()=>{window.open(`https://www.tradingview.com/symbols/${finding.ticker}/`,`_blank`,`noopener,noreferrer`);setMenu(null);}}>Open external chart</Button></div>}</>;
@@ -465,6 +503,8 @@ function MarketPulse({ findings, gainers, halts, selectedId, onSelect }: { findi
     const sortRows=(rows:Finding[])=>rows.slice().sort((a,b)=>{
       const priorityDelta=rankValue(b.actionable_rank)-rankValue(a.actionable_rank);
       if(priorityDelta) return priorityDelta;
+      const momentumDelta=momentumProfile(b).score-momentumProfile(a).score;
+      if(momentumDelta) return momentumDelta;
       const stageDelta=stageValue(b)-stageValue(a);
       if(stageDelta) return stageDelta;
       const qualityDelta=(b.quality_score||0)-(a.quality_score||0);
@@ -583,7 +623,7 @@ function EmptyPane({ text }: { text:string }) {
 
 function TwentyFourHourPanel({rows,findings,selectedId,onSelect}:{rows:TwentyFourHourStock[];findings:Finding[];selectedId?:number;onSelect:(finding:Finding)=>void}) {
   const byTicker=new Map(findings.map(f=>[f.ticker,f]));
-  return <div className="flex h-full min-h-0 flex-col"><PanelTitle icon={<IconHistory size={14}/>} title="24H STOCKS" subtitle={`${rows.length} BOATS verified`}/><div className="notice-box mx-2 mt-2 text-[10px]">Only symbols verified by a BOATS trade in the current trading session. Every symbol remains subject to Scout&apos;s normal quality, catalyst, stage, continuation, late-risk and notification pipeline.</div><div className="min-h-0 flex-1 overflow-y-auto">{rows.length?rows.map(row=>{const finding=(row.latest_finding?.id?findings.find(f=>f.id===row.latest_finding!.id):undefined)||byTicker.get(row.ticker);const clickable=Boolean(finding);return <button key={row.ticker} className="finding-row w-full" disabled={!clickable} onClick={()=>finding&&onSelect(finding)} data-selected={finding?.id===selectedId||undefined}><div className="min-w-0 flex-1"><div className="flex items-center gap-1.5"><b>{row.ticker}</b><Badge data-tone="blue">24H</Badge><Badge data-tone={row.actionable_rank==="A"?"green":row.actionable_rank==="B"?"orange":"gray"}>{row.actionable_rank}</Badge><span className="truncate text-[9px] scout-muted">{row.stage}</span></div><div className="mt-1 flex gap-2 text-[9px] scout-muted"><span>5s {pct(row.change_5s_pct,2)}</span><span>15s {pct(row.change_15s_pct,2)}</span><span>RVOL {row.vol_ratio_15s?.toFixed(1)??"—"}×</span></div><div className="mt-1 flex gap-2 text-[9px]"><span>{row.quality_label} {row.quality_score}</span><span className="scout-muted">BOATS {age(row.last_boats_trade_at)}</span></div></div><div className="text-right"><div className="metric">{money(row.price)}</div><div className="text-[9px] scout-muted">{row.last_feed?.toUpperCase()||"—"}</div></div></button>}):<EmptyPane text="No BOATS-verified 24H stocks in the current session yet"/>}</div></div>;
+  return <div className="flex h-full min-h-0 flex-col"><PanelTitle icon={<IconHistory size={14}/>} title="24H STOCKS" subtitle={`${rows.length} BOATS verified`}/><div className="notice-box mx-2 mt-2 text-[10px]">Only symbols verified by a BOATS trade in the current trading session. Every symbol remains subject to Scout&apos;s normal quality, catalyst, stage, continuation, late-risk and notification pipeline.</div><div className="min-h-0 flex-1 overflow-y-auto">{rows.length?rows.map(row=>{const finding=(row.latest_finding?.id?findings.find(f=>f.id===row.latest_finding!.id):undefined)||byTicker.get(row.ticker);const clickable=Boolean(finding);return <button key={row.ticker} className="finding-row w-full" disabled={!clickable} onClick={()=>finding&&onSelect(finding)} data-selected={finding?.id===selectedId||undefined}><div className="min-w-0 flex-1"><div className="flex items-center gap-1.5"><b>{row.ticker}</b><Badge data-tone="blue">24H</Badge><Badge data-tone={row.actionable_rank==="A"?"green":row.actionable_rank==="B"?"orange":"gray"}>{row.actionable_rank}</Badge><span className="truncate text-[9px] scout-muted">{row.stage}</span>{finding&&<MomentumBadges finding={finding}/>}</div><div className="mt-1 flex gap-2 text-[9px] scout-muted"><span>5s {pct(row.change_5s_pct,2)}</span><span>15s {pct(row.change_15s_pct,2)}</span><span>RVOL {row.vol_ratio_15s?.toFixed(1)??"—"}×</span></div><div className="mt-1 flex gap-2 text-[9px]"><span>{row.quality_label} {row.quality_score}</span><span className="scout-muted">BOATS {age(row.last_boats_trade_at)}</span></div></div><div className="text-right"><div className="metric">{money(row.price)}</div><div className="text-[9px] scout-muted">{row.last_feed?.toUpperCase()||"—"}</div></div></button>}):<EmptyPane text="No BOATS-verified 24H stocks in the current session yet"/>}</div></div>;
 }
 
 function PrimarySidebar({ view, findings, twentyFourHour, gainers, halts, catalysts, validation, selected, onSelect, connected, onNotifications, scanner, saveScanner, scannerBusy, scannerMessage, attention, setAttentionStatus, backendVersion }: {
@@ -847,7 +887,8 @@ function OpportunitySpotlight({items,onOpen,onStatus}:{items:AttentionItem[];onO
   const item=queue[0];
   if(!item)return null;
   const f=item.finding;
-  return <aside className="opportunity-spotlight" aria-live="polite"><div className="spotlight-kicker"><IconBolt size={14}/> OPPORTUNITY <span>{queue.length} new</span></div><div className="spotlight-title"><b>{f.ticker}</b><EventIcon event={f.stage}/>{f.leg_context&&<Badge data-tone="green">{f.leg_context.replaceAll('_',' ')}</Badge>}<time>{age(item.updated_at)}</time></div><div className="spotlight-price">{money(f.price)} <span>{pct(f.change_15s_pct,1)} / 15s</span></div><div className="spotlight-evidence">RVOL {f.vol_ratio_15s?.toFixed(1)??'—'}× · {compactMoney(f.dollar_volume_15s)} · {f.trades_15s??'—'} trades</div><div className="spotlight-actions"><Button onClick={()=>onOpen(item)}>Open chart</Button><Button variant="ghost" onClick={()=>onStatus(item,'watching')}>Watch</Button><Button variant="ghost" onClick={()=>onStatus(item,'dismissed')}>Dismiss</Button></div><div className="spotlight-rule">Charts and Inspector stay unchanged until you open it.</div></aside>;
+  const momentum=momentumProfile(f);
+  return <aside className="opportunity-spotlight" aria-live="polite"><div className="spotlight-kicker"><IconBolt size={14}/> OPPORTUNITY <span>{queue.length} new</span></div><div className="spotlight-title"><b>{f.ticker}</b><EventIcon event={f.stage}/>{f.leg_context&&<Badge data-tone="green">{f.leg_context.replaceAll('_',' ')}</Badge>}<MomentumBadges finding={f}/><time>{age(item.updated_at)}</time></div><div className="spotlight-price">{money(f.price)} <span>{pct(f.change_15s_pct,1)} / 15s</span></div><div className="spotlight-evidence">RVOL {f.vol_ratio_15s?.toFixed(1)??'—'}× · {compactMoney(f.dollar_volume_15s)} · {f.trades_15s??'—'} trades{momentum.tier!=="NORMAL"?` · POWER ${momentum.score}/13`:""}</div><div className="spotlight-actions"><Button onClick={()=>onOpen(item)}>Open chart</Button><Button variant="ghost" onClick={()=>onStatus(item,'watching')}>Watch</Button><Button variant="ghost" onClick={()=>onStatus(item,'dismissed')}>Dismiss</Button></div><div className="spotlight-rule">Charts and Inspector stay unchanged until you open it.</div></aside>;
 }
 
 function DesktopWorkbench(props:WorkbenchProps) {
