@@ -142,6 +142,9 @@ class SymbolState:
     continuation_started_at: float = 0.0
     first_leg_candidate_at: float = 0.0
     first_leg_context: str | None = None
+    activity_age_at: float = 0.0  # experiment_time_decay_participation_bar: first tick this
+    # symbol showed real relative activity in the current session; used to progressively
+    # relax the participation bar while the trend keeps holding, instead of a static bar.
     pre_ignition_finding_id: int | None = None
     last_market_feed: str = ""
     last_market_trade_at: float = 0.0

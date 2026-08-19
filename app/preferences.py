@@ -14,7 +14,11 @@ DEFAULT_NOTIFICATION_PREFERENCES: dict[str, Any] = {
             "priority": "high",
         },
         "windows": {
-            "enabled": False,
+            # 2026-08-19: reversed the v6.5.3 pause. Native Tauri desktop toast is now the
+            # PRIMARY channel for the installed desktop app (fires while Scout is open and
+            # connected); ntfy remains the background/app-closed channel, not a competing
+            # duplicate -- see the "PLATFORMS" notice copy in web/app/page.tsx.
+            "enabled": True,
             "sound": True,
             "toast": True,
             "priority": "high",

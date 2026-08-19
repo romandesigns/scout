@@ -2,7 +2,7 @@
 
 Version 6.5.0 wires the frozen v6.4.13 Rust primary perception engine into Scout's live runtime while retaining Python specialist/context intelligence, lifecycle handling, and unique candidate coverage. See [V6.5-IMPLEMENTATION.md](V6.5-IMPLEMENTATION.md).
 
-V5.9 keeps the catalyst engine listening continuously and delivers background Web Push notifications to the installed Android PWA. News begins as `CATALYST_WATCH` and becomes `CATALYST_ACTIVE` only when clean market-reaction evidence confirms participation. VAPID keys are generated automatically during the coordinated VPS deployment; ntfy remains an optional fallback.
+V5.9 keeps the catalyst engine listening continuously and delivers background Web Push notifications to the installed Android/iPhone PWA. News begins as `CATALYST_WATCH` and becomes `CATALYST_ACTIVE` only when clean market-reaction evidence confirms participation. VAPID keys are generated automatically during the coordinated VPS deployment. As of 2026-08-19, native delivery is primary per client (Tauri desktop toast, installed mobile push, in-page toast for a plain browser tab) with self-hosted ntfy as the background/backup channel everywhere.
 
 Private, self-hosted **bullish market monitoring and decision-support** platform for detecting low-priced U.S. stocks before or near momentum ignition. Scout does **not** place, route, prepare, or automate trades.
 

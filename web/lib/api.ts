@@ -31,6 +31,12 @@ export async function getStatus(): Promise<ScoutStatus> {
   return getJson<ScoutStatus>("/api/status");
 }
 
+export type NtfyConfig = { configured: boolean; server: string | null; topic: string | null; subscribe_url: string | null };
+
+export async function getNtfyConfig(): Promise<NtfyConfig> {
+  return getJson<NtfyConfig>("/api/notifications/ntfy-config");
+}
+
 export async function getFindings(limit = 100): Promise<Finding[]> {
   const payload = await getJson<{ items: Finding[] }>(`/api/findings?limit=${limit}&episodes=1`);
   return payload.items;

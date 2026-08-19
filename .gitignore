@@ -104,3 +104,6 @@ temp/
 rust/**/target/
 
 e2e-validation-*.json
+detection-quality-*.json
+detection-quality-*.csv
+promotion-trace-*.json

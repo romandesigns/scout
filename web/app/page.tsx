@@ -58,6 +58,8 @@ import {
   getScannerSettings,
   getNotificationPreferences,
   getStatus,
+  getNtfyConfig,
+  type NtfyConfig,
   getTimeline,
   getValidation,
   getAttention,
@@ -69,7 +71,8 @@ import {
   saveScannerSettings,
   testNotification,
 } from "@/lib/api";
-import { getNativeAutostartState, installNativeDeepLinkHandler, installNativeNotificationActionHandler, sendNativeTestNotification, setNativeAutostart } from "@/lib/native";
+import { getNativeAutostartState, installNativeDeepLinkHandler, installNativeNotificationActionHandler, isInstalledPwa, queueNativeScoutNotification, sendNativeTestNotification, setNativeAutostart, showPwaForegroundNotification, webPushForegroundAllowed, webToastAllowed } from "@/lib/native";
+import { toastManager, ScoutToastProvider } from "@/components/ui/toast";
 import { disableWebPush, enableWebPush, webPushState, type WebPushState } from "@/lib/web-push";
 import { getTwentyFourHourStocks, type TwentyFourHourStock } from "@/lib/twenty-four-hour";
 import type {
@@ -447,7 +450,31 @@ function FindingRow({ finding, selected, onSelect }: { finding: Finding; selecte
     {momentum.tier!=="NORMAL"&&<div className="mt-1 flex items-center gap-2 text-[9px] font-semibold"><span className="text-[var(--orange)]">🔥 POWER {momentum.score}/13</span><span className={momentum.state==="FRESH"?"text-[var(--green)]":"text-[var(--orange)]"}>{momentum.state==="FRESH"?"ENTRY WINDOW ACTIVE":momentum.state.replaceAll("_"," ")}</span></div>}
     {finding.leg_context && <div className="mt-1 text-[9px] font-semibold tracking-wide text-[var(--green)]">{finding.leg_context.replaceAll("_"," ")} · {age(finding.detected_at)} AGO</div>}
     {finding.rejection_reasons?.length ? <div className="mt-1 truncate text-[9px] text-[var(--orange)]">{finding.rejection_reasons.slice(0,2).join(" · ")}</div> : null}
+    <PromotionProgress finding={finding}/>
   </button>{menu&&<div className="stock-context-menu" style={{left:menu.x,top:menu.y}} onMouseLeave={()=>setMenu(null)}><Button variant="ghost" onClick={()=>{onSelect();setMenu(null);}}>Open in active chart</Button><Button variant="ghost" onClick={()=>{onSelect();setMenu(null);}}>Inspect event</Button><Button variant="ghost" onClick={()=>{void navigator.clipboard.writeText(finding.ticker);setMenu(null);}}>Copy ticker</Button><Button variant="ghost" onClick={()=>{void navigator.clipboard.writeText(`${finding.ticker} ${finding.stage} ${money(finding.price)} ${clock(finding.detected_at)}`);setMenu(null);}}>Copy alert summary</Button><Button variant="ghost" onClick={()=>{window.open(`https://www.tradingview.com/symbols/${finding.ticker}/`,`_blank`,`noopener,noreferrer`);setMenu(null);}}>Open external chart</Button></div>}</>;
+}
+
+// Surfaces how close a not-yet-actionable candidate is to clearing Scout's promotion
+// gates, using the same candidate_profile.promotion_trace data the backend already
+// persists for every PRE_IGNITION/ACTIVITY_WATCH finding (see PROMOTION-TRACE.md).
+// Decision-support only: does not change any detector threshold or promotion rule.
+function PromotionProgress({ finding }: { finding: Finding }) {
+  const isActionable = (finding.actionable_rank || "C").toUpperCase() === "A" || (finding.actionable_rank || "").toUpperCase() === "B";
+  const trace = finding.candidate_profile?.promotion_trace;
+  const gates = trace?.gates;
+  if (isActionable || !gates) return null;
+  const gateEntries = Object.entries(gates);
+  const total = gateEntries.length;
+  if (!total) return null;
+  const cleared = gateEntries.filter(([, passed]) => passed).length;
+  const next = trace?.next_blocker;
+  const nearActionable = total - cleared <= 1;
+  return (
+    <div className={`mt-1 text-[9px] font-semibold ${nearActionable ? "text-[var(--orange)]" : "scout-muted"}`}>
+      {nearActionable ? "⚡ " : ""}{cleared}/{total} gates cleared
+      {next ? ` · next: ${next.replaceAll("_", " ")}` : ""}
+    </div>
+  );
 }
 
 function GainerRows({ gainers, findings, onSelect }: { gainers:Gainer[]; findings:Finding[]; onSelect:(finding:Finding)=>void }) {
@@ -831,10 +858,11 @@ function NotificationSheet({ open, prefs, status, onClose, onChange, onSave, onT
       </>}
       {notificationTab==="platforms"&&<>
       <div className="settings-section-title">PLATFORMS</div>
-      <div className="notice-box"><b>Primary alert channel: Scout → ntfy</b><div>Desktop OS toasts are suppressed by default to avoid duplicate alerts. The in-app Attention center remains active.</div></div>
-      <PlatformRow title="Windows native toast" subtitle="Paused in v6.5.3 · use Scout/ntfy to avoid duplicate OS alerts" enabled={false} available={false} onToggle={()=>{}} onTest={()=>onTest("windows")}/>
-      <PlatformRow title="Mobile / ntfy" subtitle={status?.notifications.android_delivery_configured===false?"ntfy server channel not configured":"Primary background alert channel"} enabled={prefs.platforms.android.enabled} available={status?.notifications.android_delivery_configured!==false} onToggle={v=>setPlatform("android",v)} onTest={()=>onTest("android")}/>
-      <div className="push-enrollment"><div><b>Optional PWA Web Push</b><small>{pushState?.message||"Checking this device…"} · leave disabled if ntfy is already installed on this phone.</small></div><Button disabled={pushBusy||!pushState?.supported||!pushState?.configured} onClick={()=>void togglePush()}>{pushBusy?"Working…":pushState?.subscribed?"Disable PWA push":"Enable PWA push"}</Button></div>
+      <div className="notice-box"><b>Per-client priority (2026-08-19)</b><div>Desktop app: native Tauri toast is primary, ntfy covers you while Scout is closed. Installed mobile app (Android/iPhone): native device push is primary, ntfy is backup. Plain browser tab: in-page toast while open; ntfy is the only channel that reaches you when the tab is closed.</div></div>
+      <PlatformRow title="Windows native toast (primary)" subtitle="Fires while Scout is open and connected" enabled={prefs.platforms.windows.enabled} available={true} onToggle={v=>setPlatform("windows",v)} onTest={()=>onTest("windows")}/>
+      <PlatformRow title="Mobile native push (primary)" subtitle={status?.notifications.android_delivery_configured===false?"ntfy server channel not configured":"Android + iPhone installed app, background delivery"} enabled={prefs.platforms.android.enabled} available={status?.notifications.android_delivery_configured!==false} onToggle={v=>setPlatform("android",v)} onTest={()=>onTest("android")}/>
+      <div className="push-enrollment"><div><b>Enable native device push on this phone</b><small>{pushState?.message||"Checking this device…"} · works the same on Android and iPhone (iOS 16.4+); install Scout to your home screen first.</small></div><Button disabled={pushBusy||!pushState?.supported||!pushState?.configured} onClick={()=>void togglePush()}>{pushBusy?"Working…":pushState?.subscribed?"Disable device push":"Enable device push"}</Button></div>
+      <NtfyBackupPanel/>
       <div className="settings-subgrid"><ToggleRow label="Sound preference" checked={prefs.platforms.android.sound} onChange={v=>onChange({...prefs,platforms:{...prefs.platforms,android:{...prefs.platforms.android,sound:v}}})}/><ToggleRow label="Vibration" checked={prefs.platforms.android.vibration} onChange={v=>onChange({...prefs,platforms:{...prefs.platforms,android:{...prefs.platforms.android,vibration:v}}})}/><PriorityRow label="Alert priority" value={prefs.platforms.android.priority} onChange={value=>onChange({...prefs,platforms:{...prefs.platforms,android:{...prefs.platforms.android,priority:value}}})}/></div>
       <div className="settings-row"><div><b>Email / Resend</b><div className="text-[10px] scout-muted">Paused for this release. No setup is required.</div></div><Badge data-tone="blue">PAUSED</Badge></div>
       </>}
@@ -865,6 +893,29 @@ function NotificationSheet({ open, prefs, status, onClose, onChange, onSave, onT
 function ToggleRow({label,checked,onChange}:{label:string;checked:boolean;onChange:(value:boolean)=>void}) { return <div className="toggle-row"><span>{label}</span><Switch checked={checked} onCheckedChange={onChange}/></div>; }
 function PriorityRow({label,value,onChange}:{label:string;value:string;onChange:(value:string)=>void}) { return <label className="priority-row"><span>{label}</span><Select label={label} value={value||"high"} onValueChange={onChange} options={[{value:"low",label:"Low"},{value:"normal",label:"Normal"},{value:"high",label:"High"},{value:"critical",label:"Critical"}]}/></label>; }
 function PlatformRow({title,subtitle,enabled,available=true,onToggle,onTest}:{title:string;subtitle:string;enabled:boolean;available?:boolean;onToggle:(v:boolean)=>void;onTest:()=>void}) { return <div className="settings-row"><div><b>{title}</b><div className="text-[10px] scout-muted">{subtitle}</div></div><div className="flex items-center gap-2"><Button variant="ghost" className="!min-h-7 !px-2 text-[10px]" disabled={!available} onClick={onTest}>Test</Button><Switch checked={enabled&&available} disabled={!available} onCheckedChange={onToggle}/></div></div>; }
+
+// Backup channel visibility: lets the operator point ANY device (a spare phone, a browser
+// on a machine without the installed app, etc.) at this deployment's own ntfy topic without
+// needing to already know it from .env. ntfy is backup-only under the 2026-08-19 priority
+// (native toast/push is primary everywhere it's available); this panel exists so the backup
+// channel is actually reachable in practice, not just in theory.
+function NtfyBackupPanel() {
+  const [config, setConfig] = useState<NtfyConfig | null>(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => { void getNtfyConfig().then(setConfig).catch(() => setConfig({configured: false, server: null, topic: null, subscribe_url: null})); }, []);
+  if (!config) return null;
+  if (!config.configured) return <div className="notice-box mt-2"><b>ntfy backup channel</b><div>Not configured on this deployment (NTFY_TOPIC is empty).</div></div>;
+  return (
+    <div className="notice-box mt-2">
+      <b>ntfy backup channel</b>
+      <div className="mt-1 text-[10px] scout-muted">Point any device at this deployment&apos;s own channel to receive alerts even when Scout isn&apos;t open. Use the ntfy app (any platform) or a browser at the URL below.</div>
+      <div className="mt-1.5 flex items-center gap-2">
+        <code className="flex-1 truncate rounded bg-black/20 px-2 py-1 text-[10px]">{config.subscribe_url}</code>
+        <Button variant="ghost" className="!min-h-7 !px-2 text-[10px]" onClick={() => { void navigator.clipboard.writeText(config.subscribe_url || ""); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>{copied ? "Copied" : "Copy"}</Button>
+      </div>
+    </div>
+  );
+}
 
 function CommandPalette({ open, query, onQuery, findings, catalysts, gainers, onClose, onSelect }: {
   open:boolean; query:string; onQuery:(value:string)=>void; findings:Finding[]; catalysts:Catalyst[]; gainers:Gainer[]; onClose:()=>void; onSelect:(finding:Finding)=>void;
@@ -959,6 +1010,10 @@ export default function ScoutPage() {
   const [status,setStatus]=useState<ScoutStatus|null>(null);
   const [selected,setSelectedState]=useState<Finding|undefined>(API_CONFIGURED?undefined:demoFindings[0]);
   const [prefs,setPrefs]=useState<NotificationPreferences>(defaultPrefs);
+  const prefsRef=useRef(prefs);
+  useEffect(()=>{prefsRef.current=prefs;},[prefs]);
+  const isTauriRuntime=useRef(false);
+  useEffect(()=>{void import("@tauri-apps/api/core").then(m=>{isTauriRuntime.current=m.isTauri();}).catch(()=>{isTauriRuntime.current=false;});},[]);
   const [connected,setConnected]=useState(false);
   const [notificationOpen,setNotificationOpen]=useState(false);
   const [saving,setSaving]=useState(false);
@@ -1067,6 +1122,19 @@ export default function ScoutPage() {
           const finding=envelope.payload as Finding;
           setFindings(current=>[finding,...current.filter(f=>f.ticker!==finding.ticker)].slice(0,300));
           setSelectedState(current=>current?.ticker===finding.ticker?finding:current);
+          // 2026-08-19: per-client notification dispatch. Exactly one of these three fires
+          // per client context -- Tauri desktop gets native OS toast, an installed mobile
+          // PWA gets a native OS notification even while foregrounded (so it feels like any
+          // other installed app, not just while backgrounded via Web Push), and a plain
+          // browser tab gets an in-page shadcn toast since it has no OS surface to borrow.
+          if (isTauriRuntime.current) {
+            queueNativeScoutNotification(finding, prefsRef.current);
+          } else if (isInstalledPwa()) {
+            if (webPushForegroundAllowed(finding, prefsRef.current)) void showPwaForegroundNotification(finding);
+          } else if (webToastAllowed(finding, prefsRef.current)) {
+            const signals = Array.from(new Set([finding.stage, ...(finding.signals || [])])).slice(0, 3).join(" · ");
+            toastManager.add({ title: `${finding.ticker} · ${signals}`, description: `${money(finding.price)} · score ${finding.score}`, timeout: 8000 });
+          }
         }
       }catch{}
     });
@@ -1118,11 +1186,11 @@ export default function ScoutPage() {
     scanner,saveScanner:applyScannerRange,scannerBusy,scannerMessage,attention,setAttentionStatus,
   };
 
-  return <TooltipProvider><div className="scout-shell">
+  return <ScoutToastProvider><TooltipProvider><div className="scout-shell">
     <PwaRuntime/>
     <DesktopWorkbench {...props}/>
     <MobileConsole {...props}/>
     <NotificationSheet open={notificationOpen} prefs={prefs} status={status} onClose={()=>setNotificationOpen(false)} onChange={setPrefs} onSave={savePrefs} onTest={runNotificationTest} saving={saving} testMessage={testMessage}/>
     <CommandPalette open={commandOpen} query={commandQuery} onQuery={setCommandQuery} findings={visibleFindings} catalysts={catalysts} gainers={visibleGainers} onClose={()=>{setCommandOpen(false);setCommandQuery("");}} onSelect={setSelected}/>
-  </div></TooltipProvider>;
+  </div></TooltipProvider></ScoutToastProvider>;
 }

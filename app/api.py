@@ -416,6 +416,21 @@ class ScoutApi:
             "subscriptions": await asyncio.to_thread(self.store.web_push_subscription_count),
         })
 
+    async def ntfy_config(self, request: web.Request) -> web.Response:
+        """Expose this deployment's own ntfy server/topic so any device (phone, desktop
+        browser, tablet) can be pointed at the same channel from inside the app instead of
+        needing the operator to already know their own .env value. Same trust boundary as
+        the rest of the API -- this dashboard is tailnet-private, not public internet
+        (see PRODUCTION-DEPLOY.md), and NTFY_TOPIC is this operator's own private topic on
+        their own self-hosted ntfy instance, not a shared secret across users."""
+        configured = bool(settings.ntfy_server and settings.ntfy_topic)
+        return web.json_response({
+            "configured": configured,
+            "server": settings.ntfy_server if configured else None,
+            "topic": settings.ntfy_topic if configured else None,
+            "subscribe_url": f"{settings.ntfy_server}/{settings.ntfy_topic}" if configured else None,
+        })
+
     async def subscribe_push(self, request: web.Request) -> web.Response:
         try:
             payload = await request.json()
@@ -516,6 +531,7 @@ def create_app(store: Store, market: MarketWatcher, events: EventHub, catalysts=
     app.router.add_put("/api/notifications/preferences", api.update_notification_preferences)
     app.router.add_post("/api/notifications/test", api.test_notification)
     app.router.add_get("/api/push/config", api.push_config)
+    app.router.add_get("/api/notifications/ntfy-config", api.ntfy_config)
     app.router.add_post("/api/push/subscriptions", api.subscribe_push)
     app.router.add_delete("/api/push/subscriptions", api.unsubscribe_push)
     app.router.add_get("/api/settings/scanner", api.scanner_settings)

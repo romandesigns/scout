@@ -611,6 +611,20 @@ class MarketWatcher:
             and float(metrics.get("vol15") or 0) >= settings.hybrid_awakening_min_vol_ratio
             and (float(metrics.get("change15") or 0) >= settings.hybrid_awakening_min_change_15s_pct or float(metrics.get("change5") or 0) > 0)
         )
+        # 2026-08-19 experiment #4 (default off): a genuinely new tier, not a loosened
+        # threshold. Trust Rust's own high-confidence recipe score (it fires far earlier
+        # than Python's quality gate can confirm -- Milestone 009/010) even when the full
+        # "CLEAN" quality bar isn't cleared yet, as long as quality isn't actively bad
+        # (not ILLIQUID/CHOPPY/STALE) and there's real, fresh price movement backing it.
+        # See MILESTONES/2026-08-19-* for the backtest result before this is recommended.
+        if not actionable and settings.experiment_rust_fast_confirm:
+            actionable = bool(
+                metrics.get("full_warmup")
+                and str(metrics.get("quality_label") or "") not in {"ILLIQUID", "CHOPPY"}
+                and recipe_score >= 8
+                and float(metrics.get("vol15") or 0) >= settings.hybrid_awakening_min_vol_ratio
+                and float(metrics.get("change15") or 0) >= settings.hybrid_awakening_min_change_15s_pct
+            )
         duplicate = self.hybrid_memory.rust_notification_is_duplicate(symbol, detected_at)
         stage = "AWAKENING" if actionable and not duplicate else "PRE_IGNITION"
         catalyst = self.store.recent_catalyst(symbol)
@@ -1345,8 +1359,68 @@ class MarketWatcher:
             and (change5 >= settings.surge_min_change_5s_pct or change15 >= settings.early_min_change_15s_pct)
         )
 
+        # --- 2026-08-19 experiments: alternative shapes for the participation bar.
+        # Default (all flags off) preserves the exact original static bar below. Each flag
+        # is independently composable (2026-08-19 combined-test follow-up): #3 sets the
+        # starting base (unified loose bar vs. the normal strict one), then #1 and #2 each
+        # propose their own fractional reduction off whichever base is active. Reductions
+        # are combined by taking the larger single justification, not compounded/multiplied
+        # together -- stacking two "50% off" justifications into a ~75%-off bar would not be
+        # a considered design, just an accident of implementation order.
+        # See MILESTONES/2026-08-19-* for the backtest results behind each one, alone and combined.
+        base_min_trades30 = min_trades30
+        base_min_dollar30 = min_dollar30
+        if settings.experiment_unified_participation_gate:
+            # #3: stop independently re-tuning three copies of "is there enough
+            # participation" (this quality-layer bar, the separate `regular_participation`
+            # gate, and reversal_participation's own copy). Use the single, already-existing
+            # looser bar (MIN_30S_DOLLAR_VOLUME/MIN_30S_TRADES) as the one source of truth.
+            base_min_trades30 = max(2, settings.min_30s_trades)
+            base_min_dollar30 = settings.min_30s_dollar_volume
+
+        reduction = 0.0
+        if settings.experiment_adaptive_participation_bar:
+            # #1: scale the bar down per corroborating signal already present, instead of
+            # lowering it uniformly for every candidate regardless of context.
+            corroboration = 0
+            if change5 >= 0.5 or change15 >= 0.5:
+                corroboration += 1
+            if ema_up or ema_bull:
+                corroboration += 1
+            if above_vwap:
+                corroboration += 1
+            reduction = max(reduction, min(settings.experiment_adaptive_bar_max_reduction_pct, corroboration * 0.15))
+        if settings.experiment_time_decay_participation_bar:
+            # #2: the bar starts at its normal strictness and relaxes over a fixed window
+            # IF the trend is still holding (not reversing) -- targets the proven reason
+            # bigger moves succeed more often: they simply last long enough for a static
+            # bar to catch up. Smaller/faster moves never get that runway.
+            # relative_activity/fast_single_bucket are computed later in _maybe_emit, not
+            # available in this method -- reuse the same formulas locally rather than
+            # reaching across methods for state that doesn't exist here yet.
+            relative_activity_here = vol15 >= settings.vol_ratio_trigger or vol30 >= settings.vol_ratio_trigger
+            fast_single_bucket_here = (
+                vol15 >= settings.fast_single_bucket_vol_ratio
+                and change15 >= settings.fast_single_bucket_change_15s_pct
+                and dollar15 >= settings.fast_single_bucket_dollar_volume
+                and trades15 >= settings.fast_single_bucket_trades
+            )
+            activity_now = bool(relative_activity_here or fast_single_bucket_here or impulse_quality)
+            if activity_now and not s.activity_age_at:
+                s.activity_age_at = now
+            elif not activity_now:
+                s.activity_age_at = 0.0
+            trend_holding = change15 >= -0.10 and change30 >= -0.15
+            if s.activity_age_at and trend_holding:
+                age = max(0.0, now - s.activity_age_at)
+                decay = min(settings.experiment_time_decay_max_reduction_pct, age / settings.experiment_time_decay_window_seconds * settings.experiment_time_decay_max_reduction_pct)
+                reduction = max(reduction, decay)
+
+        effective_min_trades30 = max(2, round(base_min_trades30 * (1.0 - reduction)))
+        effective_min_dollar30 = base_min_dollar30 * (1.0 - reduction)
+
         rejection_reasons: list[str] = []
-        illiquid = trades30 < min_trades30 or dollar30 < min_dollar30
+        illiquid = trades30 < effective_min_trades30 or dollar30 < effective_min_dollar30
         if illiquid and not impulse_quality:
             rejection_reasons.append("LOW PARTICIPATION")
         if active_bucket_ratio < min_active_ratio and not impulse_quality:

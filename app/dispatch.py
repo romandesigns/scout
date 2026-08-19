@@ -10,7 +10,7 @@ from .config import settings
 from .db import Store
 from .models import Bucket, Finding
 from .events import EventHub
-from .notifiers import channel_rate_limited, notification_allowed, send_ntfy, send_ntfy_chart, send_resend_email, send_web_push_all
+from .notifiers import channel_rate_limited, notification_allowed, notification_allowed_any_platform, send_ntfy, send_ntfy_chart, send_resend_email, send_web_push_all
 
 log = logging.getLogger("scout.dispatch")
 
@@ -182,11 +182,15 @@ class Dispatcher:
         prefs = await asyncio.to_thread(self.store.get_notification_preferences)
         # Silent/off/watch findings are persisted and streamed to the UI but
         # never occupy delivery queues.
-        if notification_allowed(f, prefs, "android"):
-            if settings.vapid_public_key and settings.vapid_private_key and await asyncio.to_thread(self.store.web_push_subscription_count) > 0:
-                await self._queue("webpush", finding_id, f, prefs)
-            else:
-                await self._queue_consolidated_ntfy(finding_id, f, prefs)
+        # Web Push can reach subscribers on any platform (it filters per-subscriber
+        # internally in send_web_push_all), so its entry gate must not use the
+        # android-specific check -- only ntfy is intentionally the mobile-only
+        # fallback channel ("Mobile / ntfy" in Settings) and is correctly gated
+        # by the android platform toggle specifically.
+        if notification_allowed_any_platform(f, prefs) and settings.vapid_public_key and settings.vapid_private_key and await asyncio.to_thread(self.store.web_push_subscription_count) > 0:
+            await self._queue("webpush", finding_id, f, prefs)
+        elif notification_allowed(f, prefs, "android"):
+            await self._queue_consolidated_ntfy(finding_id, f, prefs)
         else:
             await asyncio.to_thread(self.store.record_delivery, finding_id, "ntfy", "not_eligible")
 

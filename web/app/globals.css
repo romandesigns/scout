@@ -165,6 +165,17 @@ html[data-scout-markers="off"] .chart-event-marker{display:none}
 .scout-tooltip-positioner{z-index:2000;pointer-events:none}
 .scout-tooltip-popup{max-width:260px;border:1px solid var(--border);border-radius:7px;background:color-mix(in srgb,var(--panel-3) 96%,black 4%);padding:6px 8px;color:var(--text);font-size:10px;line-height:1.35;box-shadow:0 10px 30px rgba(0,0,0,.28);transform-origin:var(--transform-origin)}
 .scout-tooltip-arrow{width:8px;height:8px;fill:var(--panel-3)}
+/* 2026-08-19: plain-browser-tab toast, shadcn Base UI (https://ui.shadcn.com/docs/components/base/toast).
+   Only fires when neither Tauri desktop nor an installed PWA is available to give a native
+   OS notification instead -- see the finding SSE dispatch in app/page.tsx. */
+.scout-toast-viewport{position:fixed;top:12px;right:12px;z-index:2100;display:flex;flex-direction:column;gap:8px;max-width:340px;pointer-events:none}
+.scout-toast-root{pointer-events:auto;position:relative;display:flex;flex-direction:column;gap:2px;border:1px solid var(--border);border-radius:8px;background:color-mix(in srgb,var(--panel-3) 96%,black 4%);padding:10px 30px 10px 12px;color:var(--text);box-shadow:0 12px 34px rgba(0,0,0,.32);transform:translateX(calc(100% + 12px));transition:transform 200ms ease,opacity 200ms ease;opacity:0}
+.scout-toast-root[data-starting-style],.scout-toast-root[data-ending-style]{transform:translateX(calc(100% + 12px));opacity:0}
+.scout-toast-root[data-open]{transform:translateX(0);opacity:1}
+.scout-toast-title{font-size:11px;font-weight:600}
+.scout-toast-description{font-size:10px;color:var(--muted)}
+.scout-toast-close{position:absolute;top:6px;right:6px;width:18px;height:18px;display:flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--muted);font-size:14px;line-height:1;cursor:pointer;border-radius:4px}
+.scout-toast-close:hover{background:var(--panel-2);color:var(--text)}
 .shadcn-select-trigger{display:inline-flex;min-height:28px;align-items:center;justify-content:space-between;gap:7px;border:1px solid var(--border);border-radius:6px;background:var(--panel-2);padding:0 8px;color:var(--text);font-size:11px;outline:none}
 .shadcn-select-trigger:focus-visible{box-shadow:0 0 0 2px color-mix(in srgb,var(--blue) 45%,transparent)}
 .shadcn-select-icon{display:inline-flex;color:var(--muted)}

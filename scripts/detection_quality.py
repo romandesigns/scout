@@ -14,6 +14,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    # Package import path used by pytest/tests importing scripts.detection_quality.
+    from .independent_market_data import IndependentCrossChecker, make_provider
+except ImportError:
+    # Direct-script path used by: python scripts/detection_quality.py
+    from independent_market_data import IndependentCrossChecker, make_provider
+
 HORIZONS = (30, 60, 120, 300, 900)
 
 
@@ -123,6 +130,52 @@ def coverage(metrics: dict[str, Any]) -> str:
     return "FINAL_15M"
 
 
+def mixed_breakdown(metrics: dict[str, Any]) -> dict[str, str | None]:
+    """Explain the former flat MIXED bucket by direction, magnitude and resolution."""
+    r300 = safe_float(metrics.get("return_300s_pct"))
+    r900 = safe_float(metrics.get("return_900s_pct"))
+    mfe300 = safe_float(metrics.get("mfe_300s_pct"))
+    mae300 = safe_float(metrics.get("mae_300s_pct"))
+    if r300 is None:
+        return {"direction_5m": None, "magnitude_5m": None, "resolution_15m": None}
+
+    direction = "POSITIVE" if r300 >= 0.25 else ("NEGATIVE" if r300 <= -0.25 else "FLAT")
+    ar = abs(r300)
+    magnitude = "TINY" if ar < 0.25 else ("SMALL" if ar < 0.75 else ("MEDIUM" if ar < 1.5 else "LARGE"))
+
+    if r900 is None:
+        resolution = "PENDING_15M"
+    elif direction == "POSITIVE":
+        if r900 >= max(0.25, r300 + 0.25):
+            resolution = "CONTINUATION"
+        elif r900 <= 0:
+            resolution = "FADE"
+        else:
+            resolution = "HELD"
+    elif direction == "NEGATIVE":
+        if r900 >= 0.25:
+            resolution = "RECOVERY"
+        elif r900 >= r300 + 0.50:
+            resolution = "PARTIAL_RECOVERY"
+        elif r900 <= r300 - 0.25:
+            resolution = "DETERIORATION"
+        else:
+            resolution = "HELD_NEGATIVE"
+    else:
+        if r900 >= 0.50:
+            resolution = "RESOLVED_UP"
+        elif r900 <= -0.50:
+            resolution = "RESOLVED_DOWN"
+        else:
+            resolution = "CHOP"
+
+    # Path-shape override: large two-sided excursion with little net progress.
+    if mfe300 is not None and mae300 is not None and abs(r300) < 0.5 and mfe300 >= 0.75 and mae300 <= -0.75:
+        resolution = "CHOP"
+
+    return {"direction_5m": direction, "magnitude_5m": magnitude, "resolution_15m": resolution}
+
+
 def base_classification(metrics: dict[str, Any]) -> str:
     r30 = safe_float(metrics.get("return_30s_pct"))
     r120 = safe_float(metrics.get("return_120s_pct"))
@@ -141,7 +194,8 @@ def base_classification(metrics: dict[str, Any]) -> str:
         return "FALSE_POSITIVE"
     if r300 < -1.0:
         return "FADE"
-    return "MIXED"
+    detail = mixed_breakdown(metrics)
+    return "MIXED_" + str(detail["direction_5m"]) + "_" + str(detail["resolution_15m"])
 
 
 def classification(metrics: dict[str, Any]) -> str:
@@ -169,8 +223,8 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     classifications = Counter(str(r.get("classification")) for r in rows)
 
     def normalized_label(r: dict[str, Any]) -> str:
-        label = str(r.get("classification") or "")
-        return label.removeprefix("PROVISIONAL_")
+        label = str(r.get("classification") or "").removeprefix("PROVISIONAL_")
+        return "MIXED" if label.startswith("MIXED_") else label
 
     summary: dict[str, Any] = {
         "sample_count": len(rows),
@@ -216,13 +270,17 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Scout forward detection-quality audit v5")
+    p = argparse.ArgumentParser(description="Scout forward detection-quality audit v6")
     p.add_argument("--api-base", default=os.getenv("SCOUT_API_BASE", "https://srv1170872.tail86523.ts.net:8444"))
     p.add_argument("--limit", type=int, default=100)
     p.add_argument("--include-developing", action="store_true")
     p.add_argument("--min-age-seconds", type=int, default=300)
     p.add_argument("--output-prefix", default="detection-quality")
     p.add_argument("--engine-version", default=None, help="Only audit findings produced by this Scout version; defaults to /healthz version")
+    p.add_argument("--independent-provider", default=os.getenv("SCOUT_INDEPENDENT_PROVIDER", "none"), choices=("none", "alphavantage"))
+    p.add_argument("--alpha-vantage-api-key", default=os.getenv("ALPHAVANTAGE_API_KEY"))
+    p.add_argument("--independent-tolerance-pct", type=float, default=float(os.getenv("SCOUT_INDEPENDENT_TOLERANCE_PCT", "0.75")))
+    p.add_argument("--independent-max-symbols", type=int, default=int(os.getenv("SCOUT_INDEPENDENT_MAX_SYMBOLS", "20")))
     args = p.parse_args()
 
     base = args.api_base.rstrip("/")
@@ -258,10 +316,14 @@ def main() -> int:
         include_developing=args.include_developing,
     )
 
+    provider = make_provider(args.independent_provider, api_key=args.alpha_vantage_api_key)
+    crosschecker = IndependentCrossChecker(provider, tolerance_pct=args.independent_tolerance_pct)
+    independent_symbols_used: set[str] = set()
+
     rows_out: list[dict[str, Any]] = []
     errors: list[str] = []
     print("=" * 126)
-    print("SCOUT FORWARD DETECTION-QUALITY AUDIT v5")
+    print("SCOUT FORWARD DETECTION-QUALITY AUDIT v6")
     print(f"API={base} version={engine_version or 'ANY'} fetched={len(findings)} selected={len(selected)} strict_actionable=A/B include_developing={args.include_developing} min_age={args.min_age_seconds}s")
     print("=" * 126)
     print(f"{'COHORT':11} {'TICKER':7} {'STAGE':18} {'RANK':5} {'PRICE':9} {'30s':8} {'1m':8} {'2m':8} {'5m':8} {'15m':8} {'MFE5':8} {'MAE5':8} {'COVERAGE':15} LABEL")
@@ -276,6 +338,24 @@ def main() -> int:
         except Exception as exc:
             errors.append(f"{ticker} finding={f.get('id')}: {exc}"); metrics = forward_metrics([], detected_at, price)
         cov = coverage(metrics); label = classification(metrics); persisted = validations.get(int(f.get("id") or 0), {})
+        mixed = mixed_breakdown(metrics) if label.removeprefix("PROVISIONAL_").startswith("MIXED_") else {
+            "direction_5m": None, "magnitude_5m": None, "resolution_15m": None
+        }
+
+        independent: dict[str, Any]
+        independent_comparison: dict[str, Any]
+        if provider.configured and (ticker in independent_symbols_used or len(independent_symbols_used) < max(0, args.independent_max_symbols)):
+            independent_symbols_used.add(ticker)
+            independent = crosschecker.metrics(ticker, detected_at, price)
+            independent_comparison = crosschecker.compare(metrics, independent)
+        else:
+            independent = {
+                "provider": provider.name,
+                "status": "LIMIT_REACHED" if provider.configured else "NOT_CONFIGURED",
+                "configured": provider.configured,
+            }
+            independent_comparison = {"status": independent["status"], "within_tolerance": None, "deltas": {}}
+
         out = {
             "cohort": cohort, "id": f.get("id"), "ticker": ticker, "stage": f.get("stage"), "detected_at": detected_at,
             "detected_at_iso": datetime.fromtimestamp(detected_at, timezone.utc).isoformat(), "price": price,
@@ -283,6 +363,18 @@ def main() -> int:
             "ross_score": f.get("ross_score"), "rv15": f.get("vol_ratio_15s"), "change_5s_pct": f.get("change_5s_pct"),
             "change_15s_pct": f.get("change_15s_pct"), "change_30s_pct": f.get("change_30s_pct"), "timeliness_label": f.get("timeliness_label"),
             "coverage": cov, "classification": label,
+            "classification_family": "MIXED" if label.removeprefix("PROVISIONAL_").startswith("MIXED_") else label.removeprefix("PROVISIONAL_"),
+            "mixed_direction_5m": mixed["direction_5m"], "mixed_magnitude_5m": mixed["magnitude_5m"],
+            "mixed_resolution_15m": mixed["resolution_15m"],
+            "independent_provider": independent.get("provider"), "independent_status": independent.get("status"),
+            "independent_entry_price": independent.get("entry_price"),
+            "independent_entry_price_delta_pct": independent.get("entry_price_delta_pct"),
+            "independent_return_300s_pct": independent.get("return_300s_pct"),
+            "independent_return_900s_pct": independent.get("return_900s_pct"),
+            "independent_mfe_300s_pct": independent.get("mfe_300s_pct"),
+            "independent_mae_300s_pct": independent.get("mae_300s_pct"),
+            "independent_within_tolerance": independent_comparison.get("within_tolerance"),
+            "independent_deltas": independent_comparison.get("deltas"),
             "stored_max_1m_pct": persisted.get("max_1m_pct"), "stored_max_5m_pct": persisted.get("max_5m_pct"),
             "stored_max_15m_pct": persisted.get("max_15m_pct"), "stored_time_to_peak_seconds": persisted.get("time_to_peak_seconds"),
             **metrics,
@@ -302,13 +394,25 @@ def main() -> int:
     for stage in sorted({str(r.get("stage") or "UNKNOWN") for r in rows_out}):
         stages[stage] = summarize([r for r in rows_out if str(r.get("stage") or "UNKNOWN") == stage])
 
+    independent_rows = [r for r in rows_out if r.get("independent_status") == "OK"]
+    independent_compared = [r for r in independent_rows if r.get("independent_within_tolerance") is not None]
+    independent_summary = {
+        "provider": provider.name,
+        "configured": provider.configured,
+        "rows_ok": len(independent_rows),
+        "rows_compared": len(independent_compared),
+        "within_tolerance_count": sum(1 for r in independent_compared if r.get("independent_within_tolerance") is True),
+        "outside_tolerance_count": sum(1 for r in independent_compared if r.get("independent_within_tolerance") is False),
+        "tolerance_pct": args.independent_tolerance_pct,
+    }
+
     summary = {
         "generated_at": datetime.now(timezone.utc).isoformat(), "api_base": base, "strict_actionable": True,
         "include_developing": args.include_developing, "min_age_seconds": args.min_age_seconds,
         "engine_version": engine_version,
         "fetched_count": len(findings), "selected_count": len(selected),
         "excluded": dict(sorted(excluded.items())),
-        "cohorts": cohorts, "stages": stages, "errors": errors,
+        "cohorts": cohorts, "stages": stages, "independent_validation": independent_summary, "errors": errors,
     }
     print("\n" + "=" * 126 + "\nSUMMARY")
     print(f"fetched={len(findings)} selected={len(selected)} excluded={dict(sorted(excluded.items()))}")

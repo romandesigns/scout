@@ -186,7 +186,16 @@ def _quiet_now(f: Finding, prefs: dict[str, Any] | None) -> bool:
     except Exception:
         return False
 
-def _allowed(f: Finding, prefs: dict[str, Any] | None, platform: str) -> bool:
+def _allowed_platform_agnostic(f: Finding, prefs: dict[str, Any] | None) -> bool:
+    """Every eligibility gate EXCEPT the per-platform enabled toggle.
+
+    Split out from _allowed so callers that fan out to multiple subscribers on
+    different platforms (Web Push) can apply these shared gates once, then
+    check each subscriber's own platform individually -- see infer_platform()
+    and _allowed(). A single finding can be eligible for one platform's
+    subscribers and not another's; it is never correct to decide that with one
+    hardcoded platform string for the whole batch.
+    """
     if f.shadow_mode:
         return False
     if f.stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"} and f.quality_label != "CLEAN":
@@ -203,12 +212,45 @@ def _allowed(f: Finding, prefs: dict[str, Any] | None, platform: str) -> bool:
         return False
     if _quiet_now(f, prefs):
         return False
+    return True
+
+
+def _platform_allowed(prefs: dict[str, Any] | None, platform: str) -> bool:
+    if not prefs:
+        return True
     return bool(prefs.get("platforms", {}).get(platform, {}).get("enabled", True))
 
 
+def _allowed(f: Finding, prefs: dict[str, Any] | None, platform: str) -> bool:
+    return _allowed_platform_agnostic(f, prefs) and _platform_allowed(prefs, platform)
+
+
+def infer_platform(user_agent: str) -> str:
+    """Best-effort platform classification from a stored subscription's user_agent.
+
+    Mirrors the client's own targetPlatform() detection (web/lib/native.ts) so the
+    server and every client agree on what "android" vs "windows" means: Android
+    devices are the "android" preference bucket, everything else (desktop browsers
+    on Windows/Mac/Linux, tablets, etc.) falls into "windows" -- the only two
+    platform buckets Scout's preference schema currently defines for push delivery.
+    """
+    return "android" if "android" in (user_agent or "").lower() else "windows"
+
+
 def notification_allowed(f: Finding, prefs: dict[str, Any] | None, platform: str) -> bool:
-    """Public pre-queue eligibility check used by the dispatcher."""
+    """Public pre-queue eligibility check used by the dispatcher for a specific,
+    known platform channel (e.g. ntfy, which is intentionally the mobile-only
+    channel -- labeled "Mobile / ntfy" in Settings -- so it is correctly and
+    deliberately gated by the "android" platform preference)."""
     return _allowed(f, prefs, platform)
+
+
+def notification_allowed_any_platform(f: Finding, prefs: dict[str, Any] | None) -> bool:
+    """Public pre-queue eligibility check for channels that can serve subscribers
+    on more than one platform (Web Push). Applies every gate except the
+    single-platform toggle; per-subscriber platform filtering happens inside
+    send_web_push_all itself, which knows each subscriber's actual platform."""
+    return _allowed_platform_agnostic(f, prefs)
 
 
 def _message(f: Finding) -> str:
@@ -348,7 +390,7 @@ def _web_push_payload(f: Finding) -> dict[str, Any]:
 
 
 def send_web_push_all(store: Any, f: Finding, prefs: dict[str, Any] | None = None) -> int:
-    if not _allowed(f, prefs, "android"):
+    if not _allowed_platform_agnostic(f, prefs):
         return 0
     if not (settings.vapid_public_key and settings.vapid_private_key):
         raise RuntimeError("VAPID Web Push is not configured")
@@ -360,9 +402,16 @@ def send_web_push_all(store: Any, f: Finding, prefs: dict[str, Any] | None = Non
     subscriptions = store.list_web_push_subscriptions()
     if not subscriptions:
         raise RuntimeError("No active Web Push subscriptions")
+    # Web Push reaches whichever platform's browser/PWA subscribed -- a desktop
+    # browser subscriber is not "android" just because that used to be the only
+    # platform bucket this function checked. Each subscriber's own platform
+    # preference governs whether THEY get this finding, independent of the rest.
+    eligible = [s for s in subscriptions if _platform_allowed(prefs, infer_platform(s.get("user_agent", "")))]
+    if not eligible:
+        return 0
     delivered = 0
     payload = json.dumps(_web_push_payload(f), separators=(",", ":"))
-    for subscription in subscriptions:
+    for subscription in eligible:
         endpoint = subscription["endpoint"]
         _health("webpush", last_attempt_at=int(time.time()))
         try:

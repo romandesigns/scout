@@ -1,3 +1,42 @@
+## 6.7.4
+
+- Fixed Web Push notification eligibility to check each subscriber's actual platform
+  (desktop browser vs. Android) instead of one shared toggle for every subscription.
+- Reversed the v6.5.3 pause: native Tauri desktop toast is primary again (ntfy is the
+  background/backup channel), and wired the desktop toast trigger into the live finding
+  stream -- it previously existed but was never actually called.
+- Installed mobile PWA (Android + iPhone) native device push is primary; added a foreground
+  native-notification path so it fires while the app is open, not just backgrounded.
+- Added an in-page toast (shadcn Base UI) for plain, non-installed browser tabs, which
+  previously had no in-app notification surface at all.
+- Added `/api/notifications/ntfy-config` and a Settings panel so any device can be pointed
+  at this deployment's own ntfy backup channel without needing the operator's `.env` value.
+- Added `PromotionProgress` UI: shows gate-clearance progress ("N/M gates cleared · next: X")
+  on non-actionable Radar rows, using existing `promotion_trace` data that was already
+  computed but never surfaced.
+- Added a historical backtest pipeline (ground-truth mover/reversal finding, dual-engine
+  Rust+Python replay, gate-tuning experiment scaffolding) as internal instrumentation --
+  see `HISTORICAL-BACKTEST.md` and `MILESTONES/`. Four gate-tuning experiments are
+  implemented behind default-off flags (`EXPERIMENT_*` env vars); none are enabled.
+- Added a shadow-mode candlestick pattern module (`app/candlestick.py`); not wired into
+  live detection.
+- Live detector behavior unchanged except where explicitly noted above (dormant behind
+  default-off flags).
+
+## 6.7.3
+
+- Fixed recall audit pre-existing-mover and historical-timestamp bias.
+- Added blocker forensics for seen-but-nonactionable movers.
+- Split MIXED outcomes by 5m direction/magnitude and 15m resolution.
+- Added independent Alpha Vantage intraday outcome cross-check adapter.
+- Live detector behavior unchanged.
+
+## 6.7.2
+
+- Added right-tail recall / monster-mover audit and rolling profitability trend instrumentation.
+- Added prospective top-gainer + 24H session sampler and naive baseline comparison.
+- No detector or notification-policy changes.
+
 ## 6.7.1
 
 - Added momentum-intensity and entry-state UI.

@@ -107,6 +107,17 @@ class Settings:
     quality_max_stale_seconds: int = _i("QUALITY_MAX_STALE_SECONDS", 30, 15)
     quality_impulse_min_trades_15s: int = _i("QUALITY_IMPULSE_MIN_TRADES_15S", 10, 2)
     quality_impulse_min_dollar_15s: float = _f("QUALITY_IMPULSE_MIN_DOLLAR_15S", 5000.0, 0.0)
+
+    # 2026-08-19 experiments (all default OFF -- production behavior unchanged unless
+    # explicitly enabled). See MILESTONES/2026-08-19-* for the backtest results each one
+    # was validated against before any recommendation was made.
+    experiment_adaptive_participation_bar: bool = _b("EXPERIMENT_ADAPTIVE_PARTICIPATION_BAR", False)
+    experiment_adaptive_bar_max_reduction_pct: float = _f("EXPERIMENT_ADAPTIVE_BAR_MAX_REDUCTION_PCT", 0.50, 0.0)
+    experiment_time_decay_participation_bar: bool = _b("EXPERIMENT_TIME_DECAY_PARTICIPATION_BAR", False)
+    experiment_time_decay_window_seconds: float = _f("EXPERIMENT_TIME_DECAY_WINDOW_SECONDS", 60.0, 10.0)
+    experiment_time_decay_max_reduction_pct: float = _f("EXPERIMENT_TIME_DECAY_MAX_REDUCTION_PCT", 0.50, 0.0)
+    experiment_unified_participation_gate: bool = _b("EXPERIMENT_UNIFIED_PARTICIPATION_GATE", False)
+    experiment_rust_fast_confirm: bool = _b("EXPERIMENT_RUST_FAST_CONFIRM", False)
     quality_watch_cooldown_seconds: int = _i("QUALITY_WATCH_COOLDOWN_SECONDS", 120, 30)
 
     # V5.6 first-leg initiation. Watch candidates remain silent; a confirmed

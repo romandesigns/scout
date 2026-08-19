@@ -13,6 +13,17 @@ function targetPlatform() {
   return /android/i.test(navigator.userAgent) ? "android" as const : "windows" as const;
 }
 
+// Distinguishes "installed to home screen" (real app-like context, standalone display, no
+// browser chrome) from a plain browser tab -- the split the 2026-08-19 notification design
+// actually keys off of, since installed-vs-not matters more here than Android-vs-iPhone
+// (both installed platforms use the same Web Push mechanism).
+export function isInstalledPwa(): boolean {
+  if (typeof window === "undefined") return false;
+  const standaloneMedia = window.matchMedia?.("(display-mode: standalone)").matches;
+  const iosStandalone = (navigator as unknown as { standalone?: boolean }).standalone === true;
+  return Boolean(standaloneMedia || iosStandalone);
+}
+
 function priorityName(value?: string) {
   return (["low", "normal", "high", "critical"].includes(String(value).toLowerCase())
     ? String(value).toLowerCase()
@@ -64,17 +75,42 @@ function quietNow(finding: Finding, prefs: NotificationPreferences) {
   return true;
 }
 
-function nativeAllowed(finding: Finding, prefs: NotificationPreferences) {
+// Shared gates for every client-side delivery path (Tauri desktop toast, PWA foreground
+// toast, plain-browser shadcn toast) -- 2026-08-19 refactor mirrors the same split made
+// server-side in app/notifiers.py for Web Push: platform-agnostic checks once, then each
+// caller applies its own platform-specific toggle on top, instead of one function silently
+// assuming a single target platform for every client.
+function coreAllowed(finding: Finding, prefs: NotificationPreferences) {
   if (!["CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"].includes(finding.stage) && finding.quality_label !== "CLEAN") return false;
   if (!prefs.master_enabled) return false;
-  const platform = targetPlatform();
-  if (!prefs.platforms[platform].enabled) return false;
-  if (platform === "windows" && !prefs.platforms.windows.toast) return false;
   if (signalMode(finding, prefs) !== "notify") return false;
   if (finding.score < prefs.minimum_score) return false;
   if (!prefs.sessions[sessionFor(finding.detected_at)]) return false;
   if (quietNow(finding, prefs)) return false;
   return true;
+}
+
+function nativeAllowed(finding: Finding, prefs: NotificationPreferences) {
+  if (!coreAllowed(finding, prefs)) return false;
+  const platform = targetPlatform();
+  if (!prefs.platforms[platform].enabled) return false;
+  if (platform === "windows" && !prefs.platforms.windows.toast) return false;
+  return true;
+}
+
+// PWA installed on a phone (Android or iPhone) but not running inside Tauri -- gated by the
+// same "android" preference bucket the server uses for Web Push background delivery, so the
+// foreground and background experience agree with each other.
+export function webPushForegroundAllowed(finding: Finding, prefs: NotificationPreferences) {
+  if (!coreAllowed(finding, prefs)) return false;
+  return prefs.platforms.android.enabled;
+}
+
+// Plain browser tab: not installed, not Tauri. No platform bucket applies (there isn't a
+// "web" toggle in the preference schema, deliberately -- see app/notifiers.py's
+// notification_allowed_any_platform for the server-side equivalent reasoning).
+export function webToastAllowed(finding: Finding, prefs: NotificationPreferences) {
+  return coreAllowed(finding, prefs);
 }
 
 export async function syncNativeNotificationChannels(prefs: NotificationPreferences) {
@@ -145,6 +181,42 @@ export async function sendNativeScoutNotification(finding: Finding, prefs: Notif
     return true;
   } catch {
     // Browser builds intentionally fall back to server-side ntfy/email delivery.
+    return false;
+  }
+}
+
+// Installed PWA (Android or iPhone), app currently open/foregrounded. Background delivery
+// while closed already works via Web Push (lib/web-push.ts + public/sw.js's `push` handler).
+// This covers the other half: while the tab has focus, browsers commonly suppress the OS
+// push banner for the page that's already visible, which would otherwise make the PWA feel
+// silent/non-native compared to a real installed app. Calling showNotification() directly
+// on the active service worker registration produces the same native OS notification (icon,
+// vibrate, actions) the background push path does, so the experience is consistent whether
+// the app is open or closed -- the "feel like any other mobile app" requirement.
+export async function showPwaForegroundNotification(finding: Finding) {
+  try {
+    if (!("serviceWorker" in navigator) || !("Notification" in window)) return false;
+    let granted = Notification.permission === "granted";
+    if (Notification.permission === "default") granted = (await Notification.requestPermission()) === "granted";
+    if (!granted) return false;
+    const registration = await navigator.serviceWorker.ready;
+    const price = finding.price ? (finding.price < 1 ? `$${finding.price.toFixed(4)}` : `$${finding.price.toFixed(2)}`) : "";
+    const velocity = finding.change_15s_pct == null ? "" : `15s ${finding.change_15s_pct >= 0 ? "+" : ""}${finding.change_15s_pct.toFixed(2)}%`;
+    const rvol = finding.vol_ratio_15s == null ? "" : `RVOL ${finding.vol_ratio_15s.toFixed(1)}×`;
+    const signals = Array.from(new Set([finding.stage, ...(finding.signals || [])])).slice(0, 3).join(" · ");
+    const critical = isCritical(finding);
+    // renotify/vibrate are real, widely-supported Notification API options (used already by
+    // public/sw.js's push handler) that TS's default DOM lib type doesn't declare.
+    const options = {
+      body: [price, velocity, rvol, `score ${finding.score}`].filter(Boolean).join(" · "),
+      icon: "/icons/scout-192.png", badge: "/icons/scout-192.png",
+      tag: `scout-${finding.ticker}`, renotify: critical,
+      requireInteraction: critical, vibrate: critical ? [180, 80, 180] : [120],
+      data: { url: `/?finding=${finding.id}&ticker=${encodeURIComponent(finding.ticker)}` },
+    } as NotificationOptions & { renotify?: boolean; vibrate?: number[] };
+    await registration.showNotification(`${finding.ticker} · ${signals}`, options);
+    return true;
+  } catch {
     return false;
   }
 }
