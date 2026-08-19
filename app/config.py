@@ -118,6 +118,20 @@ class Settings:
     experiment_time_decay_max_reduction_pct: float = _f("EXPERIMENT_TIME_DECAY_MAX_REDUCTION_PCT", 0.50, 0.0)
     experiment_unified_participation_gate: bool = _b("EXPERIMENT_UNIFIED_PARTICIPATION_GATE", False)
     experiment_rust_fast_confirm: bool = _b("EXPERIMENT_RUST_FAST_CONFIRM", False)
+    # #5, 2026-08-19: session-relative participation bar. The fixed QUALITY_MIN_TRADES_30S/
+    # QUALITY_MIN_DOLLAR_30S bar is session-blind -- premarket, regular, and after-hours have
+    # very different baseline liquidity (confirmed from real historical data, see
+    # scripts/build_participation_baseline.py). These are the p65 dollar30/trades30
+    # percentiles per session, computed from that real data, not guessed.
+    experiment_session_relative_participation_bar: bool = _b("EXPERIMENT_SESSION_RELATIVE_PARTICIPATION_BAR", False)
+    # #6, 2026-08-19 follow-up to #5: #5 used the p60 percentile (close to, sometimes below,
+    # the existing fixed bar -- a mild adjustment). This tests a materially stricter
+    # operating point instead: gate on whether a candidate's participation is genuinely
+    # ABNORMAL for its session (top 15-20%), not merely "at or above par". Percentile table
+    # is the same real historical data (scripts/build_participation_baseline.py), just read
+    # at a higher percentile via experiment_market_relative_percentile.
+    experiment_market_relative_participation_gate: bool = _b("EXPERIMENT_MARKET_RELATIVE_PARTICIPATION", False)
+    experiment_market_relative_percentile: int = _i("EXPERIMENT_MARKET_RELATIVE_PERCENTILE", 80, 50)
     quality_watch_cooldown_seconds: int = _i("QUALITY_WATCH_COOLDOWN_SECONDS", 120, 30)
 
     # V5.6 first-leg initiation. Watch candidates remain silent; a confirmed
@@ -220,6 +234,17 @@ class Settings:
     # Re-entry/reclaim safety: block late/chasing or immediately fading re-entry alerts.
     reentry_safety_gate_enabled: bool = _b("REENTRY_SAFETY_GATE_ENABLED", True)
     reentry_min_change_5s_pct: float = _f("REENTRY_MIN_CHANGE_5S_PCT", 0.05, 0.0)
+    # 2026-08-19: the existing reentry safety gate only checks extension from the *local*
+    # base, which is blind to a ticker that's been fading for hours and formed a new tight
+    # base far below both its session peak and VWAP (see MILESTONES/2026-08-19-008, the
+    # BIVI case). Add a VWAP-distance blocker as its own experiment, default off pending
+    # validation.
+    experiment_reentry_vwap_safety_gate: bool = _b("EXPERIMENT_REENTRY_VWAP_SAFETY_GATE", False)
+    reentry_max_below_vwap_pct: float = _f("REENTRY_MAX_BELOW_VWAP_PCT", 2.0, 0.0)
+    # Retroactive validation against a real regular-hours session showed the dominant real
+    # loss pattern was the mirror case -- chasing a reentry already extended well above
+    # VWAP, not fading below it. See app/market.py's evaluate_reentry_safety docstring.
+    reentry_max_above_vwap_pct: float = _f("REENTRY_MAX_ABOVE_VWAP_PCT", 3.0, 0.0)
     ignition_min_fresh_velocity_pct: float = _f("IGNITION_MIN_FRESH_VELOCITY_PCT", 0.50, 0.10)
     # V6.6.8 late-stage continuation guard. This is intentionally scoped to
     # fresh IGNITION/HALT_PRESSURE promotions so EARLY/BREAKOUT timing remains

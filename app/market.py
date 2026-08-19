@@ -37,6 +37,71 @@ def trading_session_key(ts: float) -> str:
     return trade_date.isoformat()
 
 
+def session_type_for(ts: float) -> str:
+    """premarket / regular / afterhours / overnight -- used by
+    experiment_session_relative_participation_bar. Matches web/lib/native.ts's sessionFor()
+    boundaries exactly so client-side session preferences and this server-side gate agree."""
+    local = datetime.fromtimestamp(ts, ET)
+    minutes = local.hour * 60 + local.minute
+    if minutes >= 20 * 60 or minutes < 4 * 60:
+        return "overnight"
+    if minutes < 9 * 60 + 30:
+        return "premarket"
+    if minutes < 16 * 60:
+        return "regular"
+    return "afterhours"
+
+
+# Session-relative participation percentiles (p60), computed from real historical tick data
+# across 501 cached datasets (scripts/build_participation_baseline.py,
+# data/optimization/backtest/participation-baseline.json) -- not guessed. Used only when
+# settings.experiment_session_relative_participation_bar is enabled (default off).
+SESSION_RELATIVE_PARTICIPATION_BAR = {
+    "premarket": {"min_dollar_30s": 4128.3, "min_trades_30s": 16},
+    "regular": {"min_dollar_30s": 2517.14, "min_trades_30s": 15},
+    "afterhours": {"min_dollar_30s": 1990.24, "min_trades_30s": 8},
+    "overnight": {"min_dollar_30s": 2517.14, "min_trades_30s": 15},  # no overnight samples collected; fall back to regular
+}
+
+# Full session-relative percentile table (p50-p95), same source as SESSION_RELATIVE_
+# PARTICIPATION_BAR above (data/optimization/backtest/participation-baseline.json, 501
+# cached datasets, real historical trade prints) -- used by
+# settings.experiment_market_relative_participation_gate (#6, 2026-08-19) to gate on
+# whether participation is genuinely ABNORMAL for its session (a higher, configurable
+# percentile) rather than #5's "merely at or above the session's median-ish level" (p60).
+# "overnight" has no samples collected; falls back to "regular".
+MARKET_RELATIVE_PARTICIPATION_PERCENTILES = {
+    "premarket": {
+        "dollar_30s": {50: 1543.73, 60: 4128.3, 70: 11282.23, 75: 19590.28, 80: 33890.79, 85: 64724.8, 90: 139023.92, 95: 341762.75},
+        "trades_30s": {50: 7, 60: 16, 70: 41, 75: 70, 80: 121, 85: 223, 90: 452, 95: 1033},
+    },
+    "regular": {
+        "dollar_30s": {50: 1115.99, 60: 2517.14, 70: 6054.99, 75: 9853.6, 80: 16729.16, 85: 31263.3, 90: 65467.28, 95: 185601.62},
+        "trades_30s": {50: 9, 60: 15, 70: 26, 75: 34, 80: 47, 85: 70, 90: 123, 95: 317},
+    },
+    "afterhours": {
+        "dollar_30s": {50: 984.49, 60: 1990.24, 70: 4294.86, 75: 6499.68, 80: 10261.69, 85: 17711.01, 90: 34079.24, 95: 85969.98},
+        "trades_30s": {50: 5, 60: 8, 70: 15, 75: 21, 80: 32, 85: 51, 90: 95, 95: 219},
+    },
+}
+MARKET_RELATIVE_PARTICIPATION_PERCENTILES["overnight"] = MARKET_RELATIVE_PARTICIPATION_PERCENTILES["regular"]
+_MARKET_RELATIVE_PERCENTILE_KEYS = (50, 60, 70, 75, 80, 85, 90, 95)
+
+
+def _nearest_percentile_key(requested: int) -> int:
+    return min(_MARKET_RELATIVE_PERCENTILE_KEYS, key=lambda k: abs(k - requested))
+
+
+def market_relative_participation_bar(session: str, percentile: int) -> tuple[float, int]:
+    """Return (min_dollar_30s, min_trades_30s) for a session at the nearest available
+    percentile to `percentile`. Snaps to the closest of the precomputed table's keys
+    (50/60/70/75/80/85/90/95) rather than interpolating -- the table is sparse by design
+    and interpolation would imply false precision the underlying sample doesn't support."""
+    table = MARKET_RELATIVE_PARTICIPATION_PERCENTILES.get(session, MARKET_RELATIVE_PARTICIPATION_PERCENTILES["regular"])
+    key = _nearest_percentile_key(percentile)
+    return table["dollar_30s"][key], table["trades_30s"][key]
+
+
 def _headers() -> dict[str, str]:
     return {"APCA-API-KEY-ID": settings.alpaca_key, "APCA-API-SECRET-KEY": settings.alpaca_secret}
 
@@ -100,23 +165,64 @@ def evaluate_reentry_safety(stage: str, m: dict) -> dict:
     Re-entry stages remain structurally distinct from fresh breakouts, but the
     production audit exposed severe adverse excursions in REARM/VWAP/EMA reclaim.
     Reject re-entry alerts that are already late-risk or fading immediately.
+
+    2026-08-19 addition (EXPERIMENT_REENTRY_VWAP_SAFETY_GATE, default off): found via a
+    live production case (BIVI, see MILESTONES/2026-08-19-008) that this gate had a real
+    blind spot. `is_late_promotion_risk` only measures extension from the *local* base --
+    a ticker that ran hard hours earlier and has been fading ever since can form a new,
+    tight local base near its depressed price and read as "not extended" even while still
+    deeply below the session VWAP. That let a two-second EMA9/EMA21 flicker inside an
+    hours-long downtrend produce a `rank=B, quality=CLEAN, EMA_RECLAIM` finding labeled
+    "STRONG MOMENTUM" / "FRESH ENTRY" on the live dashboard.
+
+    Retroactively validating against a full regular-hours session (see MILESTONES/
+    2026-08-19-008) showed the below-VWAP case wasn't actually what was hurting that
+    session's numbers -- none of that day's 25 REARM/VWAP_RECLAIM/EMA_RECLAIM findings were
+    meaningfully below VWAP. The real pattern was the mirror image: reentries firing on
+    tickers already extended well *above* VWAP (one ticker, CDTG, alone produced two
+    findings at +20-22% above VWAP with -7 to -8% outcomes each, and accounted for the
+    majority of that session's entire actionable-cohort loss) -- i.e. re-arming into an
+    already-extended chase, which `is_late_promotion_risk`'s local-extension check also
+    missed for the same local-base-reset reason. So this checks both directions: too far
+    below VWAP (stale fade, the BIVI case) and too far above VWAP (chasing an extended
+    move, the CDTG case) are each their own blocker, independently thresholded since a
+    "how much downside from a fade" tolerance and a "how much chase risk" tolerance are not
+    obviously the same number.
     """
     stage = str(stage or "").upper()
     enabled = bool(settings.reentry_safety_gate_enabled)
     change5 = float(m.get("change5") or 0.0)
+    vwap_gap_pct = m.get("vwap_gap_pct")
     late_risk = is_late_promotion_risk(m)
+    deeply_below_vwap = bool(
+        settings.experiment_reentry_vwap_safety_gate
+        and vwap_gap_pct is not None
+        and vwap_gap_pct < -settings.reentry_max_below_vwap_pct
+    )
+    chasing_above_vwap = bool(
+        settings.experiment_reentry_vwap_safety_gate
+        and vwap_gap_pct is not None
+        and vwap_gap_pct > settings.reentry_max_above_vwap_pct
+    )
     blockers = []
     if enabled and stage in {"REARM", "VWAP_RECLAIM", "EMA_RECLAIM"}:
         if late_risk:
             blockers.append("late_risk")
         if change5 < settings.reentry_min_change_5s_pct:
             blockers.append("fresh_5s_continuation")
+        if deeply_below_vwap:
+            blockers.append("deeply_below_vwap")
+        if chasing_above_vwap:
+            blockers.append("chasing_above_vwap")
     return {
         "ready": not blockers,
         "enabled": enabled,
         "stage": stage,
         "change5_pct": change5,
+        "vwap_gap_pct": vwap_gap_pct,
         "late_risk": late_risk,
+        "deeply_below_vwap": deeply_below_vwap,
+        "chasing_above_vwap": chasing_above_vwap,
         "blockers": blockers,
     }
 
@@ -1386,7 +1492,23 @@ class MarketWatcher:
         # See MILESTONES/2026-08-19-* for the backtest results behind each one, alone and combined.
         base_min_trades30 = min_trades30
         base_min_dollar30 = min_dollar30
-        if settings.experiment_unified_participation_gate:
+        if settings.experiment_market_relative_participation_gate:
+            # #6: gate on genuine session-relative ABNORMALITY (a higher percentile, default
+            # p80) rather than #5's p60 "at or above par" bar -- see
+            # MARKET_RELATIVE_PARTICIPATION_PERCENTILES above and MILESTONES/2026-08-19-* for
+            # the results #5 (p60) produced before this stricter variant was tried.
+            base_min_dollar30, base_min_trades30 = market_relative_participation_bar(
+                session_type_for(now), settings.experiment_market_relative_percentile
+            )
+            base_min_trades30 = max(2, base_min_trades30)
+        elif settings.experiment_session_relative_participation_bar:
+            # #5: the fixed bar is session-blind. Use the real, session-specific p60
+            # participation percentile instead of one universal number -- see
+            # SESSION_RELATIVE_PARTICIPATION_BAR above for how these were derived.
+            session_bar = SESSION_RELATIVE_PARTICIPATION_BAR[session_type_for(now)]
+            base_min_trades30 = max(2, session_bar["min_trades_30s"])
+            base_min_dollar30 = session_bar["min_dollar_30s"]
+        elif settings.experiment_unified_participation_gate:
             # #3: stop independently re-tuning three copies of "is there enough
             # participation" (this quality-layer bar, the separate `regular_participation`
             # gate, and reversal_participation's own copy). Use the single, already-existing
@@ -2462,13 +2584,31 @@ class MarketWatcher:
                             continue
                         if isinstance(messages, dict):
                             messages = [messages]
-                        for msg in messages:
+                        for i, msg in enumerate(messages):
                             if not isinstance(msg, dict):
                                 continue
                             if msg.get("T") == "t":
                                 await self._handle_trade(msg, subscribed, settings.alpaca_overnight_feed if overnight else settings.alpaca_feed)
                             elif msg.get("T") == "s" and not overnight:
                                 await self._handle_status(msg)
+                            # 2026-08-19: Alpaca's SIP feed batches many trade updates into
+                            # a single websocket frame during high-volume bursts.
+                            # _handle_trade's own awaits (state restore, _maybe_emit) are
+                            # conditional -- for an already-tracked symbol not yet due for
+                            # re-eval, the whole call can complete with zero real suspension
+                            # points, so `for msg in messages: await self._handle_trade(...)`
+                            # never actually yields back to the event loop for the entire
+                            # batch. Observed same day: the Rust bridge queue writer and the
+                            # SIP websocket's own internal keepalive ping/pong both starved
+                            # under load (queue saturation incident, MILESTONES/2026-08-19-
+                            # 006; ping-timeout disconnects roughly once/minute, MILESTONES/
+                            # 2026-08-19-007) -- both symptoms of the same event loop never
+                            # getting a turn during a large batch, not two separate bugs.
+                            # A cheap explicit yield every 100 messages costs nothing on a
+                            # small batch and gives other tasks a fair chance during a large
+                            # one, without slowing down actual message throughput.
+                            if i % 100 == 99:
+                                await asyncio.sleep(0)
                     raise ConnectionError(f"Alpaca {label} stream closed")
             except asyncio.CancelledError:
                 health_key = "boats" if overnight else "sip"
