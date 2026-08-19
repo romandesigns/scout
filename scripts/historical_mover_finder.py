@@ -51,8 +51,16 @@ def trading_days(start: date, end: date) -> list[date]:
     return out
 
 
-def session_window(target: date) -> tuple[datetime, datetime]:
+def session_window(target: date, regular_hours_only: bool = False) -> tuple[datetime, datetime]:
     # Mirrors build_alpaca_replay.py: pre-market through after-hours SIP.
+    if regular_hours_only:
+        # 2026-08-19 addition: isolate the regular 9:30am-4:00pm ET session specifically --
+        # requested to separate "did Scout catch real regular-hours moves" from the
+        # premarket/afterhours data-quality caveats found earlier the same day (thin/stale
+        # tape, warrant tickers with no fresh last-sale ticks, etc).
+        start = datetime.combine(target, datetime.min.time(), ET).replace(hour=9, minute=30)
+        end = datetime.combine(target, datetime.min.time(), ET).replace(hour=16, minute=0)
+        return start, end
     start = datetime.combine(target, datetime.min.time(), ET).replace(hour=4)
     end = start.replace(hour=20)
     return start, end
@@ -62,8 +70,8 @@ def bar_ts(row: dict) -> float:
     return datetime.fromisoformat(str(row["t"]).replace("Z", "+00:00")).timestamp()
 
 
-def find_movers_for_date(target: date, symbols: list[str], control_rate: int) -> list[dict]:
-    start, end = session_window(target)
+def find_movers_for_date(target: date, symbols: list[str], control_rate: int, regular_hours_only: bool = False) -> list[dict]:
+    start, end = session_window(target, regular_hours_only)
     rows_out: list[dict] = []
     rng = random.Random(f"{target.isoformat()}-scout-backtest")
 
@@ -131,6 +139,8 @@ def main() -> int:
                     help="Emit ~1/N non-mover symbols per date as a control sample for precision scoring. 0 disables.")
     p.add_argument("--symbols", default=None, help="Comma-separated explicit symbol list; skips the full-universe scan")
     p.add_argument("--max-symbols", type=int, default=None, help="Cap the scanned universe (smoke-testing only)")
+    p.add_argument("--regular-hours-only", action="store_true",
+                    help="Restrict the scan window to 9:30am-4:00pm ET instead of 4am-8pm ET")
     args = p.parse_args()
 
     if not settings.alpaca_key or not settings.alpaca_secret:
@@ -155,7 +165,7 @@ def main() -> int:
     total_controls = 0
     with out_path.open("w", encoding="utf-8") as fh:
         for day in days:
-            rows = find_movers_for_date(day, symbols, args.control_rate)
+            rows = find_movers_for_date(day, symbols, args.control_rate, args.regular_hours_only)
             movers = [r for r in rows if r["is_mover"]]
             controls = [r for r in rows if not r["is_mover"]]
             total_movers += len(movers)
