@@ -1164,6 +1164,22 @@ class MarketWatcher:
                 subscribed.update(add)
                 if add or remove:
                     log.info("%s subscriptions updated: +%d -%d total=%d", label, len(add), len(remove), len(subscribed))
+            except websockets.exceptions.ConnectionClosed as exc:
+                # The shared websocket (self.ws / self.overnight_ws) can die between
+                # universe_loop reading it and this send actually going out -- observed
+                # 2026-08-19 as frequent Alpaca SIP "keepalive ping timeout" disconnects,
+                # roughly once a minute during a network-unstable stretch. This is
+                # expected and self-healing: _stream()'s own reconnect loop replaces
+                # self.ws/self.overnight_ws independently, and the next universe_loop
+                # cycle (settings.universe_refresh_seconds later) reconciles cleanly
+                # against the fresh connection. Previously this propagated all the way up
+                # to universe_loop's `except Exception: log.exception("Universe refresh
+                # failed")`, logging a full ERROR-level stack trace on every single
+                # occurrence -- misleading (the universe refresh itself had already
+                # succeeded; only the reconcile send failed) and pure noise once the SIP
+                # connection is flapping. Log it quietly instead and let the loop retry.
+                status["last_error"] = f"{label} websocket closed mid-reconcile (will retry next cycle): {exc}"
+                log.info("%s reconcile skipped: websocket closed mid-send, will retry next cycle", label)
             except Exception as exc:
                 status["last_error"] = str(exc)
                 raise
