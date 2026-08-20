@@ -108,6 +108,7 @@ class RustPerceptionBridge:
         self.written = 0
         self.writer_batches = 0
         self.max_queue_depth = 0
+        self._last_quote_submit_at: dict[str, float] = {}
 
     async def start(self) -> None:
         if not self.enabled or self._tasks:
@@ -126,17 +127,45 @@ class RustPerceptionBridge:
         await self._stop_process()
 
     def submit_trade(self, *, symbol: str, ts: float, price: float, size: float, feed: str) -> bool:
+        return self._submit_event(
+            event_type="trade", symbol=symbol, ts=ts, feed=feed,
+            payload={"price": float(price), "size": max(0.0, float(size))},
+        )
+
+    def submit_quote(
+        self, *, symbol: str, ts: float, bid_price: float, ask_price: float,
+        bid_size: float, ask_size: float, feed: str,
+    ) -> bool:
+        """Forward SIP quote context without involving Python's detector hot path."""
+        normalized_symbol = symbol.upper()
+        previous = self._last_quote_submit_at.get(normalized_symbol, 0.0)
+        if ts - previous < settings.rust_quote_min_interval_ms / 1000.0:
+            return False
+        midpoint = (bid_price + ask_price) / 2.0 if bid_price > 0 and ask_price > 0 else max(bid_price, ask_price)
+        if midpoint <= 0:
+            return False
+        self._last_quote_submit_at[normalized_symbol] = ts
+        return self._submit_event(
+            event_type="quote", symbol=normalized_symbol, ts=ts, feed=feed,
+            payload={
+                "price": midpoint, "size": 0.0, "bid_price": max(0.0, bid_price),
+                "ask_price": max(0.0, ask_price), "bid_size": max(0.0, bid_size),
+                "ask_size": max(0.0, ask_size),
+            },
+        )
+
+    def _submit_event(self, *, event_type: str, symbol: str, ts: float, feed: str, payload: dict[str, float]) -> bool:
         if not self.enabled:
             return False
         event = {
             "schema": "scout.market-event.v1",
-            "event_type": "trade",
+            "event_type": event_type,
             "symbol": symbol.upper(),
             "source_ts": float(ts),
             "received_ts": time.time(),
             "sequence": next(self._sequence),
             "feed": str(feed).lower(),
-            "payload": {"price": float(price), "size": max(0.0, float(size))},
+            "payload": payload,
         }
         try:
             self.queue.put_nowait(event)

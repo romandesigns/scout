@@ -223,3 +223,74 @@ def test_rust_bridge_microbatches_preserve_burst_without_drops(tmp_path: Path):
             await bridge.stop()
 
     asyncio.run(run_test())
+
+
+def test_rust_bridge_rate_limits_quotes_per_symbol():
+    from app.hybrid import RustPerceptionBridge
+
+    async def handler(payload):
+        return None
+
+    bridge = RustPerceptionBridge(handler)
+    bridge.enabled = True
+    assert bridge.submit_quote(
+        symbol="wake", ts=1000.0, bid_price=1.0, ask_price=1.01,
+        bid_size=800, ask_size=200, feed="sip",
+    )
+    assert not bridge.submit_quote(
+        symbol="wake", ts=1000.2, bid_price=1.0, ask_price=1.01,
+        bid_size=900, ask_size=200, feed="sip",
+    )
+    assert bridge.submit_quote(
+        symbol="wake", ts=1001.0, bid_price=1.01, ask_price=1.02,
+        bid_size=900, ask_size=200, feed="sip",
+    )
+    assert bridge.queue.qsize() == 2
+
+
+def test_shaping_up_transition_becomes_evidence_rich_early_watch(tmp_path: Path):
+    import asyncio
+    from app.market import MarketWatcher
+    from app.models import SymbolState
+
+    class CaptureDispatcher:
+        def __init__(self): self.items = []
+        async def emit(self, finding, buckets=None, current=None):
+            self.items.append(finding); return len(self.items)
+
+    store = Store(tmp_path / "state.db")
+    dispatcher = CaptureDispatcher()
+    market = MarketWatcher(store, dispatcher)  # type: ignore[arg-type]
+    market.states["WAKE"] = SymbolState("WAKE", 15, 160)
+    metrics = {
+        "full_warmup": True, "quality_label": "ILLIQUID", "quality_score": 58,
+        "price": .48, "score": 6, "vol15": 1.1, "vol30": 1.0,
+        "change5": .06, "change15": .08, "change3": .02, "change10": .07,
+        "change30": .10, "change60": .12, "extension": .4,
+        "ema9": .48, "ema21": .479, "ema9_slope": .001, "vwap": .475,
+        "above_vwap": True, "quiet_break": False, "accel15_pp": .02,
+        "dollar15": 900, "dollar30": 1400, "trades15": 4, "trades30": 7,
+        "breakout_level": .50, "breakout_window": "micro", "rejection_reasons": ["LOW PARTICIPATION"],
+        "directional_efficiency": .7, "active_bucket_ratio": .75, "direction_reversals": 1,
+        "previous_close": .46, "gap_pct": 4.3, "day_volume": 10000,
+        "projected_session_volume": 100000, "volume_rate_per_minute": 1200,
+        "candidate_profile": {}, "base_low": .46, "base_high": .49, "micro_resistance": .50,
+    }
+    market._metrics = lambda _state, _ts: metrics  # type: ignore[method-assign]
+    candidate = {
+        "ticker": "WAKE", "detected_at": 1_700_000_000.0, "stage": "SHAPING_UP",
+        "recipe_score": 8, "confidence": 82, "trade_acceleration": 6.0,
+        "dollar_acceleration": 9.6, "bid_ask_imbalance": 4.0, "spread_pct": 2.0,
+        "trigger_level": .50, "invalidation_level": .46,
+        "recipe_present": ["trade frequency is accelerating", "bid pressure supports the move"],
+        "recipe_missing": [], "trigger_distance_pct": 4.17, "base_extension_pct": .4,
+    }
+    asyncio.run(market.handle_rust_candidate(candidate))
+    finding = dispatcher.items[0]
+    assert finding.stage == "AWAKENING"
+    assert finding.actionable_rank == "B"
+    assert finding.shadow_mode is False
+    assert finding.trigger_level == .50 and finding.invalidation_level == .46
+    assert any("6.0x its dormant baseline" in item for item in finding.evidence)
+    assert finding.candidate_profile["transition_confidence"] == 82
+    store.close()

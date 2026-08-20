@@ -687,7 +687,11 @@ class MarketWatcher:
             finding.evidence.append("Rust + Python candidate agreement")
             finding.notification_reason = "dual-engine confirmation"
         elif source == "rust":
-            finding.notification_reason = "Rust primary perception detected dormant-to-active transition"
+            finding.notification_reason = (
+                "ticker-relative participation accelerated near a bullish trigger"
+                if finding.stage == "AWAKENING"
+                else "Rust perception detected a dormant-to-active transition"
+            )
         else:
             if finding.stage == "REARM" or "FIRST_PULLBACK" in (finding.signals or []):
                 finding.notification_reason = "controlled pullback held and bullish momentum reaccelerated"
@@ -710,6 +714,8 @@ class MarketWatcher:
         if not metrics or not (self.min_price <= float(metrics["price"]) <= self.max_price):
             return
         recipe_score = int(candidate.get("recipe_score") or 0)
+        rust_stage = str(candidate.get("stage") or "PRE_IGNITION").upper()
+        confidence = int(candidate.get("confidence") or 0)
         actionable = bool(
             metrics.get("full_warmup")
             and metrics.get("quality_label") == "CLEAN"
@@ -717,6 +723,17 @@ class MarketWatcher:
             and float(metrics.get("vol15") or 0) >= settings.hybrid_awakening_min_vol_ratio
             and (float(metrics.get("change15") or 0) >= settings.hybrid_awakening_min_change_15s_pct or float(metrics.get("change5") or 0) > 0)
         )
+        # The transition engine uses the ticker's own dormant baseline and SIP quote
+        # pressure. This is deliberately an early-watch tier: sparse absolute volume is
+        # not itself a blocker when participation is accelerating sharply from baseline.
+        if settings.rust_shaping_up_notify_enabled and rust_stage in {"SHAPING_UP", "REARMED"}:
+            actionable = bool(
+                metrics.get("full_warmup")
+                and confidence >= settings.rust_shaping_up_min_confidence
+                and float(candidate.get("trade_acceleration") or 0) >= 3.0
+                and float(candidate.get("dollar_acceleration") or 0) >= 3.0
+                and float(metrics.get("change15") or 0) > -0.2
+            )
         # 2026-08-19 experiment #4 (default off): a genuinely new tier, not a loosened
         # threshold. Trust Rust's own high-confidence recipe score (it fires far earlier
         # than Python's quality gate can confirm -- Milestone 009/010) even when the full
@@ -735,9 +752,16 @@ class MarketWatcher:
         stage = "AWAKENING" if actionable and not duplicate else "PRE_IGNITION"
         catalyst = self.store.recent_catalyst(symbol)
         evidence = [
-            "Rust primary perception qualified an early structural transition",
+            f"Rust transition state: {rust_stage}",
+            f"trade frequency {float(candidate.get('trade_acceleration') or 0):.1f}x its dormant baseline",
+            f"dollar volume {float(candidate.get('dollar_acceleration') or 0):.1f}x its dormant baseline",
             *[str(x) for x in candidate.get("recipe_present") or []][:6],
         ]
+        percentile = float(candidate.get("cross_sectional_percentile") or 0)
+        if percentile > 0:
+            evidence.append(f"cross-market opportunity percentile {percentile:.0f}")
+        if float(candidate.get("bid_ask_imbalance") or 0) > 1.0:
+            evidence.append(f"displayed bid/ask size ratio {float(candidate.get('bid_ask_imbalance')):.1f}x")
         signals = [stage]
         if catalyst:
             signals.append("CATALYST")
@@ -758,20 +782,31 @@ class MarketWatcher:
             active_bucket_ratio=metrics.get("active_bucket_ratio"), direction_reversals=metrics.get("direction_reversals"), previous_close=metrics.get("previous_close"),
             gap_pct=metrics.get("gap_pct"), day_volume=metrics.get("day_volume"), projected_session_volume=metrics.get("projected_session_volume"),
             volume_rate_per_minute=metrics.get("volume_rate_per_minute"), candidate_profile=dict(metrics.get("candidate_profile") or {}),
-            episode_id=state.episode_id, detection_timeframe_seconds=settings.bucket_seconds, formation_start_at=detected_at - 300.0,
+            episode_id=int(candidate.get("episode_id") or state.episode_id), detection_timeframe_seconds=settings.bucket_seconds, formation_start_at=detected_at - 300.0,
             formation_end_at=detected_at, formation_low=metrics.get("base_low"), formation_high=metrics.get("base_high"),
-            trigger_level=float(metrics.get("micro_resistance") or 0) or None, invalidation_level=metrics.get("base_low"),
+            trigger_level=float(candidate.get("trigger_level") or metrics.get("micro_resistance") or 0) or None,
+            invalidation_level=float(candidate.get("invalidation_level") or metrics.get("base_low") or 0) or None,
             urgency=("EARLY" if actionable else "WATCH"), engine_version=settings.app_version, lifecycle_phase=("AWAKENING" if actionable else "ARMED"),
             shadow_mode=not actionable or duplicate, recipe_score=recipe_score,
             recipe_present=[str(x) for x in candidate.get("recipe_present") or []], recipe_missing=[str(x) for x in candidate.get("recipe_missing") or []],
             trigger_distance_pct=float(candidate.get("trigger_distance_pct") or 0),
             base_extension_at_detection_pct=float(candidate.get("base_extension_pct") or 0),
             timeliness_label="EARLY", precursor_finding_id=state.pre_ignition_finding_id,
-            hybrid_key=self._hybrid_key(state, detected_at),
+            hybrid_key=f"{symbol}:{trading_session_key(detected_at)}:{int(candidate.get('episode_id') or 0)}",
         )
         if catalyst:
             finding.catalyst_headline, finding.catalyst_category, finding.catalyst_score, finding.catalyst_url, _ = catalyst
             finding.candidate_profile["catalyst"] = min(100, int((finding.catalyst_score or 0) * 20))
+        finding.candidate_profile.update({
+            "trade_acceleration": round(float(candidate.get("trade_acceleration") or 0), 2),
+            "dollar_acceleration": round(float(candidate.get("dollar_acceleration") or 0), 2),
+            "bid_ask_imbalance": round(float(candidate.get("bid_ask_imbalance") or 0), 2),
+            "spread_pct": round(float(candidate.get("spread_pct") or 0), 3),
+            "transition_confidence": confidence,
+            "cross_sectional_percentile": round(percentile, 1),
+            "market_breadth_pct": round(float(candidate.get("market_breadth_pct") or 0), 1),
+            "probability_5_before_3": round(float(candidate.get("probability_5_before_3") or 0), 3),
+        })
         self._decorate_hybrid(finding, "rust")
         snap = self.snapshot(symbol)
         buckets, current = snap if snap else ([], None)
@@ -1254,7 +1289,10 @@ class MarketWatcher:
                     )
                 if "*" in desired:
                     if subscribed != {"*"}:
-                        await send({"action": "subscribe", "trades": ["*"]})
+                        payload = {"action": "subscribe", "trades": ["*"]}
+                        if key == "sip":
+                            payload["quotes"] = ["*"]
+                        await send(payload)
                         subscribed.clear()
                         subscribed.add("*")
                     return
@@ -1263,9 +1301,15 @@ class MarketWatcher:
                 # Chunk and bound every send. Reconnect and universe-refresh
                 # reconciliation can no longer overlap indefinitely.
                 for chunk in _chunks(remove, 1000):
-                    await send({"action": "unsubscribe", "trades": chunk})
+                    payload = {"action": "unsubscribe", "trades": chunk}
+                    if key == "sip":
+                        payload["quotes"] = chunk
+                    await send(payload)
                 for chunk in _chunks(add, 1000):
-                    await send({"action": "subscribe", "trades": chunk})
+                    payload = {"action": "subscribe", "trades": chunk}
+                    if key == "sip":
+                        payload["quotes"] = chunk
+                    await send(payload)
                 subscribed.difference_update(remove)
                 subscribed.update(add)
                 if add or remove:
@@ -2550,6 +2594,27 @@ class MarketWatcher:
             if m:
                 await self._maybe_emit(s, m, ts, fast=False)
 
+    def _handle_quote(self, msg: dict, subscribed: set[str], feed: str = "sip") -> None:
+        """Send Alpaca SIP quote pressure to Rust; Python remains trade-driven."""
+        if not self.rust_bridge:
+            return
+        symbol = str(msg.get("S", "")).upper()
+        if not symbol or ("*" not in subscribed and symbol not in subscribed):
+            return
+        try:
+            bid_price = float(msg.get("bp", 0)); ask_price = float(msg.get("ap", 0))
+            bid_size = float(msg.get("bs", 0)); ask_size = float(msg.get("as", 0))
+        except (TypeError, ValueError):
+            return
+        try:
+            ts = datetime.fromisoformat(str(msg.get("t")).replace("Z", "+00:00")).timestamp()
+        except Exception:
+            ts = time.time()
+        self.rust_bridge.submit_quote(
+            symbol=symbol, ts=ts, bid_price=bid_price, ask_price=ask_price,
+            bid_size=bid_size, ask_size=ask_size, feed=feed,
+        )
+
     async def _stream(self, uri: str, label: str, overnight: bool = False):
         if not settings.alpaca_key or not settings.alpaca_secret:
             raise RuntimeError("ALPACA_API_KEY/ALPACA_API_SECRET are required")
@@ -2589,6 +2654,8 @@ class MarketWatcher:
                                 continue
                             if msg.get("T") == "t":
                                 await self._handle_trade(msg, subscribed, settings.alpaca_overnight_feed if overnight else settings.alpaca_feed)
+                            elif msg.get("T") == "q" and not overnight:
+                                self._handle_quote(msg, subscribed, settings.alpaca_feed)
                             elif msg.get("T") == "s" and not overnight:
                                 await self._handle_status(msg)
                             # 2026-08-19: Alpaca's SIP feed batches many trade updates into

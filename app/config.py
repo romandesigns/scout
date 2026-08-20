@@ -328,11 +328,14 @@ class Settings:
     rust_bridge_queue_max: int = _i("RUST_BRIDGE_QUEUE_MAX", 50000, 1000)
     rust_bridge_batch_max: int = _i("RUST_BRIDGE_BATCH_MAX", 256, 1)
     rust_bridge_batch_bytes: int = _i("RUST_BRIDGE_BATCH_BYTES", 65536, 4096)
+    rust_quote_min_interval_ms: int = _i("RUST_QUOTE_MIN_INTERVAL_MS", 1000, 100)
     hybrid_merge_window_seconds: float = _f("HYBRID_MERGE_WINDOW_SECONDS", 45.0, 1.0)
     hybrid_dedupe_seconds: float = _f("HYBRID_DEDUPE_SECONDS", 20.0, 0.0)
     hybrid_episode_gap_seconds: float = _f("HYBRID_EPISODE_GAP_SECONDS", 900.0, 60.0)
     hybrid_awakening_min_vol_ratio: float = _f("HYBRID_AWAKENING_MIN_VOL_RATIO", 1.5, 1.0)
     hybrid_awakening_min_change_15s_pct: float = _f("HYBRID_AWAKENING_MIN_CHANGE_15S_PCT", 0.15, 0.0)
+    rust_shaping_up_notify_enabled: bool = _b("RUST_SHAPING_UP_NOTIFY_ENABLED", True)
+    rust_shaping_up_min_confidence: int = _i("RUST_SHAPING_UP_MIN_CONFIDENCE", 65, 50)
     hybrid_precision_threshold_pct: float = _f("HYBRID_PRECISION_THRESHOLD_PCT", 5.0, 0.5)
 
     # Health / ops.

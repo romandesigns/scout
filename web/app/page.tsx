@@ -416,24 +416,44 @@ function MomentumBadges({finding}:{finding:Finding}) {
   return <span className="flex flex-wrap items-center gap-1"><Badge data-tone={momentumTone}><IconFlame size={10}/>{momentumLabel}</Badge><Badge data-tone={stateTone}>{stateLabel}</Badge></span>;
 }
 
+function tickerDecision(finding: Finding) {
+  const momentum=momentumProfile(finding);
+  const quality=(finding.quality_label||"DEVELOPING").toUpperCase();
+  const urgency=(finding.urgency||"").toUpperCase();
+  const actionable=["A","B"].includes((finding.actionable_rank||"").toUpperCase());
+  const late=momentum.state==="EXTENDED"||momentum.state==="LATE_RISK";
+  if(quality==="ILLIQUID")return {label:"AVOID FOR NOW",tone:"red",reason:"Trading is too thin for a dependable entry"};
+  if(quality==="CHOPPY")return {label:"USE CAUTION",tone:"orange",reason:"Price action is unstable"};
+  if(late)return {label:"DO NOT CHASE",tone:"orange",reason:"The move is already extended"};
+  if(actionable&&(urgency==="NOW"||momentum.tier==="EXTREME"))return {label:"READY NOW",tone:"green",reason:"Bullish momentum and entry conditions align"};
+  if(actionable||momentum.tier==="STRONG")return {label:"ENTRY FORMING",tone:"green",reason:"Momentum is strengthening; watch the trigger"};
+  if(["AWAKENING","PRE_IGNITION","EARLY","ARMED","REARM"].includes(finding.stage))return {label:"BUILDING",tone:"blue",reason:"Early bullish activity is developing"};
+  return {label:"WATCH",tone:"blue",reason:"Not enough confirmation yet"};
+}
+
+function readableRisk(reason:string) {
+  const labels:Record<string,string>={
+    "LOW PARTICIPATION":"Thin trading",
+    "SPARSE PRINTS":"Few trades",
+    "BULLISH STRUCTURE UNCONFIRMED":"Bullish structure unconfirmed",
+    "CHOPPY PATH":"Choppy price action",
+  };
+  return labels[reason]||reason.toLowerCase().replaceAll("_"," ");
+}
+
 function FindingRow({ finding, selected, onSelect }: { finding: Finding; selected: boolean; onSelect: () => void }) {
   const [menu,setMenu]=useState<{x:number;y:number}|null>(null);
-  const signals = Array.from(new Set([finding.stage, ...(finding.signals || [])])).slice(0, 3);
-  const quality=finding.quality_label || (finding.stage==="ACTIVITY_WATCH"?"DEVELOPING":"CLEAN");
-  const qualityTone=quality==="CLEAN"?"green":quality==="DEVELOPING"?"blue":quality==="CHOPPY"?"orange":"red";
   const urgency=finding.urgency||(finding.extension_pct!=null&&finding.extension_pct>=8?"EXTENDED":finding.stage==="FIRST_LEG"?"NOW":finding.quality_label==="CLEAN"?"CONFIRMED":"WATCH");
   const momentum=momentumProfile(finding);
   const priority=urgency==="NOW"||finding.stage==="HALT_PRESSURE"||momentum.tier==="EXTREME";
+  const decision=tickerDecision(finding);
+  const risks=(finding.rejection_reasons||[]).slice(0,2).map(readableRisk);
   return <><button className="market-row" data-selected={selected || undefined} data-priority={priority||undefined} onClick={onSelect} onContextMenu={event=>{event.preventDefault();setMenu({x:event.clientX,y:event.clientY});}}>
     <div className="flex items-center justify-between gap-2">
       <div className="flex min-w-0 items-center gap-1.5">
         <span className="ticker-symbol">{finding.ticker}</span>
-        <EventIcon event={urgency}/>
-        {signals.map(signal => <EventIcon key={signal} event={signal}/>)}
-        <Badge data-tone={qualityTone}>{finding.actionable_rank || "C"} · {quality}</Badge>
-        {finding.catalyst_headline && !signals.includes("CATALYST") && <EventIcon event="CATALYST"/>}
-        {finding.ross_match && <Badge data-tone="green">ROSS {finding.ross_score ?? ""}</Badge>}
-        <MomentumBadges finding={finding}/>
+        <Badge data-tone={decision.tone}>{decision.label}</Badge>
+        {finding.catalyst_headline&&<Badge data-tone="blue">NEWS</Badge>}
       </div>
       <span className="scout-muted metric text-[10px]">{age(finding.detected_at)}</span>
     </div>
@@ -441,15 +461,16 @@ function FindingRow({ finding, selected, onSelect }: { finding: Finding; selecte
       <div><span className="metric text-[14px] font-semibold">{money(finding.price)}</span><span className="ml-2 metric text-[10px] text-[var(--green)]">{pct(finding.extension_pct)}</span></div>
       <span className="metric text-[10px] scout-muted">evidence {finding.score}/10</span>
     </div>
+    <div className="ticker-decision mt-1.5" data-tone={decision.tone}><b>{decision.reason}</b><span>{finding.stage.replaceAll("_"," ").toLowerCase()}</span></div>
     <div className="market-metrics mt-1.5">
-      <span><b>5s</b> {pct(finding.change_5s_pct,1)}</span>
-      <span><b>15s</b> {pct(finding.change_15s_pct,1)}</span>
-      <span><b>30s</b> {pct(finding.change_30s_pct,1)}</span>
-      <span><b>RV15</b> {finding.vol_ratio_15s?.toFixed(1) ?? "—"}×</span>
+      <span><b>5 sec</b> {pct(finding.change_5s_pct,1)}</span>
+      <span><b>15 sec</b> {pct(finding.change_15s_pct,1)}</span>
+      <span><b>30 sec</b> {pct(finding.change_30s_pct,1)}</span>
+      <span><b>Volume</b> {finding.vol_ratio_15s?.toFixed(1) ?? "—"}×</span>
     </div>
-    {momentum.tier!=="NORMAL"&&<div className="mt-1 flex items-center gap-2 text-[9px] font-semibold"><span className="text-[var(--orange)]">🔥 POWER {momentum.score}/13</span><span className={momentum.state==="FRESH"?"text-[var(--green)]":"text-[var(--orange)]"}>{momentum.state==="FRESH"?"ENTRY WINDOW ACTIVE":momentum.state.replaceAll("_"," ")}</span></div>}
+    {momentum.tier!=="NORMAL"&&<div className="mt-1 text-[9px] font-semibold text-[var(--green)]">Momentum strength {momentum.score}/13{momentum.state==="FRESH"?" · entry window open":` · ${momentum.state.replaceAll("_"," ").toLowerCase()}`}</div>}
     {finding.leg_context && <div className="mt-1 text-[9px] font-semibold tracking-wide text-[var(--green)]">{finding.leg_context.replaceAll("_"," ")} · {age(finding.detected_at)} AGO</div>}
-    {finding.rejection_reasons?.length ? <div className="mt-1 truncate text-[9px] text-[var(--orange)]">{finding.rejection_reasons.slice(0,2).join(" · ")}</div> : null}
+    {risks.length ? <div className="mt-1 truncate text-[9px] text-[var(--orange)]">Caution: {risks.join(" · ")}</div> : null}
     <PromotionProgress finding={finding}/>
   </button>{menu&&<div className="stock-context-menu" style={{left:menu.x,top:menu.y}} onMouseLeave={()=>setMenu(null)}><Button variant="ghost" onClick={()=>{onSelect();setMenu(null);}}>Open in active chart</Button><Button variant="ghost" onClick={()=>{onSelect();setMenu(null);}}>Inspect event</Button><Button variant="ghost" onClick={()=>{void navigator.clipboard.writeText(finding.ticker);setMenu(null);}}>Copy ticker</Button><Button variant="ghost" onClick={()=>{void navigator.clipboard.writeText(`${finding.ticker} ${finding.stage} ${money(finding.price)} ${clock(finding.detected_at)}`);setMenu(null);}}>Copy alert summary</Button><Button variant="ghost" onClick={()=>{window.open(`https://www.tradingview.com/symbols/${finding.ticker}/`,`_blank`,`noopener,noreferrer`);setMenu(null);}}>Open external chart</Button></div>}</>;
 }
