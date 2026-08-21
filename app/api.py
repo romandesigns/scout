@@ -153,6 +153,7 @@ class ScoutApi:
                 "rust_bridge": self.market.rust_bridge.status() if self.market.rust_bridge else {"enabled": False, "running": False},
                 "precision": await asyncio.to_thread(self.store.hybrid_precision_stats, settings.hybrid_precision_threshold_pct),
                 "notification_latency": await asyncio.to_thread(self.store.notification_latency_stats),
+                "pipeline_latency": await asyncio.to_thread(self.store.pipeline_latency_stats),
                 "architecture": "rust-primary+python-specialist",
             },
             "engines": {
@@ -223,7 +224,18 @@ class ScoutApi:
         row = await asyncio.to_thread(self.store.finding_verification, finding_id)
         if not row:
             raise web.HTTPNotFound(text="finding not found")
+        row["pipeline_trace"] = await asyncio.to_thread(self.store.finding_pipeline_trace, finding_id)
         return web.json_response(row)
+
+    async def client_displayed(self, request: web.Request) -> web.Response:
+        finding_id = _int(request.match_info.get("finding_id"), 0, 1, 2_147_483_647)
+        if not await asyncio.to_thread(self.store.get_finding, finding_id):
+            raise web.HTTPNotFound(text="finding not found")
+        payload = await request.json() if request.can_read_body else {}
+        channel = str(payload.get("channel") or "client")[:32]
+        detail = str(payload.get("surface") or "")[:200]
+        await asyncio.to_thread(self.store.record_pipeline_trace, finding_id, "client_displayed", None, channel, detail)
+        return web.json_response({"ok": True})
 
     async def update_finding_review(self, request: web.Request) -> web.Response:
         finding_id = _int(request.match_info.get("finding_id"), 0, 1, 2_147_483_647)
@@ -540,6 +552,7 @@ def create_app(store: Store, market: MarketWatcher, events: EventHub, catalysts=
     app.router.add_get("/api/findings", api.findings)
     app.router.add_get("/api/findings/{finding_id:\\d+}", api.finding)
     app.router.add_get("/api/findings/{finding_id:\\d+}/verification", api.finding_verification)
+    app.router.add_post("/api/findings/{finding_id:\\d+}/client-displayed", api.client_displayed)
     app.router.add_put("/api/findings/{finding_id:\\d+}/review", api.update_finding_review)
     app.router.add_get("/api/catalysts", api.catalysts)
     app.router.add_get("/api/market/gainers", api.gainers)

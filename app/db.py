@@ -237,6 +237,16 @@ class Store:
                     provider_id TEXT
                 );
                 CREATE INDEX IF NOT EXISTS ix_delivery_finding_time ON notification_delivery_events(finding_id,event_at);
+                CREATE TABLE IF NOT EXISTS pipeline_trace_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    finding_id INTEGER NOT NULL,
+                    stage TEXT NOT NULL,
+                    event_at REAL NOT NULL,
+                    channel TEXT,
+                    detail TEXT
+                );
+                CREATE INDEX IF NOT EXISTS ix_pipeline_trace_finding_time ON pipeline_trace_events(finding_id,event_at);
+                CREATE INDEX IF NOT EXISTS ix_pipeline_trace_stage_time ON pipeline_trace_events(stage,event_at DESC);
                 CREATE TABLE IF NOT EXISTS finding_reviews (
                     finding_id INTEGER PRIMARY KEY,
                     automatic_grade INTEGER,
@@ -640,6 +650,51 @@ class Store:
                 )
             self.db.commit()
             return int(cur.lastrowid)
+
+    def record_pipeline_trace(self, finding_id: int, stage: str, event_at: float | None = None, channel: str | None = None, detail: str | None = None) -> int:
+        with self.lock:
+            cur = self.db.execute(
+                "INSERT INTO pipeline_trace_events(finding_id,stage,event_at,channel,detail) VALUES(?,?,?,?,?)",
+                (int(finding_id), str(stage)[:48], float(event_at or time.time()), (channel or "")[:32], (detail or "")[:500]),
+            )
+            self.db.commit()
+            return int(cur.lastrowid)
+
+    def finding_pipeline_trace(self, finding_id: int) -> list[dict[str, Any]]:
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT id,finding_id,stage,event_at,channel,detail FROM pipeline_trace_events WHERE finding_id=? ORDER BY event_at,id",
+                (int(finding_id),),
+            ).fetchall()
+        keys = ["id", "finding_id", "stage", "event_at", "channel", "detail"]
+        return [dict(zip(keys, row)) for row in rows]
+
+    def pipeline_latency_stats(self, limit: int = 500) -> dict[str, Any]:
+        """Stage-to-stage latency from prospective high-resolution trace events."""
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT finding_id,stage,event_at FROM pipeline_trace_events ORDER BY id DESC LIMIT ?",
+                (max(10, min(20000, int(limit) * 16)),),
+            ).fetchall()
+        by_finding: dict[int, dict[str, float]] = {}
+        for finding_id, stage, event_at in reversed(rows):
+            by_finding.setdefault(int(finding_id), {}).setdefault(str(stage), float(event_at))
+        spans = {
+            "receive_to_rust_ms": ("source_received", "rust_evaluated"),
+            "rust_to_candidate_ms": ("rust_evaluated", "candidate_created"),
+            "candidate_to_actionable_ms": ("candidate_created", "actionable_promoted"),
+            "actionable_to_queue_ms": ("actionable_promoted", "notification_queued"),
+            "queue_to_provider_ms": ("notification_queued", "provider_accepted"),
+            "provider_to_client_ms": ("provider_accepted", "client_displayed"),
+            "actionable_to_order_ms": ("actionable_promoted", "paper_order_submitted"),
+            "order_to_fill_ms": ("paper_order_submitted", "paper_order_filled"),
+        }
+        result: dict[str, Any] = {}
+        for label, (start, end) in spans.items():
+            values = sorted((trace[end] - trace[start]) * 1000 for trace in by_finding.values() if start in trace and end in trace and trace[end] >= trace[start])[-limit:]
+            if values:
+                result[label] = {"samples": len(values), "median": round(values[len(values)//2], 2), "p95": round(values[min(len(values)-1, math.ceil(len(values)*0.95)-1)], 2), "max": round(values[-1], 2)}
+        return result
 
     def finding_delivery(self, finding_id: int) -> list[dict[str, Any]]:
         with self.lock:

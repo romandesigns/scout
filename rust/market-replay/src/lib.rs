@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const SCHEMA_VERSION: &str = "scout.market-event.v1";
 const BUCKET_SECONDS: f64 = 15.0;
@@ -35,6 +36,35 @@ pub struct MarketEvent {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Integrity { pub malformed: u64, pub duplicates: u64, pub out_of_order: u64 }
 #[derive(Clone, Debug, Serialize)]
+pub struct MarketState {
+    pub qualified: bool,
+    pub five_minute_context: bool,
+    pub five_minute_change_pct: f64,
+    pub one_minute_structure: bool,
+    pub one_minute_change_pct: f64,
+    pub one_minute_higher_low_ratio: f64,
+    pub thirty_second_confirmation: bool,
+    pub thirty_second_change_pct: f64,
+    pub fast_tape_clear: bool,
+    pub five_second_change_pct: f64,
+    pub liquid: bool,
+    pub trades_30s: usize,
+    pub dollar_volume_30s: f64,
+    pub spread_pct: f64,
+    pub extension_pct: f64,
+    pub continuation: bool,
+    pub trigger_level: f64,
+    pub invalidation_level: f64,
+    pub blockers: Vec<&'static str>,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct TraceTimestamps {
+    pub source_received: f64,
+    pub normalized: f64,
+    pub rust_evaluated: f64,
+    pub candidate_created: f64,
+}
+#[derive(Clone, Debug, Serialize)]
 pub struct Candidate {
     pub ticker: String,
     pub detected_at: f64,
@@ -59,6 +89,8 @@ pub struct Candidate {
     pub market_breadth_pct: f64,
     pub probability_5_before_3: f64,
     pub data_quality: &'static str,
+    pub market_state: MarketState,
+    pub trace: TraceTimestamps,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct ReplayReport {
@@ -71,7 +103,7 @@ pub struct ReplayReport {
 }
 
 #[derive(Clone, Debug)]
-struct Trade { ts: f64, price: f64, size: f64 }
+struct Trade { ts: f64, received_ts: f64, price: f64, size: f64 }
 #[derive(Clone, Debug)]
 struct Quote { ts: f64, bid_price: f64, ask_price: f64, bid_size: f64, ask_size: f64 }
 #[derive(Default)]
@@ -171,6 +203,15 @@ pub fn load_events(path: &Path) -> Result<(Vec<MarketEvent>, Integrity), String>
     Ok((events, integrity))
 }
 fn pct(from: f64, to: f64) -> f64 { if from == 0.0 { 0.0 } else { (to - from) / from * 100.0 } }
+fn unix_now() -> f64 { SystemTime::now().duration_since(UNIX_EPOCH).map(|v| v.as_secs_f64()).unwrap_or(0.0) }
+fn window_change(trades: &[&Trade], latest: &Trade, seconds: f64) -> f64 {
+    trades.iter().find(|trade| trade.ts >= latest.ts - seconds).map(|trade| pct(trade.price, latest.price)).unwrap_or(0.0)
+}
+fn higher_low_ratio(trades: &[&Trade]) -> f64 {
+    let sampled: Vec<f64> = trades.iter().rev().step_by(2).take(12).map(|trade| trade.price).collect::<Vec<_>>().into_iter().rev().collect();
+    if sampled.len() < 2 { return 0.0; }
+    sampled.windows(2).filter(|pair| pair[1] >= pair[0]).count() as f64 / (sampled.len() - 1) as f64
+}
 #[derive(Debug)]
 struct Evaluation { candidate: Option<Candidate>, phase: u8 }
 
@@ -218,10 +259,40 @@ fn evaluate(symbol: &str, window: &SymbolWindow) -> Evaluation {
     let dollar_acceleration = dollar30 / baseline_dollar30;
     let change5 = base.iter().find(|trade| trade.ts >= latest.ts - 5.0).map(|trade| pct(trade.price, latest.price)).unwrap_or(0.0);
     let change15 = trades15.first().map(|trade| pct(trade.price, latest.price)).unwrap_or(0.0);
+    let change30 = window_change(&base, latest, 30.0);
+    let trades60: Vec<&Trade> = base.iter().copied().filter(|trade| trade.ts >= latest.ts - 60.0).collect();
+    let trades300: Vec<&Trade> = base.iter().copied().filter(|trade| trade.ts >= latest.ts - 300.0).collect();
+    let change60 = window_change(&base, latest, 60.0);
+    let change300 = window_change(&base, latest, 300.0);
+    let higher_lows60 = higher_low_ratio(&trades60);
     let quote = window.quotes.back().filter(|quote| latest.ts - quote.ts <= 10.0);
     let bid_ask_imbalance = quote.map(|q| q.bid_size / q.ask_size.max(1.0)).unwrap_or(1.0);
     let spread_pct = quote.map(|q| pct(q.bid_price, q.ask_price).abs()).unwrap_or(0.0);
     let quote_support = quote.is_some_and(|q| q.bid_price > 0.0 && q.ask_price > q.bid_price && bid_ask_imbalance >= 1.15 && spread_pct <= 3.0);
+    let five_minute_context = trades300.len() >= 8 && change300 >= -1.0;
+    let one_minute_structure = trades60.len() >= 4 && change60 >= 0.10 && higher_lows60 >= 0.55;
+    let thirty_second_confirmation = trades30.len() >= 6 && change30 >= 0.15 && dollar30 >= 750.0;
+    let fast_tape_clear = change5 >= -0.35 && change15 >= -0.20;
+    let liquid = trades30.len() >= 6 && dollar30 >= 750.0 && (quote.is_none() || spread_pct <= 3.0);
+    let continuation = change30 > 0.0 && change15 >= 0.0 && latest.price >= trigger * 0.98;
+    let state_checks = [
+        ("five_minute_context", five_minute_context),
+        ("one_minute_structure", one_minute_structure),
+        ("thirty_second_confirmation", thirty_second_confirmation),
+        ("fast_tape_clear", fast_tape_clear),
+        ("liquidity", liquid),
+        ("extension", extension <= 3.0),
+        ("continuation", continuation),
+    ];
+    let mut state_blockers = state_checks.iter().filter_map(|(name, ok)| (!ok).then_some(*name)).collect::<Vec<_>>();
+    let mut market_state = MarketState {
+        qualified: false, five_minute_context, five_minute_change_pct: change300,
+        one_minute_structure, one_minute_change_pct: change60, one_minute_higher_low_ratio: higher_lows60,
+        thirty_second_confirmation, thirty_second_change_pct: change30, fast_tape_clear,
+        five_second_change_pct: change5, liquid, trades_30s: trades30.len(), dollar_volume_30s: dollar30,
+        spread_pct, extension_pct: extension, continuation, trigger_level: trigger,
+        invalidation_level: base_low, blockers: Vec::new(),
+    };
     let checks = [
         ("compressed or orderly base", range_pct <= 3.5),
         ("price remains near the base", extension <= 3.0),
@@ -242,7 +313,15 @@ fn evaluate(symbol: &str, window: &SymbolWindow) -> Evaluation {
     let shaping = stirring && trades30.len() >= 6 && dollar30 >= 750.0
         && dollar_acceleration >= 3.0 && (-3.0..=2.0).contains(&trigger_distance)
         && (quote_support || change5 > 0.05 || change15 > 0.15);
-    let phase = if shaping { 2 } else if stirring { 1 } else { 0 };
+    if !shaping {
+        state_blockers.push("transition_activity");
+    }
+    market_state.blockers = state_blockers;
+    market_state.qualified = market_state.blockers.is_empty();
+    // Qualification is its own transition. A symbol may shape up before its 30s/1m/5m
+    // contract is complete; emitting phase 3 when the full market state aligns prevents
+    // that earlier watch transition from swallowing the later actionable edge.
+    let phase = if market_state.qualified { 3 } else if shaping { 2 } else if stirring { 1 } else { 0 };
     let confidence = ((score as u16 * 7
         + trade_acceleration.min(10.0).round() as u16
         + dollar_acceleration.min(10.0).round() as u16
@@ -264,6 +343,11 @@ fn evaluate(symbol: &str, window: &SymbolWindow) -> Evaluation {
         episode_id: window.episode_id, cross_sectional_percentile: 0.0,
         market_breadth_pct: 0.0, probability_5_before_3,
         data_quality: if quote.is_some() { "TRADES_QUOTES" } else { "TRADES_ONLY" },
+        market_state,
+        trace: TraceTimestamps {
+            source_received: latest.received_ts, normalized: latest.received_ts,
+            rust_evaluated: unix_now(), candidate_created: unix_now(),
+        },
     });
     Evaluation { candidate, phase }
 }
@@ -294,7 +378,7 @@ impl Engine {
                 state.observe_bucket(now);
                 state.last_trade_ts = Some(now);
                 state.episode_peak = state.episode_peak.max(event.payload.price);
-                state.trades.push_back(Trade { ts: now, price: event.payload.price, size: event.payload.size });
+                state.trades.push_back(Trade { ts: now, received_ts: event.received_ts, price: event.payload.price, size: event.payload.size });
             } else {
                 state.quotes.push_back(Quote {
                     ts: now, bid_price: event.payload.bid_price, ask_price: event.payload.ask_price,
@@ -311,8 +395,8 @@ impl Engine {
             let drawdown = if state.episode_peak > 0.0 { -pct(state.episode_peak, latest_price) } else { 0.0 };
             let invalidated = state.episode_invalidation > 0.0 && latest_price <= state.episode_invalidation;
             let episode_finished = (state.phase == 1 && elapsed >= 300.0)
-                || (state.phase == 2 && elapsed >= 60.0 && invalidated)
-                || (state.phase == 2 && elapsed >= 900.0 && drawdown >= 4.0);
+                || (state.phase >= 2 && elapsed >= 60.0 && invalidated)
+                || (state.phase >= 2 && elapsed >= 900.0 && drawdown >= 4.0);
             if episode_finished {
                 state.phase = 0;
                 state.armed = false;
@@ -436,6 +520,7 @@ mod tests {
     fn dormant_symbol_emits_stirring_then_shaping_up_on_acceleration() {
         let mut engine = Engine::default();
         let mut stages = Vec::new();
+        let mut last_candidate = None;
         for index in 0..9_u64 {
             let ts = 5_000.0 + index as f64 * 15.0;
             let event = MarketEvent {
@@ -444,7 +529,7 @@ mod tests {
                 sequence: index, feed: "sip".to_string(),
                 payload: Payload { price: 1.0, size: 100.0, ..Payload::default() },
             };
-            if let Some(candidate) = engine.process_event(event) { stages.push(candidate.stage); }
+            if let Some(candidate) = engine.process_event(event) { stages.push(candidate.stage); last_candidate = Some(candidate); }
         }
         let quote_ts = 5_122.0;
         let quote = MarketEvent {
@@ -464,9 +549,14 @@ mod tests {
                 sequence: 200 + index, feed: "sip".to_string(),
                 payload: Payload { price: 1.0 + index as f64 * 0.0005, size: 150.0, ..Payload::default() },
             };
-            if let Some(candidate) = engine.process_event(event) { stages.push(candidate.stage); }
+            if let Some(candidate) = engine.process_event(event) { stages.push(candidate.stage); last_candidate = Some(candidate); }
         }
         assert_eq!(stages, vec!["STIRRING", "SHAPING_UP"]);
+        let candidate = last_candidate.expect("transition candidate");
+        assert!(candidate.market_state.trades_30s >= 6);
+        assert!(candidate.market_state.liquid);
+        assert!(candidate.trace.rust_evaluated >= candidate.trace.source_received);
+        assert!(!candidate.market_state.blockers.is_empty() || candidate.market_state.qualified);
     }
 
     #[test]

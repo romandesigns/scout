@@ -109,6 +109,7 @@ class Finding:
     hybrid_score: int = 0
     hybrid_key: str | None = None
     notification_reason: str | None = None
+    trace_timestamps: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass

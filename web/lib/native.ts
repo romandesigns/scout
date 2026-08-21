@@ -1,4 +1,5 @@
 import type { Finding, NotificationPreferences } from "./types";
+import { reportClientDisplayed } from "./api";
 
 const CRITICAL = new Set(["FIRST_LEG", "SURGE", "IGNITION", "HALT_PRESSURE", "CATALYST_ACTIVE", "HALT"]);
 const SETUP = new Set(["EARLY"]);
@@ -239,6 +240,7 @@ export async function sendNativeScoutNotification(finding: Finding, prefs: Notif
         deepLink: `stockhunter-scout://finding?finding=${finding.id}&ticker=${encodeURIComponent(finding.ticker)}&timeframe=60`,
       },
     });
+    void reportClientDisplayed(finding.id, platform, "native-notification");
     return true;
   } catch {
     // Browser builds intentionally fall back to server-side ntfy/email delivery.
@@ -272,6 +274,7 @@ export async function showPwaForegroundNotification(finding: Finding) {
       data: { url: `/?finding=${finding.id}&ticker=${encodeURIComponent(finding.ticker)}&timeframe=60` },
     } as NotificationOptions & { renotify?: boolean; vibrate?: number[] };
     await registration.showNotification(decisionTitle(finding), options);
+    void reportClientDisplayed(finding.id, targetPlatform(), "pwa-foreground-notification");
     return true;
   } catch {
     return false;

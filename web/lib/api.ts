@@ -58,6 +58,11 @@ export async function saveFindingReview(id:number,value:{user_grade?:number|null
   return response.json();
 }
 
+export async function reportClientDisplayed(id:number,channel:string,surface:string):Promise<void> {
+  if(!id)return;
+  await fetch(`${API_BASE}/api/findings/${id}/client-displayed`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({channel,surface}),keepalive:true});
+}
+
 export async function getCatalysts(limit = 100): Promise<Catalyst[]> {
   const payload = await getJson<{ items: Catalyst[] }>(`/api/catalysts?limit=${limit}`);
   return payload.items;

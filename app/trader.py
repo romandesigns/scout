@@ -164,6 +164,7 @@ class PaperTrader:
             )
             raise
         self.store.update_paper_trade(client_id, alpaca_order_id=order.get("id"), status=order.get("status", "accepted"), raw_json=json.dumps(order))
+        self.store.record_pipeline_trace(finding_id, "paper_order_submitted", channel="alpaca", detail=str(order.get("id") or ""))
         self.last_order_at = int(time.time())
         log.warning("PAPER ORDER %s qty=%s signal=%.4f stop=%.4f target=%.4f rr=1:%.2f", finding.ticker, quantity, signal, stop, target, cfg["risk_reward"])
 
@@ -190,6 +191,7 @@ class PaperTrader:
             updates: dict[str, Any] = {"status": status, "entry_price": filled, "raw_json": json.dumps(order)}
             if order.get("filled_at") and not trade.get("filled_at"):
                 updates["filled_at"] = int(time.time())
+                self.store.record_pipeline_trace(int(trade["finding_id"]), "paper_order_filled", channel="alpaca", detail=str(order.get("id") or ""))
             exit_leg = next((leg for leg in order.get("legs", []) if leg.get("side") == "sell" and leg.get("status") == "filled"), None)
             if exit_leg and filled:
                 exit_price = float(exit_leg.get("filled_avg_price") or 0)

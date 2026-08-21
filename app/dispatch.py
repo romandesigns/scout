@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import itertools
+import time
 from collections.abc import Awaitable, Callable
 
 from .charts import render_detection_chart
@@ -80,6 +81,7 @@ class Dispatcher:
         try:
             queue.put_nowait(item)
             await asyncio.to_thread(self.store.record_delivery, finding_id, channel, "queued")
+            await asyncio.to_thread(self.store.record_pipeline_trace, finding_id, "notification_queued", None, channel)
         except asyncio.QueueFull:
             log.error("%s notification queue full; finding %s %s remains persisted", channel, f.ticker, f.stage)
             await asyncio.to_thread(self.store.record_delivery, finding_id, channel, "queue_failed", "notification queue full")
@@ -96,6 +98,7 @@ class Dispatcher:
                     fn = send_ntfy if channel == "ntfy" else send_resend_email
                     await asyncio.to_thread(fn, f, prefs)
                 await asyncio.to_thread(self.store.record_delivery, finding_id, channel, "provider_accepted")
+                await asyncio.to_thread(self.store.record_pipeline_trace, finding_id, "provider_accepted", None, channel)
             except Exception as exc:
                 await asyncio.to_thread(self.store.record_delivery, finding_id, channel, "failed", str(exc))
                 log.exception("%s worker failed for finding %s %s %s", channel, finding_id, f.ticker, f.stage)
@@ -129,7 +132,11 @@ class Dispatcher:
             await self._queue("ntfy", finding_id, finding, prefs)
 
     async def _queue_consolidated_ntfy(self, finding_id: int, f: Finding, prefs: dict) -> None:
-        if settings.notification_consolidation_seconds <= 0 or f.stage in {"HALT", "RESUME", "CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE"}:
+        if (
+            settings.notification_consolidation_seconds <= 0
+            or f.stage in {"HALT", "RESUME", "CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE"}
+            or (f.actionable_rank == "A" and not f.shadow_mode)
+        ):
             await self._queue("ntfy", finding_id, f, prefs)
             return
         ticker = f.ticker.upper()
@@ -198,6 +205,17 @@ class Dispatcher:
             f.candidate_profile["edge_validation"] = await asyncio.to_thread(self.store.paper_edge_validation, f)
         finding_id = await asyncio.to_thread(self.store.save_finding, f)
         f.finding_id = finding_id
+        trace = dict(f.trace_timestamps or {})
+        trace.setdefault("source_received", float(f.detected_at))
+        trace.setdefault("normalized", trace["source_received"])
+        trace.setdefault("candidate_created", time.time())
+        if f.catalyst_headline:
+            trace.setdefault("catalyst_associated", trace["candidate_created"])
+        if f.actionable_rank == "A" and not f.shadow_mode:
+            trace.setdefault("actionable_promoted", trace["candidate_created"])
+        f.trace_timestamps = trace
+        for stage, event_at in sorted(trace.items(), key=lambda item: item[1]):
+            await asyncio.to_thread(self.store.record_pipeline_trace, finding_id, stage, event_at)
         if self.finding_listener:
             try:
                 self.finding_listener(finding_id, f)

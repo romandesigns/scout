@@ -53,6 +53,30 @@ def test_recent_python_alert_suppresses_redundant_rust_notification():
     assert not memory.rust_notification_is_duplicate("TEST", 125.0)
 
 
+def test_pipeline_trace_reports_stage_latency(tmp_path: Path):
+    store = Store(tmp_path / "trace.db")
+    try:
+        finding_id = store.save_finding(_finding())
+        store.record_pipeline_trace(finding_id, "source_received", 100.000)
+        store.record_pipeline_trace(finding_id, "rust_evaluated", 100.012)
+        store.record_pipeline_trace(finding_id, "candidate_created", 100.015)
+        store.record_pipeline_trace(finding_id, "actionable_promoted", 100.020)
+        store.record_pipeline_trace(finding_id, "notification_queued", 100.025, "webpush")
+        store.record_pipeline_trace(finding_id, "provider_accepted", 100.045, "webpush")
+        store.record_pipeline_trace(finding_id, "client_displayed", 100.065, "webpush")
+        trace = store.finding_pipeline_trace(finding_id)
+        assert [event["stage"] for event in trace] == [
+            "source_received", "rust_evaluated", "candidate_created", "actionable_promoted",
+            "notification_queued", "provider_accepted", "client_displayed",
+        ]
+        stats = store.pipeline_latency_stats()
+        assert stats["receive_to_rust_ms"]["median"] == 12.0
+        assert stats["queue_to_provider_ms"]["median"] == 20.0
+        assert stats["provider_to_client_ms"]["median"] == 20.0
+    finally:
+        store.close()
+
+
 def test_shadow_rust_candidate_never_notifies():
     prefs = normalize_notification_preferences(None)
     # AWAKENING remains available in the dashboard but is no longer a user-facing
@@ -174,6 +198,7 @@ def test_market_rust_candidate_becomes_actionable_awakening(tmp_path: Path):
         "ticker": "TEST", "detected_at": 1_700_000_000.0, "price": 3.05,
         "recipe_score": 8, "recipe_present": ["compressed or orderly base", "relative volume is waking up"],
         "recipe_missing": [], "trigger_distance_pct": 0.1, "base_extension_pct": 0.2,
+        "market_state": {"qualified": True, "blockers": []},
     }
     asyncio.run(market.handle_rust_candidate(candidate))
     assert len(dispatcher.items) == 1
@@ -183,6 +208,46 @@ def test_market_rust_candidate_becomes_actionable_awakening(tmp_path: Path):
     assert finding.shadow_mode is False
     assert finding.lifecycle_phase == "AWAKENING"
     assert finding.hybrid_key
+    store.close()
+
+
+def test_rust_market_state_vetoes_python_actionable_promotion(tmp_path: Path):
+    import asyncio
+    from app.market import MarketWatcher
+    from app.models import SymbolState
+
+    class CaptureDispatcher:
+        def __init__(self): self.items = []
+        async def emit(self, finding, buckets=None, current=None):
+            self.items.append(finding); return len(self.items)
+
+    store = Store(tmp_path / "state.db")
+    dispatcher = CaptureDispatcher()
+    market = MarketWatcher(store, dispatcher)  # type: ignore[arg-type]
+    market.states["VETO"] = SymbolState("VETO", 15, 160)
+    market._metrics = lambda _state, _ts: {  # type: ignore[method-assign]
+        "full_warmup": True, "quality_label": "CLEAN", "quality_score": 92, "price": 3.05,
+        "score": 9, "vol15": 4.0, "vol30": 3.0, "change5": .15, "change15": .25,
+        "change3": .05, "change10": .16, "change30": .4, "change60": .7,
+        "extension": .2, "ema9": 3.02, "ema21": 3.0, "ema9_slope": .01,
+        "vwap": 3.0, "above_vwap": True, "quiet_break": True, "evidence": ["quality clean"],
+        "accel15_pp": .1, "dollar15": 12000.0, "dollar30": 18000.0,
+        "trades15": 18, "trades30": 30, "breakout_level": 3.06, "breakout_window": "micro",
+        "rejection_reasons": [], "directional_efficiency": .8, "active_bucket_ratio": 1.0,
+        "direction_reversals": 0, "previous_close": 2.9, "gap_pct": 5.0, "day_volume": 500000.0,
+        "projected_session_volume": 1000000.0, "volume_rate_per_minute": 20000.0,
+        "candidate_profile": {}, "base_low": 2.98, "base_high": 3.05, "micro_resistance": 3.06,
+    }
+    asyncio.run(market.handle_rust_candidate({
+        "ticker": "VETO", "detected_at": 1_700_000_000.0, "price": 3.05,
+        "stage": "CONFIRMED", "recipe_score": 9, "recipe_present": ["clean transition"],
+        "recipe_missing": [], "trigger_distance_pct": .1, "base_extension_pct": .2,
+        "market_state": {"qualified": False, "blockers": ["thirty_second_confirmation"]},
+    }))
+    finding = dispatcher.items[0]
+    assert finding.stage == "PRE_IGNITION"
+    assert finding.actionable_rank != "A"
+    assert finding.candidate_profile["market_state_authority"] == "rust"
     store.close()
 
 def test_rust_bridge_microbatches_preserve_burst_without_drops(tmp_path: Path):

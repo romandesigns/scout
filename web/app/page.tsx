@@ -67,6 +67,7 @@ import {
   getFindingVerification,
   prefetchMarketSnapshot,
   saveFindingReview,
+  reportClientDisplayed,
   updateAttention,
   saveNotificationPreferences,
   saveScannerSettings,
@@ -1205,6 +1206,7 @@ export default function ScoutPage() {
               const phase=["IGNITION","BREAKOUT","SURGE"].includes(finding.stage)?`${kind} CONFIRMED`:`${kind} SETUP`;
               const trigger=finding.trigger_level??finding.breakout_level;
               toastManager.add({ title: `${finding.ticker} · ${phase}`, description: `OPEN 1m · confirm 30s · context 5m · ${money(finding.price)}${trigger!=null?` · trigger ${money(trigger)}`:""}${finding.invalidation_level!=null?` · invalid below ${money(finding.invalidation_level)}`:""}`, timeout: 10000, data:{deepLink:`/?finding=${finding.id}&ticker=${encodeURIComponent(finding.ticker)}&timeframe=60`} });
+              void reportClientDisplayed(finding.id,"web","browser-toast");
             }
           }
         }

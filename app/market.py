@@ -738,13 +738,15 @@ class MarketWatcher:
         recipe_score = int(candidate.get("recipe_score") or 0)
         rust_stage = str(candidate.get("stage") or "PRE_IGNITION").upper()
         confidence = int(candidate.get("confidence") or 0)
+        rust_market_state = dict(candidate.get("market_state") or {})
+        python_multi_timeframe = (metrics.get("candidate_profile") or {}).get("multi_timeframe") or {}
+        rust_market_qualified = bool(rust_market_state.get("qualified")) if rust_market_state else bool(
+            not python_multi_timeframe or python_multi_timeframe.get("qualified")
+        )
         actionable = bool(
             metrics.get("full_warmup")
             and metrics.get("quality_label") == "CLEAN"
-            and (
-                not (metrics.get("candidate_profile") or {}).get("multi_timeframe")
-                or bool((metrics.get("candidate_profile") or {}).get("multi_timeframe", {}).get("qualified"))
-            )
+            and rust_market_qualified
             and recipe_score >= 7
             and float(metrics.get("vol15") or 0) >= settings.hybrid_awakening_min_vol_ratio
             and (float(metrics.get("change15") or 0) >= settings.hybrid_awakening_min_change_15s_pct or float(metrics.get("change5") or 0) > 0)
@@ -755,6 +757,7 @@ class MarketWatcher:
         if settings.rust_shaping_up_notify_enabled and rust_stage in {"SHAPING_UP", "REARMED"}:
             actionable = bool(
                 metrics.get("full_warmup")
+                and rust_market_qualified
                 and confidence >= settings.rust_shaping_up_min_confidence
                 and float(candidate.get("trade_acceleration") or 0) >= 3.0
                 and float(candidate.get("dollar_acceleration") or 0) >= 3.0
@@ -769,6 +772,7 @@ class MarketWatcher:
         if not actionable and settings.experiment_rust_fast_confirm:
             actionable = bool(
                 metrics.get("full_warmup")
+                and rust_market_qualified
                 and str(metrics.get("quality_label") or "") not in {"ILLIQUID", "CHOPPY"}
                 and recipe_score >= 8
                 and float(metrics.get("vol15") or 0) >= settings.hybrid_awakening_min_vol_ratio
@@ -819,6 +823,7 @@ class MarketWatcher:
             base_extension_at_detection_pct=float(candidate.get("base_extension_pct") or 0),
             timeliness_label="EARLY", precursor_finding_id=state.pre_ignition_finding_id,
             hybrid_key=f"{symbol}:{trading_session_key(detected_at)}:{int(candidate.get('episode_id') or 0)}",
+            trace_timestamps={str(k): float(v) for k, v in dict(candidate.get("trace") or {}).items() if isinstance(v, (int, float))},
         )
         if catalyst:
             finding.catalyst_headline, finding.catalyst_category, finding.catalyst_score, finding.catalyst_url, _ = catalyst
@@ -832,7 +837,34 @@ class MarketWatcher:
             "cross_sectional_percentile": round(percentile, 1),
             "market_breadth_pct": round(float(candidate.get("market_breadth_pct") or 0), 1),
             "probability_5_before_3": round(float(candidate.get("probability_5_before_3") or 0), 3),
+            "market_state_authority": "rust",
+            "rust_market_state": rust_market_state,
         })
+        if rust_market_state:
+            finding.candidate_profile["multi_timeframe"] = {
+                "qualified": rust_market_qualified,
+                "gates": {
+                    "five_minute_context": bool(rust_market_state.get("five_minute_context")),
+                    "one_minute_structure": bool(rust_market_state.get("one_minute_structure")),
+                    "thirty_second_confirmation": bool(rust_market_state.get("thirty_second_confirmation")),
+                    "fast_tape_clear": bool(rust_market_state.get("fast_tape_clear")),
+                    "liquidity": bool(rust_market_state.get("liquid")),
+                    "extension": float(rust_market_state.get("extension_pct") or 0) <= 3.0,
+                    "continuation": bool(rust_market_state.get("continuation")),
+                },
+                "blockers": list(rust_market_state.get("blockers") or []),
+                "five_minute_change_pct": rust_market_state.get("five_minute_change_pct"),
+                "one_minute_change_pct": rust_market_state.get("one_minute_change_pct"),
+                "one_minute_higher_low_ratio": rust_market_state.get("one_minute_higher_low_ratio"),
+                "change_30s_pct": rust_market_state.get("thirty_second_change_pct"),
+                "fast_tape_veto": not bool(rust_market_state.get("fast_tape_clear")),
+            }
+        now_trace = time.time()
+        finding.trace_timestamps.setdefault("candidate_created", now_trace)
+        if catalyst:
+            finding.trace_timestamps["catalyst_associated"] = now_trace
+        if actionable:
+            finding.trace_timestamps["actionable_promoted"] = now_trace
         self._decorate_hybrid(finding, "rust")
         snap = self.snapshot(symbol)
         buckets, current = snap if snap else ([], None)

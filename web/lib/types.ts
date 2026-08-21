@@ -88,6 +88,7 @@ export type Finding = {
 };
 
 export type DeliveryEvent = { id:number; finding_id:number; channel:string; status:string; event_at:number; detail?:string|null; provider_id?:string|null };
+export type PipelineTraceEvent = { id:number; finding_id:number; stage:string; event_at:number; channel?:string|null; detail?:string|null };
 export type FindingVerification = {
   finding:Finding;
   outcome:{max_1m_pct:number|null;max_5m_pct:number|null;max_15m_pct:number|null;max_session_pct:number|null;time_to_peak_seconds:number|null;updated_at:number|null}|null;
@@ -95,6 +96,7 @@ export type FindingVerification = {
   automatic_label:string;
   grade_reasons:string[];
   delivery:DeliveryEvent[];
+  pipeline_trace?:PipelineTraceEvent[];
   legacy_delivery_audit:boolean;
   review?:{user_grade?:number|null;user_agrees?:boolean|null;reason_tags?:string[];notes?:string;reviewed_at?:number|null}|null;
 };
@@ -276,6 +278,7 @@ export type ScoutStatus = {
     rust_bridge?: {enabled:boolean;running:boolean;queue_depth?:number;submitted?:number;dropped?:number;candidates?:number;restarts?:number;last_error?:string|null};
     precision?: {threshold_pct:number;completed_episodes:number;successful_episodes:number;precision:number|null;source_mix:Record<string,number>};
     notification_latency?: Record<string,{samples:number;median_seconds:number;p95_seconds:number;max_seconds:number}>;
+    pipeline_latency?: Record<string,{samples:number;median:number;p95:number;max:number}>;
     architecture?: string;
   };
   engines: Record<string, boolean>;
