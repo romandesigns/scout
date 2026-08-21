@@ -138,12 +138,16 @@ class RustPerceptionBridge:
     ) -> bool:
         """Forward SIP quote context without involving Python's detector hot path."""
         normalized_symbol = symbol.upper()
+        # Alpaca can publish one-sided/crossed quote updates while a venue is changing
+        # state. Rust's canonical market-event contract correctly rejects those quotes;
+        # filter them before enqueueing so one bad quote cannot terminate and restart the
+        # entire perception subprocess (and strand valid trades behind restart churn).
+        if bid_price <= 0 or ask_price <= bid_price:
+            return False
         previous = self._last_quote_submit_at.get(normalized_symbol, 0.0)
         if ts - previous < settings.rust_quote_min_interval_ms / 1000.0:
             return False
-        midpoint = (bid_price + ask_price) / 2.0 if bid_price > 0 and ask_price > 0 else max(bid_price, ask_price)
-        if midpoint <= 0:
-            return False
+        midpoint = (bid_price + ask_price) / 2.0
         self._last_quote_submit_at[normalized_symbol] = ts
         return self._submit_event(
             event_type="quote", symbol=normalized_symbol, ts=ts, feed=feed,

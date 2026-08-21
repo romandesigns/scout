@@ -248,6 +248,25 @@ def test_rust_bridge_rate_limits_quotes_per_symbol():
     assert bridge.queue.qsize() == 2
 
 
+def test_rust_bridge_rejects_one_sided_and_crossed_quotes_before_enqueue():
+    from app.hybrid import RustPerceptionBridge
+
+    async def handler(payload):
+        return None
+
+    bridge = RustPerceptionBridge(handler)
+    bridge.enabled = True
+    assert not bridge.submit_quote(
+        symbol="wake", ts=1000.0, bid_price=0.0, ask_price=1.01,
+        bid_size=0, ask_size=200, feed="sip",
+    )
+    assert not bridge.submit_quote(
+        symbol="wake", ts=1001.0, bid_price=1.02, ask_price=1.01,
+        bid_size=800, ask_size=200, feed="sip",
+    )
+    assert bridge.queue.qsize() == 0
+
+
 def test_shaping_up_transition_becomes_evidence_rich_early_watch(tmp_path: Path):
     import asyncio
     from app.market import MarketWatcher

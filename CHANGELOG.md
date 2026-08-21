@@ -1,5 +1,12 @@
 ## 6.7.4
 
+## 6.7.7
+
+- Reject one-sided and crossed SIP quotes before they enter the Rust market-event stream.
+- Prevent a malformed quote from repeatedly terminating the Rust perception subprocess,
+  saturating its queue, and dropping otherwise valid market trades.
+- Add regression coverage for both invalid quote shapes.
+
 ## 6.7.6
 
 - Enabled the validated time-decaying participation bar by default so sustained bullish
