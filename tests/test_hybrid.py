@@ -55,7 +55,9 @@ def test_recent_python_alert_suppresses_redundant_rust_notification():
 
 def test_shadow_rust_candidate_never_notifies():
     prefs = normalize_notification_preferences(None)
-    assert notification_allowed(_finding(shadow_mode=False), prefs, "android")
+    # AWAKENING remains available in the dashboard but is no longer a user-facing
+    # decision notification; only EARLY setup and one confirmation are pushed.
+    assert not notification_allowed(_finding(shadow_mode=False), prefs, "android")
     assert not notification_allowed(_finding(shadow_mode=True), prefs, "android")
 
 

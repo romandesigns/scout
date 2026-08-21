@@ -56,6 +56,7 @@ import {
   getGainers,
   getHalts,
   getScannerSettings,
+  getTraderSettings,
   getNotificationPreferences,
   getStatus,
   getNtfyConfig,
@@ -69,9 +70,10 @@ import {
   updateAttention,
   saveNotificationPreferences,
   saveScannerSettings,
+  saveTraderSettings,
   testNotification,
 } from "@/lib/api";
-import { getNativeAutostartState, installNativeDeepLinkHandler, installNativeNotificationActionHandler, isInstalledPwa, queueNativeScoutNotification, sendNativeTestNotification, setNativeAutostart, showPwaForegroundNotification, webPushForegroundAllowed, webToastAllowed } from "@/lib/native";
+import { claimClientDecision, getNativeAutostartState, installNativeDeepLinkHandler, installNativeNotificationActionHandler, isInstalledPwa, queueNativeScoutNotification, sendNativeTestNotification, setNativeAutostart, showPwaForegroundNotification, webPushForegroundAllowed, webToastAllowed } from "@/lib/native";
 import { toastManager, ScoutToastProvider } from "@/components/ui/toast";
 import { disableWebPush, enableWebPush, webPushState, type WebPushState } from "@/lib/web-push";
 import { getTwentyFourHourStocks, type TwentyFourHourStock } from "@/lib/twenty-four-hour";
@@ -88,6 +90,7 @@ import type {
   AttentionItem,
   AttentionStatus,
   FindingVerification,
+  TraderSettings,
 } from "@/lib/types";
 
 type ActivityView = "radar" | "24h" | "ross" | "catalysts" | "gainers" | "halts" | "validation" | "alerts" | "settings";
@@ -627,6 +630,9 @@ function SettingsPanel({ connected, onNotifications, scanner, saveScanner, scann
   const [autostartBusy,setAutostartBusy]=useState(false);
   const [uiPrefs,setUiPrefs]=useState<UiPreferences>(DEFAULT_UI_PREFS);
   const [range,setRange]=useState(scanner);
+  const [trader,setTrader]=useState<TraderSettings|null>(null);
+  const [traderBusy,setTraderBusy]=useState(false);
+  const [traderMessage,setTraderMessage]=useState("");
   useEffect(()=>setRange(scanner),[scanner.min_price,scanner.max_price]);
   useEffect(()=>{
     let alive=true;
@@ -634,8 +640,16 @@ function SettingsPanel({ connected, onNotifications, scanner, saveScanner, scann
     const next=readUiPreferences();
     setUiPrefs(next);
     applyUiPreferences(next);
+    if(API_CONFIGURED)void getTraderSettings().then(value=>{if(alive)setTrader(value);}).catch(()=>undefined);
     return()=>{alive=false;};
   },[]);
+  async function updateTrader(value:Partial<TraderSettings>){
+    if(!trader)return;
+    setTraderBusy(true);setTraderMessage("");
+    try{const saved=await saveTraderSettings(value);setTrader(saved);setTraderMessage(saved.enabled?`Paper trader active at 1:${saved.risk_reward}.`:"Paper trader deactivated.");}
+    catch(error){setTraderMessage(error instanceof Error?error.message:"Unable to update Scout Trader");}
+    finally{setTraderBusy(false);}
+  }
   async function toggleAutostart(enabled:boolean){
     setAutostartBusy(true);
     const ok=await setNativeAutostart(enabled);
@@ -650,6 +664,7 @@ function SettingsPanel({ connected, onNotifications, scanner, saveScanner, scann
     <div className="settings-row"><div><span>Launch with Windows</span><div className="text-[10px] scout-muted">{autostart.supported?"Keep Scout available after sign-in":"Available in the installed Windows app"}</div></div><Switch checked={autostart.enabled} disabled={!autostart.supported||autostartBusy} onCheckedChange={toggleAutostart}/></div>
     <div className="settings-row"><div><span>Close to tray</span><div className="text-[10px] scout-muted">Installed desktop app keeps its live connection running</div></div><Badge data-tone="green">ON</Badge></div>
     <div className="scanner-range-card"><div className="scanner-range-title"><div><b>Scanner price range</b><span>Controls subscriptions, detections, and alerts</span></div><Badge data-tone="blue">${range.min_price.toFixed(2)}–${range.max_price.toFixed(2)}</Badge></div><div className="scanner-range-inputs"><label>Minimum<Input type="number" min="0.01" step="0.01" value={range.min_price} onChange={e=>setRange({...range,min_price:Number(e.target.value)})}/></label><label>Maximum<Input type="number" min="0.02" step="0.01" value={range.max_price} onChange={e=>setRange({...range,max_price:Number(e.target.value)})}/></label></div><div className="scanner-presets"><Button variant="ghost" onClick={()=>setRange({min_price:.15,max_price:5})}>$0.15–$5</Button><Button variant="ghost" onClick={()=>setRange({min_price:.15,max_price:10})}>$0.15–$10</Button><Button variant="ghost" onClick={()=>setRange({min_price:2,max_price:10})}>$2–$10</Button></div><Button className="w-full" disabled={scannerBusy||range.min_price>=range.max_price} onClick={()=>void saveScanner(range)}>{scannerBusy?"Applying…":"Apply scanner range"}</Button>{scannerMessage&&<div className="notice-box">{scannerMessage}</div>}</div>
+    <div className="scanner-range-card"><div className="scanner-range-title"><div><b>Scout Trader</b><span>Alpaca paper execution · confirmed A-rank clean momentum only</span></div><Badge data-tone={trader?.enabled?"green":trader?.configured?"gray":"orange"}>{trader?.enabled?"PAPER ACTIVE":trader?.configured?"OFF":"NOT CONFIGURED"}</Badge></div><div className="settings-row"><div><span>Automatic paper trades</span><div className="text-[10px] scout-muted">$100 whole-share bracket · max 3 positions · $25 daily loss guard</div></div><Switch checked={Boolean(trader?.enabled)} disabled={!trader?.configured||traderBusy} onCheckedChange={enabled=>void updateTrader({enabled})}/></div><div className="scanner-range-inputs"><label>Risk<Input type="number" value={1} disabled/></label><label>Reward<Input type="number" min="1" max="10" step="0.25" value={trader?.risk_reward??3} disabled={!trader||traderBusy} onChange={e=>setTrader(current=>current?{...current,risk_reward:Number(e.target.value)}:current)}/></label></div><Button className="w-full" disabled={!trader?.configured||traderBusy||!trader||trader.risk_reward<1||trader.risk_reward>10} onClick={()=>void updateTrader({risk_reward:trader?.risk_reward??3})}>{traderBusy?"Applying…":`Apply 1:${trader?.risk_reward??3} R:R`}</Button><div className="notice-box">Paper only. Scout cannot route orders to Alpaca&apos;s live endpoint. Stops are structural and capped at {trader?.max_stop_pct??3}%.</div>{trader?.performance&&<div className="text-[10px] scout-muted">Trades {trader.performance.total} · Open {trader.performance.open} · Closed {trader.performance.closed} · P&amp;L ${trader.performance.realized_pl.toFixed(2)}</div>}{traderMessage&&<div className="notice-box">{traderMessage}</div>}{trader?.last_error&&<div className="notice-box">Last trader error: {trader.last_error}</div>}</div>
     <div className="settings-row"><span>Compact density</span><Switch checked={uiPrefs.compactDensity} onCheckedChange={value=>setUi("compactDensity",value)}/></div>
     <div className="settings-section-title">CHART</div>
     <div className="settings-row"><div><span>Event annotations</span><div className="text-[10px] scout-muted">Master control for selected-event overlays</div></div><Switch checked={uiPrefs.showChartMarkers} onCheckedChange={value=>setUi("showChartMarkers",value)}/></div>
@@ -1151,10 +1166,13 @@ export default function ScoutPage() {
           if (isTauriRuntime.current) {
             queueNativeScoutNotification(finding, prefsRef.current);
           } else if (isInstalledPwa()) {
-            if (webPushForegroundAllowed(finding, prefsRef.current)) void showPwaForegroundNotification(finding);
+            if (webPushForegroundAllowed(finding, prefsRef.current) && claimClientDecision(finding)) void showPwaForegroundNotification(finding);
           } else if (webToastAllowed(finding, prefsRef.current)) {
-            const signals = Array.from(new Set([finding.stage, ...(finding.signals || [])])).slice(0, 3).join(" · ");
-            toastManager.add({ title: `${finding.ticker} · ${signals}`, description: `${money(finding.price)} · score ${finding.score}`, timeout: 8000 });
+            if (claimClientDecision(finding)) {
+              const phase=["IGNITION","BREAKOUT","SURGE"].includes(finding.stage)?"MOMENTUM CONFIRMED":"BULLISH SETUP";
+              const trigger=finding.trigger_level??finding.breakout_level;
+              toastManager.add({ title: `${finding.ticker} · ${phase}`, description: `${money(finding.price)}${trigger!=null?` · trigger ${money(trigger)}`:""}${finding.invalidation_level!=null?` · invalid below ${money(finding.invalidation_level)}`:""}`, timeout: 10000 });
+            }
           }
         }
       }catch{}

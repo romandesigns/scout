@@ -1,5 +1,18 @@
 ## 6.7.4
 
+## 6.8.0
+
+- Consolidate user-facing momentum notifications into one `BULLISH SETUP` and at
+  most one `MOMENTUM CONFIRMED` decision per ticker episode.
+- Include trigger, distance, invalidation, quality, and monitoring context in setup alerts.
+- Keep granular lifecycle stages available in Scout while making them dashboard-only.
+- Add Scout Trader for Alpaca paper execution with a hard paper-host safety boundary.
+- Add dashboard controls to activate/deactivate paper trading and configure risk:reward,
+  defaulting to 1:3.
+- Restrict paper entries to regular-session, clean A-rank confirmations with duplicate,
+  position-count, daily-loss, tradability, structural-stop, and maximum-stop safeguards.
+- Persist paper orders, reconcile bracket outcomes, and expose paper performance in Scout.
+
 ## 6.7.7
 
 - Reject one-sided and crossed SIP quotes before they enter the Rust market-event stream.

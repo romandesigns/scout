@@ -23,7 +23,8 @@ def with_vapid(**overrides):
 
 from app.models import Finding
 from app.notifiers import (
-    infer_platform, notification_allowed_any_platform, send_web_push_all,
+    _message, _user_title, infer_platform, notification_allowed_any_platform,
+    notification_phase, send_web_push_all,
 )
 from app.preferences import DEFAULT_NOTIFICATION_PREFERENCES
 
@@ -128,6 +129,39 @@ class WebPushPerSubscriberPlatformTests(unittest.TestCase):
             delivered = send_web_push_all(store, finding, prefs)
         self.assertEqual(delivered, 0)
         mock_webpush.assert_not_called()
+
+
+class DecisionNotificationTests(unittest.TestCase):
+    def setUp(self):
+        self.android_sub = {"endpoint": "https://push/android-1", "p256dh": "k", "auth": "a",
+                            "user_agent": "Mozilla/5.0 (Linux; Android 14)"}
+        self.windows_sub = {"endpoint": "https://push/windows-1", "p256dh": "k", "auth": "a",
+                            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+
+    def test_internal_lifecycle_stages_never_push(self):
+        for stage in ("ACTIVITY_WATCH", "PRE_IGNITION", "AWAKENING", "STAIRCASE", "REARM"):
+            finding = make_finding(stage=stage)
+            self.assertIsNone(notification_phase(finding))
+            self.assertFalse(notification_allowed_any_platform(finding, DEFAULT_NOTIFICATION_PREFERENCES))
+
+    def test_setup_is_self_contained(self):
+        finding = make_finding(
+            trigger_level=2.04, invalidation_level=1.94,
+            notification_reason="volume and price structure aligned",
+        )
+        message = _message(finding)
+        self.assertEqual(notification_phase(finding), "setup")
+        self.assertEqual(_user_title(finding), "⚡ TEST · BULLISH SETUP")
+        self.assertIn("Trigger $2.0400 (+2.00% away)", message)
+        self.assertIn("Invalid below $1.9400", message)
+        self.assertIn("Scout is monitoring this episode", message)
+
+    def test_confirmation_has_one_user_facing_label(self):
+        for stage in ("IGNITION", "BREAKOUT", "SURGE"):
+            finding = make_finding(stage=stage, trigger_level=1.98, invalidation_level=1.92)
+            self.assertEqual(notification_phase(finding), "confirmed")
+            self.assertEqual(_user_title(finding), "✅ TEST · MOMENTUM CONFIRMED")
+            self.assertIn("Confirmed at $2.0000", _message(finding))
 
     def test_shared_gates_still_block_regardless_of_platform(self):
         """A CHOPPY (non-CLEAN) finding must still be blocked for everyone -- the platform

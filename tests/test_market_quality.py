@@ -98,7 +98,7 @@ class MarketQualityTests(unittest.TestCase):
         )
         self.assertTrue(_allowed(finding, DEFAULT_NOTIFICATION_PREFERENCES, "android"))
 
-    def test_confirmed_reclaim_notifies_but_reversal_watch_is_silent(self):
+    def test_reclaim_and_reversal_watch_remain_dashboard_only(self):
         base = dict(
             ticker="TEST", detected_at=1_800_000_000, price=2.62, score=9,
             vol_ratio_15s=6, vol_ratio_30s=5, change_60s_pct=3, extension_pct=2,
@@ -106,7 +106,7 @@ class MarketQualityTests(unittest.TestCase):
             above_vwap=True, quiet_break=False, evidence=["structural reclaim"],
             quality_label="CLEAN", quality_score=84,
         )
-        self.assertTrue(_allowed(Finding(stage="RECLAIM", **base), DEFAULT_NOTIFICATION_PREFERENCES, "android"))
+        self.assertFalse(_allowed(Finding(stage="RECLAIM", **base), DEFAULT_NOTIFICATION_PREFERENCES, "android"))
         self.assertFalse(_allowed(Finding(stage="REVERSAL_WATCH", **base), DEFAULT_NOTIFICATION_PREFERENCES, "android"))
 
     def test_validation_keeps_immature_horizons_pending_and_floors_max(self):
@@ -154,7 +154,7 @@ class MarketQualityTests(unittest.TestCase):
         self.assertLessEqual(abs(metrics["base_extension_pct"]), 2.0)
         self.assertIn(metrics["leg_context"], {"BASE_RELEASE", "CONSOLIDATION_RELEASE"})
 
-    def test_first_leg_watch_is_silent_and_confirmed_leg_notifies(self):
+    def test_first_leg_states_remain_dashboard_only(self):
         base = dict(
             ticker="TEST", detected_at=1_800_000_000, price=2.02, score=8,
             vol_ratio_15s=6, vol_ratio_30s=4, change_60s_pct=.8, extension_pct=.9,
@@ -164,7 +164,7 @@ class MarketQualityTests(unittest.TestCase):
         )
         self.assertFalse(_allowed(Finding(stage="FIRST_LEG_WATCH", **base), DEFAULT_NOTIFICATION_PREFERENCES, "android"))
         self.assertFalse(_allowed(Finding(stage="PRE_IGNITION", shadow_mode=True, **base), DEFAULT_NOTIFICATION_PREFERENCES, "android"))
-        self.assertTrue(_allowed(Finding(stage="FIRST_LEG", **base), DEFAULT_NOTIFICATION_PREFERENCES, "android"))
+        self.assertFalse(_allowed(Finding(stage="FIRST_LEG", **base), DEFAULT_NOTIFICATION_PREFERENCES, "android"))
 
     def test_pre_ignition_recipe_round_trips_as_shadow_evidence(self):
         store = Store(Path(self.tmp.name) / "pre-ignition.db")

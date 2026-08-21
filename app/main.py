@@ -15,10 +15,11 @@ from .events import EventHub
 from .market import MarketWatcher
 from .hybrid import RustPerceptionBridge
 from .watchdog import EventLoopWatchdog
+from .trader import PaperTrader
 
 
-async def serve_http(store: Store, market: MarketWatcher, events: EventHub, catalysts: CatalystWatcher, dispatcher: Dispatcher):
-    app = create_app(store, market, events, catalysts, dispatcher)
+async def serve_http(store: Store, market: MarketWatcher, events: EventHub, catalysts: CatalystWatcher, dispatcher: Dispatcher, trader: PaperTrader):
+    app = create_app(store, market, events, catalysts, dispatcher, trader)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", settings.health_port)
@@ -44,6 +45,8 @@ async def amain():
     await rust_bridge.start()
     dispatcher.set_snapshot_provider(market.snapshot)
     dispatcher.set_finding_listener(market.register_finding)
+    trader = PaperTrader(store)
+    dispatcher.set_trade_listener(trader.on_finding)
     catalysts = CatalystWatcher(store, dispatcher, market)
 
     log.info(
@@ -59,7 +62,8 @@ async def amain():
         *([asyncio.create_task(market.overnight_stream_loop(), name="market-overnight")] if settings.enable_overnight_stream else []),
         asyncio.create_task(catalysts.sec_loop(), name="sec"),
         asyncio.create_task(catalysts.alpaca_news_loop(), name="alpaca-news"),
-        asyncio.create_task(serve_http(store, market, events, catalysts, dispatcher), name="http"),
+        asyncio.create_task(serve_http(store, market, events, catalysts, dispatcher, trader), name="http"),
+        asyncio.create_task(trader.reconcile_loop(), name="paper-trader-reconcile"),
         asyncio.create_task(watchdog.heartbeat(), name="event-loop-heartbeat"),
     ]
 

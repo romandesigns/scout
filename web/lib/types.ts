@@ -269,6 +269,7 @@ export type ScoutStatus = {
     queues?: Record<string, unknown>;
     delivery?: Record<string, unknown>;
   };
+  trader?: TraderSettings;
   hybrid?: {
     rust_bridge?: {enabled:boolean;running:boolean;queue_depth?:number;submitted?:number;dropped?:number;candidates?:number;restarts?:number;last_error?:string|null};
     precision?: {threshold_pct:number;completed_episodes:number;successful_episodes:number;precision:number|null;source_mix:Record<string,number>};
@@ -317,6 +318,20 @@ export type NotificationPreferences = {
 };
 
 export type ScannerSettings = { min_price:number; max_price:number };
+
+export type TraderSettings = {
+  enabled:boolean; mode:"paper"; configured:boolean; paper_safe:boolean;
+  risk_reward:number; position_notional:number; max_positions:number;
+  daily_loss_limit:number; max_stop_pct:number; last_error?:string|null; last_order_at?:number|null;
+  performance?:{total:number;open:number;closed:number;wins:number;win_rate:number|null;realized_pl:number};
+};
+
+export type PaperTrade = {
+  id:number; episode_key:string; finding_id:number; ticker:string; client_order_id:string;
+  alpaca_order_id?:string|null; status:string; quantity:number; signal_price:number;
+  entry_price?:number|null; stop_price:number; target_price:number; exit_price?:number|null;
+  submitted_at:number; filled_at?:number|null; closed_at?:number|null; exit_reason?:string|null; realized_pl?:number|null;
+};
 
 export type AttentionStatus = "unread"|"opened"|"watching"|"acknowledged"|"dismissed"|"expired";
 export type AttentionItem = {

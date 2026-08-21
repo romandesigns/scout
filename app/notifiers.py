@@ -131,6 +131,24 @@ def _post_with_backoff(
 
 CRITICAL_STAGES = {"FIRST_LEG", "SURGE", "IGNITION", "HALT_WATCH", "HALT_PRESSURE", "CATALYST_ACTIVE", "HALT"}
 
+# The engine keeps its granular lifecycle for scoring and audit. Push delivery
+# intentionally exposes a much smaller decision model to avoid making the user
+# interpret every internal transition.
+SETUP_STAGES = {"EARLY"}
+CONFIRMATION_STAGES = {"IGNITION", "BREAKOUT", "SURGE"}
+SPECIAL_STAGES = {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME", "HALT_WATCH", "HALT_PRESSURE"}
+USER_NOTIFY_STAGES = SETUP_STAGES | CONFIRMATION_STAGES | SPECIAL_STAGES
+
+
+def notification_phase(f: Finding) -> str | None:
+    if f.stage in SETUP_STAGES:
+        return "setup"
+    if f.stage in CONFIRMATION_STAGES:
+        return "confirmed"
+    if f.stage in SPECIAL_STAGES:
+        return f.stage.lower()
+    return None
+
 
 def _is_critical(f: Finding) -> bool:
     return any(signal in CRITICAL_STAGES for signal in dict.fromkeys([f.stage, *(f.signals or [])]))
@@ -198,6 +216,8 @@ def _allowed_platform_agnostic(f: Finding, prefs: dict[str, Any] | None) -> bool
     """
     if f.shadow_mode:
         return False
+    if f.stage not in USER_NOTIFY_STAGES:
+        return False
     if f.stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"} and f.quality_label != "CLEAN":
         return False
     if not prefs:
@@ -254,32 +274,44 @@ def notification_allowed_any_platform(f: Finding, prefs: dict[str, Any] | None) 
 
 
 def _message(f: Finding) -> str:
-    catalyst = f.catalyst_category or "searching / not yet confirmed"
-    signals = " · ".join(f.signals or [f.stage])
-    velocity = []
-    if f.change_3s_pct is not None:
-        velocity.append(f"3s {f.change_3s_pct:+.2f}%")
-    if f.change_5s_pct is not None:
-        velocity.append(f"5s {f.change_5s_pct:+.2f}%")
-    if f.change_15s_pct is not None:
-        velocity.append(f"15s {f.change_15s_pct:+.2f}%")
-    if f.change_30s_pct is not None:
-        velocity.append(f"30s {f.change_30s_pct:+.2f}%")
-    hybrid = "+".join(f.hybrid_sources or [f.engine_source])
-    lines = [
-        f"${f.price:.4f} | rank {f.actionable_rank} | quality {f.quality_label} {f.quality_score}/100 | {signals}",
-        f"Scout intelligence: {hybrid} | hybrid {f.hybrid_score}/100" if hybrid else None,
-        f"Why now: {f.notification_reason}" if f.notification_reason else None,
-        " | ".join(velocity) if velocity else f"60s move {f.change_60s_pct:+.1f}%",
-        f"15s RVOL {f.vol_ratio_15s:.1f}× | 30s RVOL {f.vol_ratio_30s:.1f}×",
-        (f"30s ${f.dollar_volume_30s:,.0f} | {f.trades_30s} trades" if f.dollar_volume_30s is not None and f.trades_30s is not None else None),
-        (f"Breakout: ${f.breakout_level:.4f} ({f.breakout_window})" if f.breakout_level is not None else None),
-        f"EMA9 {'>' if f.ema9 and f.ema21 and f.ema9 > f.ema21 else '≤'} EMA21 | VWAP {'above' if f.above_vwap else 'below/unknown'}",
-        f"Catalyst: {catalyst}",
-        " • ".join(f.evidence[:6]),
-        (f"Suppressed by: {', '.join(f.rejection_reasons)}" if f.rejection_reasons else None),
-    ]
+    phase = notification_phase(f)
+    trigger = f.trigger_level if f.trigger_level is not None else f.breakout_level
+    distance = ((trigger / f.price) - 1) * 100 if trigger and f.price > 0 else f.trigger_distance_pct
+    structure = "above VWAP" if f.above_vwap else "VWAP not yet reclaimed"
+    reason = f.notification_reason or ("; ".join(f.evidence[:2]) if f.evidence else "momentum and participation aligned")
+    if phase == "setup":
+        lines = [
+            f"Price ${f.price:.4f} · {f.actionable_rank}-rank {f.quality_label.lower()} setup",
+            f"Trigger ${trigger:.4f} ({distance:+.2f}% away)" if trigger is not None and distance is not None else "Trigger is forming; open Scout for the live level",
+            f"Invalid below ${f.invalidation_level:.4f}" if f.invalidation_level is not None else "Invalidation: loss of structure/VWAP",
+            f"Why now: {reason}",
+            f"Context: {structure} · 30s RVOL {f.vol_ratio_30s:.1f}×",
+            "Scout is monitoring this episode for confirmation.",
+        ]
+    elif phase == "confirmed":
+        gain = ((f.price / trigger) - 1) * 100 if trigger and trigger > 0 else None
+        lines = [
+            f"Confirmed at ${f.price:.4f}" + (f" · {gain:+.2f}% through ${trigger:.4f}" if gain is not None else ""),
+            f"Why confirmed: {reason}",
+            f"Quality {f.quality_label.lower()} · {structure} · 30s RVOL {f.vol_ratio_30s:.1f}×",
+            f"Invalid below ${f.invalidation_level:.4f}" if f.invalidation_level is not None else None,
+        ]
+    else:
+        lines = [
+            f"Price ${f.price:.4f} · {f.stage.replace('_', ' ')}",
+            f"Why now: {reason}",
+            f"Quality {f.quality_label.lower()} · {structure}",
+        ]
     return "\n".join(x for x in lines if x)
+
+
+def _user_title(f: Finding) -> str:
+    phase = notification_phase(f)
+    if phase == "setup":
+        return f"⚡ {f.ticker} · BULLISH SETUP"
+    if phase == "confirmed":
+        return f"✅ {f.ticker} · MOMENTUM CONFIRMED"
+    return f"{f.ticker} · {f.stage.replace('_', ' ')}"
 
 
 def send_ntfy(f: Finding, prefs: dict[str, Any] | None = None) -> None:
@@ -323,7 +355,7 @@ def send_ntfy(f: Finding, prefs: dict[str, Any] | None = None) -> None:
 
     payload = {
         "topic": settings.ntfy_topic,
-        "title": f"{title_icon} {f.ticker} | {f.stage}{f' · {f.leg_context}' if f.leg_context else ''}",
+        "title": _user_title(f),
         "message": _message(f),
         "priority": priority,
         "tags": (
@@ -375,7 +407,7 @@ def send_ntfy_chart(f: Finding, prefs: dict[str, Any] | None = None) -> None:
 def _web_push_payload(f: Finding) -> dict[str, Any]:
     critical = _is_critical(f) or f.stage == "CATALYST_ACTIVE"
     return {
-        "title": f"{f.ticker} · {f.stage.replace('_', ' ')}",
+        "title": _user_title(f),
         "body": _message(f),
         "ticker": f.ticker,
         "findingId": f.finding_id,

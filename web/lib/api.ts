@@ -14,6 +14,8 @@ import type {
   AttentionStatus,
   FindingVerification,
   PushConfig,
+  TraderSettings,
+  PaperTrade,
 } from "./types";
 
 const configured = process.env.NEXT_PUBLIC_SCOUT_API_BASE?.replace(/\/$/, "");
@@ -179,6 +181,21 @@ export async function saveScannerSettings(value: ScannerSettings): Promise<Scann
   const response = await fetch(`${API_BASE}/api/settings/scanner`, {method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(value)});
   if(!response.ok) throw new Error(await response.text() || `${response.status} ${response.statusText}`);
   return response.json();
+}
+
+export async function getTraderSettings():Promise<TraderSettings>{
+  return getJson<TraderSettings>("/api/trader/settings");
+}
+
+export async function saveTraderSettings(value:Partial<TraderSettings>):Promise<TraderSettings>{
+  const response=await fetch(`${API_BASE}/api/trader/settings`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(value)});
+  if(!response.ok)throw new Error(await response.text()||`${response.status} ${response.statusText}`);
+  return response.json();
+}
+
+export async function getPaperTrades(limit=100):Promise<PaperTrade[]>{
+  const payload=await getJson<{items:PaperTrade[]}>(`/api/trader/trades?limit=${limit}`);
+  return payload.items;
 }
 
 export async function getAttention(limit=100):Promise<AttentionItem[]> {

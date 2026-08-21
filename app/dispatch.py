@@ -3,14 +3,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import itertools
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from .charts import render_detection_chart
 from .config import settings
 from .db import Store
 from .models import Bucket, Finding
 from .events import EventHub
-from .notifiers import channel_rate_limited, notification_allowed, notification_allowed_any_platform, send_ntfy, send_ntfy_chart, send_resend_email, send_web_push_all
+from .notifiers import channel_rate_limited, notification_allowed, notification_allowed_any_platform, notification_phase, send_ntfy, send_ntfy_chart, send_resend_email, send_web_push_all
 
 log = logging.getLogger("scout.dispatch")
 
@@ -21,6 +21,7 @@ class Dispatcher:
         self.events = events
         self.snapshot_provider: Callable[[str], tuple[list[Bucket], Bucket | None] | None] | None = None
         self.finding_listener: Callable[[int, Finding], None] | None = None
+        self.trade_listener: Callable[[int, Finding], Awaitable[None]] | None = None
         self._sequence = itertools.count()
         self._ntfy_queue: asyncio.PriorityQueue = asyncio.PriorityQueue(maxsize=settings.notification_queue_max)
         self._email_queue: asyncio.PriorityQueue = asyncio.PriorityQueue(maxsize=settings.notification_queue_max)
@@ -30,6 +31,23 @@ class Dispatcher:
         self._pending_ntfy_tasks: dict[str, asyncio.Task] = {}
         self._pending_email: dict[str, tuple[int, Finding, dict]] = {}
         self._pending_email_tasks: dict[str, asyncio.Task] = {}
+        self._notified_episode_phases: set[tuple[str, str, str, str]] = set()
+
+    def _claim_episode_phase(self, channel: str, f: Finding, prefs: dict) -> bool:
+        """Allow at most one setup and one confirmation per symbol episode.
+
+        Special events such as halts remain event-driven. The preference existed
+        previously but was not enforced anywhere in the delivery path.
+        """
+        phase = notification_phase(f)
+        if not prefs.get("only_stage_escalations", True) or phase not in {"setup", "confirmed"}:
+            return True
+        episode = f.hybrid_key or f"{f.ticker.upper()}:{int(f.episode_id)}"
+        key = (channel, f.ticker.upper(), episode, phase)
+        if key in self._notified_episode_phases:
+            return False
+        self._notified_episode_phases.add(key)
+        return True
 
     @staticmethod
     def _stage_priority(stage: str) -> int:
@@ -168,6 +186,9 @@ class Dispatcher:
     def set_finding_listener(self, listener: Callable[[int, Finding], None]) -> None:
         self.finding_listener = listener
 
+    def set_trade_listener(self, listener: Callable[[int, Finding], Awaitable[None]]) -> None:
+        self.trade_listener = listener
+
     async def emit(self, f: Finding, buckets: list[Bucket] | None = None, current: Bucket | None = None) -> int:
         # Persist + push first. Rendering/email must never block the first alert.
         finding_id = await asyncio.to_thread(self.store.save_finding, f)
@@ -177,6 +198,8 @@ class Dispatcher:
                 self.finding_listener(finding_id, f)
             except Exception:
                 log.exception("finding listener failed for %s %s", f.ticker, f.stage)
+        if self.trade_listener:
+            asyncio.create_task(self.trade_listener(finding_id, f), name=f"scout-paper-trade-{f.ticker}")
 
         self._ensure_workers()
         prefs = await asyncio.to_thread(self.store.get_notification_preferences)
@@ -187,9 +210,9 @@ class Dispatcher:
         # android-specific check -- only ntfy is intentionally the mobile-only
         # fallback channel ("Mobile / ntfy" in Settings) and is correctly gated
         # by the android platform toggle specifically.
-        if notification_allowed_any_platform(f, prefs) and settings.vapid_public_key and settings.vapid_private_key and await asyncio.to_thread(self.store.web_push_subscription_count) > 0:
+        if notification_allowed_any_platform(f, prefs) and self._claim_episode_phase("webpush", f, prefs) and settings.vapid_public_key and settings.vapid_private_key and await asyncio.to_thread(self.store.web_push_subscription_count) > 0:
             await self._queue("webpush", finding_id, f, prefs)
-        elif notification_allowed(f, prefs, "android"):
+        elif notification_allowed(f, prefs, "android") and self._claim_episode_phase("ntfy", f, prefs):
             await self._queue_consolidated_ntfy(finding_id, f, prefs)
         else:
             await asyncio.to_thread(self.store.record_delivery, finding_id, "ntfy", "not_eligible")
@@ -228,7 +251,7 @@ class Dispatcher:
                         "chart_url": f"/charts/{path.rsplit('/', 1)[-1]}",
                     })
                 await asyncio.to_thread(send_ntfy_chart, f, prefs)
-            if notification_allowed(f, prefs, "email"):
+            if notification_allowed(f, prefs, "email") and self._claim_episode_phase("email", f, prefs):
                 await self._queue_consolidated_email(finding_id, f, prefs)
             else:
                 await asyncio.to_thread(self.store.record_delivery, finding_id, "email", "not_eligible")

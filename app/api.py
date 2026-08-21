@@ -48,12 +48,13 @@ async def cors_middleware(request: web.Request, handler):
 
 
 class ScoutApi:
-    def __init__(self, store: Store, market: MarketWatcher, events: EventHub, catalysts=None, dispatcher=None):
+    def __init__(self, store: Store, market: MarketWatcher, events: EventHub, catalysts=None, dispatcher=None, trader=None):
         self.store = store
         self.market = market
         self.events = events
         self.catalyst_watcher = catalysts
         self.dispatcher = dispatcher
+        self.trader = trader
         self._response_cache: dict[str, tuple[float, bytes]] = {}
         self._response_cache_lock = asyncio.Lock()
 
@@ -147,6 +148,7 @@ class ScoutApi:
                 "queues": self.dispatcher.notification_queue_status() if self.dispatcher else {},
                 "delivery": delivery_health(),
             },
+            "trader": self.trader.status() if self.trader else {"mode": "paper", "enabled": False, "configured": False},
             "hybrid": {
                 "rust_bridge": self.market.rust_bridge.status() if self.market.rust_bridge else {"enabled": False, "running": False},
                 "precision": await asyncio.to_thread(self.store.hybrid_precision_stats, settings.hybrid_precision_threshold_pct),
@@ -373,6 +375,28 @@ class ScoutApi:
         self.events.publish("scanner-settings", value)
         return web.json_response(value)
 
+    async def trader_settings(self, request: web.Request) -> web.Response:
+        if not self.trader:
+            raise web.HTTPServiceUnavailable(text="paper trader unavailable")
+        return web.json_response(self.trader.status())
+
+    async def update_trader_settings(self, request: web.Request) -> web.Response:
+        if not self.trader:
+            raise web.HTTPServiceUnavailable(text="paper trader unavailable")
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                raise ValueError("trader settings must be an object")
+            value = await asyncio.to_thread(self.trader.update_settings, payload)
+        except (TypeError, ValueError) as exc:
+            raise web.HTTPBadRequest(text=str(exc))
+        self.events.publish("trader-settings", value)
+        return web.json_response(self.trader.status())
+
+    async def trader_trades(self, request: web.Request) -> web.Response:
+        limit = _int(request.query.get("limit"), 100, 1, 500)
+        return web.json_response({"items": await asyncio.to_thread(self.store.list_paper_trades, limit)})
+
     async def update_notification_preferences(self, request: web.Request) -> web.Response:
         try:
             payload = await request.json()
@@ -507,8 +531,8 @@ class ScoutApi:
         return response
 
 
-def create_app(store: Store, market: MarketWatcher, events: EventHub, catalysts=None, dispatcher=None) -> web.Application:
-    api = ScoutApi(store, market, events, catalysts, dispatcher)
+def create_app(store: Store, market: MarketWatcher, events: EventHub, catalysts=None, dispatcher=None, trader=None) -> web.Application:
+    api = ScoutApi(store, market, events, catalysts, dispatcher, trader)
     app = web.Application(middlewares=[cors_middleware])
     app.router.add_get("/healthz", api.health)
     app.router.add_get("/api/status", api.status)
@@ -536,6 +560,9 @@ def create_app(store: Store, market: MarketWatcher, events: EventHub, catalysts=
     app.router.add_delete("/api/push/subscriptions", api.unsubscribe_push)
     app.router.add_get("/api/settings/scanner", api.scanner_settings)
     app.router.add_put("/api/settings/scanner", api.update_scanner_settings)
+    app.router.add_get("/api/trader/settings", api.trader_settings)
+    app.router.add_put("/api/trader/settings", api.update_trader_settings)
+    app.router.add_get("/api/trader/trades", api.trader_trades)
     app.router.add_get("/api/events", api.event_stream)
     app.router.add_get("/charts/{name}", api.chart)
 

@@ -174,6 +174,33 @@ class Store:
                     value_json TEXT NOT NULL,
                     updated_at INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS trader_settings (
+                    key TEXT PRIMARY KEY,
+                    value_json TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS paper_trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    episode_key TEXT NOT NULL UNIQUE,
+                    finding_id INTEGER NOT NULL,
+                    ticker TEXT NOT NULL,
+                    client_order_id TEXT NOT NULL UNIQUE,
+                    alpaca_order_id TEXT,
+                    status TEXT NOT NULL,
+                    quantity REAL,
+                    signal_price REAL NOT NULL,
+                    entry_price REAL,
+                    stop_price REAL NOT NULL,
+                    target_price REAL NOT NULL,
+                    exit_price REAL,
+                    submitted_at INTEGER NOT NULL,
+                    filled_at INTEGER,
+                    closed_at INTEGER,
+                    exit_reason TEXT,
+                    realized_pl REAL,
+                    raw_json TEXT
+                );
+                CREATE INDEX IF NOT EXISTS ix_paper_trades_status_time ON paper_trades(status,submitted_at DESC);
                 CREATE TABLE IF NOT EXISTS market_status_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     ticker TEXT NOT NULL,
@@ -324,6 +351,81 @@ class Store:
             )
             self.db.commit()
         return value
+
+    def get_trader_settings(self) -> dict[str, Any]:
+        defaults = {
+            "enabled": False, "risk_reward": 3.0, "position_notional": 100.0,
+            "max_positions": 3, "daily_loss_limit": 25.0, "max_stop_pct": 3.0,
+        }
+        with self.lock:
+            row = self.db.execute("SELECT value_json FROM trader_settings WHERE key='paper'").fetchone()
+        if not row:
+            return defaults
+        try:
+            value = {**defaults, **json.loads(row[0])}
+            return {
+                "enabled": bool(value["enabled"]),
+                "risk_reward": max(1.0, min(10.0, float(value["risk_reward"]))),
+                "position_notional": max(10.0, min(10000.0, float(value["position_notional"]))),
+                "max_positions": max(1, min(20, int(value["max_positions"]))),
+                "daily_loss_limit": max(1.0, min(10000.0, float(value["daily_loss_limit"]))),
+                "max_stop_pct": max(0.25, min(10.0, float(value["max_stop_pct"]))),
+            }
+        except Exception:
+            return defaults
+
+    def set_trader_settings(self, value: dict[str, Any]) -> dict[str, Any]:
+        current = self.get_trader_settings()
+        merged = {**current, **value}
+        normalized = {
+            "enabled": bool(merged["enabled"]),
+            "risk_reward": round(max(1.0, min(10.0, float(merged["risk_reward"]))), 2),
+            "position_notional": round(max(10.0, min(10000.0, float(merged["position_notional"]))), 2),
+            "max_positions": max(1, min(20, int(merged["max_positions"]))),
+            "daily_loss_limit": round(max(1.0, min(10000.0, float(merged["daily_loss_limit"]))), 2),
+            "max_stop_pct": round(max(0.25, min(10.0, float(merged["max_stop_pct"]))), 2),
+        }
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO trader_settings(key,value_json,updated_at) VALUES('paper',?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at",
+                (json.dumps(normalized, separators=(",", ":")), int(time.time())),
+            )
+            self.db.commit()
+        return normalized
+
+    def create_paper_trade(self, value: dict[str, Any]) -> bool:
+        with self.lock:
+            cursor = self.db.execute(
+                "INSERT OR IGNORE INTO paper_trades(episode_key,finding_id,ticker,client_order_id,alpaca_order_id,status,quantity,signal_price,entry_price,stop_price,target_price,submitted_at,filled_at,closed_at,exit_reason,realized_pl,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (value["episode_key"], value["finding_id"], value["ticker"], value["client_order_id"], value.get("alpaca_order_id"), value["status"], value.get("quantity"), value["signal_price"], value.get("entry_price"), value["stop_price"], value["target_price"], value["submitted_at"], value.get("filled_at"), value.get("closed_at"), value.get("exit_reason"), value.get("realized_pl"), json.dumps(value.get("raw", {}))),
+            )
+            self.db.commit()
+            return cursor.rowcount > 0
+
+    def update_paper_trade(self, client_order_id: str, **values: Any) -> None:
+        allowed = {"alpaca_order_id", "status", "quantity", "entry_price", "exit_price", "filled_at", "closed_at", "exit_reason", "realized_pl", "raw_json"}
+        clean = {key: value for key, value in values.items() if key in allowed}
+        if not clean:
+            return
+        sql = ",".join(f"{key}=?" for key in clean)
+        with self.lock:
+            self.db.execute(f"UPDATE paper_trades SET {sql} WHERE client_order_id=?", (*clean.values(), client_order_id))
+            self.db.commit()
+
+    def list_paper_trades(self, limit: int = 100) -> list[dict[str, Any]]:
+        keys = ["id","episode_key","finding_id","ticker","client_order_id","alpaca_order_id","status","quantity","signal_price","entry_price","stop_price","target_price","exit_price","submitted_at","filled_at","closed_at","exit_reason","realized_pl"]
+        with self.lock:
+            rows = self.db.execute(f"SELECT {','.join(keys)} FROM paper_trades ORDER BY submitted_at DESC LIMIT ?", (max(1, min(500, int(limit))),)).fetchall()
+        return [dict(zip(keys, row)) for row in rows]
+
+    def paper_trade_stats(self) -> dict[str, Any]:
+        with self.lock:
+            rows = self.db.execute("SELECT status,realized_pl FROM paper_trades").fetchall()
+        closed = [float(pl) for status, pl in rows if status in {"filled", "closed", "canceled", "rejected"} and pl is not None]
+        open_count = sum(1 for status, _ in rows if status in {"new", "accepted", "pending_new", "partially_filled", "filled"})
+        wins = sum(1 for value in closed if value > 0)
+        return {"total": len(rows), "open": open_count, "closed": len(closed), "wins": wins, "win_rate": round(wins / len(closed), 4) if closed else None, "realized_pl": round(sum(closed), 2)}
 
     def recent_catalyst(self, ticker: str, max_age_minutes: int = 360):
         cutoff = int(time.time()) - max_age_minutes * 60

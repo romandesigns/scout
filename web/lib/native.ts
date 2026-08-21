@@ -1,6 +1,11 @@
 import type { Finding, NotificationPreferences } from "./types";
 
 const CRITICAL = new Set(["FIRST_LEG", "SURGE", "IGNITION", "HALT_PRESSURE", "CATALYST_ACTIVE", "HALT"]);
+const SETUP = new Set(["EARLY"]);
+const CONFIRMED = new Set(["IGNITION", "BREAKOUT", "SURGE"]);
+const SPECIAL = new Set(["CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME", "HALT_WATCH", "HALT_PRESSURE"]);
+const USER_NOTIFY = new Set([...SETUP, ...CONFIRMED, ...SPECIAL]);
+const claimedDecisions = new Set<string>();
 const nativePending = new Map<string, { finding: Finding; prefs: NotificationPreferences; timer: ReturnType<typeof setTimeout> }>();
 const stagePriority: Record<string,number> = { ACTIVITY_WATCH:0, REVERSAL_WATCH:0, FIRST_LEG_WATCH:0, PRE_IGNITION:0, EARLY:2, STAIRCASE:2, FIRST_LEG:3, EMA_RECLAIM:3, SURGE:4, VWAP_RECLAIM:4, BREAKOUT:5, REARM:6, IGNITION:7, CATALYST_WATCH:8, CATALYST_ACTIVE:10, RESUME:9, HALT:10 };
 
@@ -81,6 +86,7 @@ function quietNow(finding: Finding, prefs: NotificationPreferences) {
 // caller applies its own platform-specific toggle on top, instead of one function silently
 // assuming a single target platform for every client.
 function coreAllowed(finding: Finding, prefs: NotificationPreferences) {
+  if (!USER_NOTIFY.has(finding.stage)) return false;
   if (!["CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"].includes(finding.stage) && finding.quality_label !== "CLEAN") return false;
   if (!prefs.master_enabled) return false;
   if (signalMode(finding, prefs) !== "notify") return false;
@@ -88,6 +94,50 @@ function coreAllowed(finding: Finding, prefs: NotificationPreferences) {
   if (!prefs.sessions[sessionFor(finding.detected_at)]) return false;
   if (quietNow(finding, prefs)) return false;
   return true;
+}
+
+function decisionPhase(finding: Finding) {
+  if (SETUP.has(finding.stage)) return "setup";
+  if (CONFIRMED.has(finding.stage)) return "confirmed";
+  return finding.stage.toLowerCase();
+}
+
+export function claimClientDecision(finding: Finding) {
+  const phase = decisionPhase(finding);
+  if (phase !== "setup" && phase !== "confirmed") return true;
+  const episode = finding.hybrid_key || `${finding.ticker}:${finding.episode_id || 0}`;
+  const key = `${episode}:${phase}`;
+  if (claimedDecisions.has(key)) return false;
+  claimedDecisions.add(key);
+  return true;
+}
+
+function decisionTitle(finding: Finding) {
+  if (SETUP.has(finding.stage)) return `${finding.ticker} · BULLISH SETUP`;
+  if (CONFIRMED.has(finding.stage)) return `${finding.ticker} · MOMENTUM CONFIRMED`;
+  return `${finding.ticker} · ${finding.stage.replaceAll("_", " ")}`;
+}
+
+function decisionBody(finding: Finding) {
+  const price = finding.price ? (finding.price < 1 ? `$${finding.price.toFixed(4)}` : `$${finding.price.toFixed(2)}`) : "";
+  const trigger = finding.trigger_level ?? finding.breakout_level;
+  const invalidation = finding.invalidation_level;
+  if (SETUP.has(finding.stage)) {
+    const distance = trigger && finding.price ? (trigger / finding.price - 1) * 100 : finding.trigger_distance_pct;
+    return [
+      price,
+      trigger != null ? `trigger $${trigger.toFixed(4)}${distance != null ? ` (${distance >= 0 ? "+" : ""}${distance.toFixed(2)}%)` : ""}` : "trigger forming",
+      invalidation != null ? `invalid below $${invalidation.toFixed(4)}` : "invalid on structure/VWAP loss",
+      `${finding.actionable_rank || "C"}-rank ${String(finding.quality_label || "developing").toLowerCase()}`,
+      "Scout monitoring",
+    ].filter(Boolean).join(" · ");
+  }
+  return [
+    `confirmed ${price}`,
+    trigger != null ? `through $${trigger.toFixed(4)}` : "momentum confirmed",
+    invalidation != null ? `invalid below $${invalidation.toFixed(4)}` : "",
+    `${String(finding.quality_label || "developing").toLowerCase()} quality`,
+  ].filter(Boolean).join(" · ");
 }
 
 function nativeAllowed(finding: Finding, prefs: NotificationPreferences) {
@@ -158,16 +208,10 @@ export async function sendNativeScoutNotification(finding: Finding, prefs: Notif
     if (!granted) granted = (await requestPermission()) === "granted";
     if (!granted) return false;
 
-    const price = finding.price ? (finding.price < 1 ? `$${finding.price.toFixed(4)}` : `$${finding.price.toFixed(2)}`) : "";
-    const velocity = finding.change_15s_pct == null ? "" : `15s ${finding.change_15s_pct >= 0 ? "+" : ""}${finding.change_15s_pct.toFixed(2)}%`;
-    const rvol = finding.vol_ratio_15s == null ? "" : `RVOL ${finding.vol_ratio_15s.toFixed(1)}×`;
-    const signals = Array.from(new Set([finding.stage, ...(finding.signals || [])])).slice(0, 3).join(" · ");
-    const body = [price, velocity, rvol, `score ${finding.score}`].filter(Boolean).join(" · ");
-
     sendNotification({
       id: Math.abs(Number(finding.id || 0)) % 2_147_483_647 || undefined,
-      title: `${finding.ticker} · ${signals}`,
-      body,
+      title: decisionTitle(finding),
+      body: decisionBody(finding),
       group: prefs.group_by_ticker ? finding.ticker : undefined,
       channelId: platform === "android" ? (isCritical(finding) ? "scout-critical" : "scout-default") : undefined,
       actionTypeId: platform === "android" ? "scout-finding" : undefined,
@@ -200,21 +244,17 @@ export async function showPwaForegroundNotification(finding: Finding) {
     if (Notification.permission === "default") granted = (await Notification.requestPermission()) === "granted";
     if (!granted) return false;
     const registration = await navigator.serviceWorker.ready;
-    const price = finding.price ? (finding.price < 1 ? `$${finding.price.toFixed(4)}` : `$${finding.price.toFixed(2)}`) : "";
-    const velocity = finding.change_15s_pct == null ? "" : `15s ${finding.change_15s_pct >= 0 ? "+" : ""}${finding.change_15s_pct.toFixed(2)}%`;
-    const rvol = finding.vol_ratio_15s == null ? "" : `RVOL ${finding.vol_ratio_15s.toFixed(1)}×`;
-    const signals = Array.from(new Set([finding.stage, ...(finding.signals || [])])).slice(0, 3).join(" · ");
     const critical = isCritical(finding);
     // renotify/vibrate are real, widely-supported Notification API options (used already by
     // public/sw.js's push handler) that TS's default DOM lib type doesn't declare.
     const options = {
-      body: [price, velocity, rvol, `score ${finding.score}`].filter(Boolean).join(" · "),
+      body: decisionBody(finding),
       icon: "/icons/scout-192.png", badge: "/icons/scout-192.png",
       tag: `scout-${finding.ticker}`, renotify: critical,
       requireInteraction: critical, vibrate: critical ? [180, 80, 180] : [120],
       data: { url: `/?finding=${finding.id}&ticker=${encodeURIComponent(finding.ticker)}` },
     } as NotificationOptions & { renotify?: boolean; vibrate?: number[] };
-    await registration.showNotification(`${finding.ticker} · ${signals}`, options);
+    await registration.showNotification(decisionTitle(finding), options);
     return true;
   } catch {
     return false;
@@ -238,7 +278,7 @@ export function queueNativeScoutNotification(finding: Finding, prefs: Notificati
   const pending={finding,prefs,timer:setTimeout(()=>{
     const latest=nativePending.get(ticker);
     nativePending.delete(ticker);
-    if(latest) void sendNativeScoutNotification(latest.finding,latest.prefs);
+    if(latest && claimClientDecision(latest.finding)) void sendNativeScoutNotification(latest.finding,latest.prefs);
   },finding.stage==="FIRST_LEG"?3000:8000)};
   nativePending.set(ticker,pending);
 }
