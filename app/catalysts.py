@@ -55,7 +55,7 @@ class CatalystWatcher:
             "sec": {"last_ok_at": None, "last_error": None},
         }
 
-    async def _emit(self, ticker: str, headline: str, category: str, score: int, url: str, source: str, published_at: int | None = None):
+    async def _emit(self, ticker: str, headline: str, category: str, score: int, url: str, source: str, published_at: int | None = None, *, verified: bool = False, verification_method: str = ""):
         ticker = ticker.upper().strip()
         if not ticker:
             return
@@ -63,7 +63,10 @@ class CatalystWatcher:
             score = max(score, 5)
             category = f"WATCHLIST · {category}"
         ts = int(published_at or time.time())
-        self.store.save_catalyst(ticker, headline, category, score, url, source, ts)
+        self.store.save_catalyst(ticker, headline, category, score, url, source, ts, verified=verified, verification_method=verification_method)
+        if not verified:
+            log.info("Unverified catalyst retained for audit only: %s source=%s", ticker, source)
+            return
         f, buckets, current = self.market.make_catalyst_finding(ticker, headline, category, score, url, time.time())
         await self.dispatcher.emit(f, buckets, current)
         log.info("Bullish catalyst %s %s score=%d source=%s", ticker, category, score, source)
@@ -159,7 +162,7 @@ class CatalystWatcher:
                 self.last_sec_ok_at = int(time.time())
                 self.source_health["sec"] = {"last_ok_at": self.last_sec_ok_at, "last_error": None}
                 for row in rows:
-                    await self._emit(*row)
+                    await self._emit(*row, verified=True, verification_method="sec-cik-filing")
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -255,7 +258,7 @@ class CatalystWatcher:
                                 pass
                             for ticker in msg.get("symbols", []) or []:
                                 if re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,9}", str(ticker).upper()):
-                                    await self._emit(str(ticker).upper(), headline, category, score, url, source, published)
+                                    await self._emit(str(ticker).upper(), headline, category, score, url, source, published, verified=True, verification_method="alpaca-symbol-metadata")
             except asyncio.CancelledError:
                 self.news_connected = False
                 raise

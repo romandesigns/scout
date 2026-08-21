@@ -10,7 +10,9 @@ import { Toast as BaseToast } from "@base-ui/react/toast";
 // available; this in-page toast is what a tab-open browser session gets instead, since
 // browser tabs have no OS-level notification surface of their own to borrow.
 
-export const toastManager = BaseToast.createToastManager();
+type ScoutToastData = { deepLink?: string };
+
+export const toastManager = BaseToast.createToastManager<ScoutToastData>();
 
 export function ScoutToastProvider({ children }: { children: React.ReactNode }) {
   return (
@@ -22,12 +24,30 @@ export function ScoutToastProvider({ children }: { children: React.ReactNode }) 
 }
 
 function ScoutToastViewport() {
-  const { toasts } = BaseToast.useToastManager();
+  const { toasts, close } = BaseToast.useToastManager<ScoutToastData>();
   return (
     <BaseToast.Portal>
       <BaseToast.Viewport className="scout-toast-viewport">
         {toasts.map((toast) => (
-          <BaseToast.Root key={toast.id} toast={toast} className="scout-toast-root" data-type={toast.type}>
+          <BaseToast.Root
+            key={toast.id}
+            toast={toast}
+            className="scout-toast-root"
+            data-type={toast.type}
+            role={toast.data?.deepLink ? "link" : undefined}
+            tabIndex={toast.data?.deepLink ? 0 : undefined}
+            onClick={(event) => {
+              if (!toast.data?.deepLink || (event.target as HTMLElement).closest("button")) return;
+              window.dispatchEvent(new CustomEvent("scout:open-finding", { detail: toast.data.deepLink }));
+              close(toast.id);
+            }}
+            onKeyDown={(event) => {
+              if (!toast.data?.deepLink || !["Enter", " "].includes(event.key)) return;
+              event.preventDefault();
+              window.dispatchEvent(new CustomEvent("scout:open-finding", { detail: toast.data.deepLink }));
+              close(toast.id);
+            }}
+          >
             <BaseToast.Title className="scout-toast-title" />
             <BaseToast.Description className="scout-toast-description" />
             <BaseToast.Close aria-label="Dismiss" className="scout-toast-close">

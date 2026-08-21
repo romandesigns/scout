@@ -1085,11 +1085,11 @@ export default function ScoutPage() {
     const ticker=(params.get("ticker")||"").toUpperCase();
     if(id){
       const local=findings.find(f=>f.id===id);
-      if(local){setSelectedState(local);return;}
-      if(API_CONFIGURED){try{setSelectedState(await getFinding(id));return;}catch{}}
+      if(local){setSelected(local);return;}
+      if(API_CONFIGURED){try{setSelected(await getFinding(id));return;}catch{}}
     }
-    if(ticker){const local=findings.find(f=>f.ticker===ticker);if(local)setSelectedState(local);}
-  },[findings]);
+    if(ticker){const local=findings.find(f=>f.ticker===ticker);if(local)setSelected(local);}
+  },[findings,setSelected]);
 
   const refresh=useCallback(async(heavy=true)=>{
     if (!API_CONFIGURED || (typeof document!=="undefined" && document.hidden)) return;
@@ -1146,6 +1146,11 @@ export default function ScoutPage() {
 
   useEffect(()=>installNativeDeepLinkHandler(url=>{void applyDeepLink(url);}),[applyDeepLink]);
   useEffect(()=>installNativeNotificationActionHandler(url=>{void applyDeepLink(url);}),[applyDeepLink]);
+  useEffect(()=>{
+    const open=(event:Event)=>{const url=(event as CustomEvent<string>).detail;if(url)void applyDeepLink(url);};
+    window.addEventListener("scout:open-finding",open);
+    return()=>window.removeEventListener("scout:open-finding",open);
+  },[applyDeepLink]);
 
   useEffect(()=>{
     if(typeof window==='undefined'||!API_CONFIGURED)return;
@@ -1171,7 +1176,7 @@ export default function ScoutPage() {
             if (claimClientDecision(finding)) {
               const phase=["IGNITION","BREAKOUT","SURGE"].includes(finding.stage)?"MOMENTUM CONFIRMED":"BULLISH SETUP";
               const trigger=finding.trigger_level??finding.breakout_level;
-              toastManager.add({ title: `${finding.ticker} · ${phase}`, description: `${money(finding.price)}${trigger!=null?` · trigger ${money(trigger)}`:""}${finding.invalidation_level!=null?` · invalid below ${money(finding.invalidation_level)}`:""}`, timeout: 10000 });
+              toastManager.add({ title: `${finding.ticker} · ${phase}`, description: `${money(finding.price)}${trigger!=null?` · trigger ${money(trigger)}`:""}${finding.invalidation_level!=null?` · invalid below ${money(finding.invalidation_level)}`:""}`, timeout: 10000, data:{deepLink:`/?finding=${finding.id}&ticker=${encodeURIComponent(finding.ticker)}`} });
             }
           }
         }

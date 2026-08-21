@@ -332,19 +332,21 @@ export function installNativeNotificationActionHandler(onUrl: (url: string) => v
   void (async () => {
     try {
       const { isTauri } = await import("@tauri-apps/api/core");
-      if (!isTauri() || targetPlatform() !== "android" || disposed) return;
+      if (!isTauri() || disposed) return;
       const { registerActionTypes, onAction } = await import("@tauri-apps/plugin-notification");
-      await registerActionTypes([{
-        id: "scout-finding",
-        actions: [{ id: "view", title: "View Scout", foreground: true }],
-      }]);
+      if (targetPlatform() === "android") {
+        await registerActionTypes([{
+          id: "scout-finding",
+          actions: [{ id: "view", title: "View Scout", foreground: true }],
+        }]);
+      }
       listener = await onAction((notification) => {
         const deepLink = notification.extra?.deepLink;
         if (typeof deepLink === "string") onUrl(deepLink);
       });
       if (disposed) void listener.unregister().catch(() => undefined);
     } catch {
-      // Mobile actions are supplemental; normal deep links/ntfy remain available.
+      // Native actions are supplemental; normal deep links/ntfy remain available.
     }
   })();
 

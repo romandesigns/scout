@@ -256,6 +256,10 @@ class Store:
                 """
             )
             self._ensure_columns("findings", FINDING_COLUMNS)
+            self._ensure_columns("catalysts", [
+                ("verified", "INTEGER NOT NULL DEFAULT 0"),
+                ("verification_method", "TEXT"),
+            ])
             # hybrid_key is a migrated column, so create its index only after
             # _ensure_columns has guaranteed that the column exists on older DBs.
             self.db.execute(
@@ -316,11 +320,12 @@ class Store:
             self.db.execute("INSERT OR IGNORE INTO seen(key,source,seen_at) VALUES(?,?,?)", (key, source, int(time.time())))
             self.db.commit()
 
-    def save_catalyst(self, ticker: str, headline: str, category: str, score: int, url: str, source: str, published_at: int | None = None) -> None:
+    def save_catalyst(self, ticker: str, headline: str, category: str, score: int, url: str, source: str, published_at: int | None = None, *, verified: bool = False, verification_method: str = "") -> None:
         with self.lock:
             self.db.execute(
-                "INSERT OR IGNORE INTO catalysts(ticker,headline,category,score,url,source,published_at) VALUES(?,?,?,?,?,?,?)",
-                (ticker.upper(), headline[:1000], category[:200], int(score), url[:2000], source[:100], int(published_at or time.time())),
+                "INSERT INTO catalysts(ticker,headline,category,score,url,source,published_at,verified,verification_method) VALUES(?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(ticker,headline) DO UPDATE SET category=excluded.category,score=excluded.score,url=excluded.url,source=excluded.source,published_at=excluded.published_at,verified=excluded.verified,verification_method=excluded.verification_method",
+                (ticker.upper(), headline[:1000], category[:200], int(score), url[:2000], source[:100], int(published_at or time.time()), int(verified), verification_method[:100]),
             )
             self.db.commit()
 
@@ -431,7 +436,7 @@ class Store:
         cutoff = int(time.time()) - max_age_minutes * 60
         with self.lock:
             return self.db.execute(
-                "SELECT headline,category,score,url,published_at FROM catalysts WHERE ticker=? AND published_at>=? ORDER BY published_at DESC LIMIT 1",
+                "SELECT headline,category,score,url,published_at FROM catalysts WHERE ticker=? AND published_at>=? AND verified=1 ORDER BY published_at DESC LIMIT 1",
                 (ticker.upper(), cutoff),
             ).fetchone()
 
@@ -873,18 +878,21 @@ class Store:
     def list_catalysts(self, limit: int = 100, ticker: str | None = None) -> list[dict[str, Any]]:
         limit = max(1, min(500, int(limit)))
         params: list[Any] = []
-        where = ""
+        where = "WHERE verified=1"
         if ticker:
-            where = "WHERE ticker=?"
+            where += " AND ticker=?"
             params.append(ticker.upper())
         params.append(limit)
         with self.lock:
             rows = self.db.execute(
-                f"SELECT id,ticker,headline,category,score,url,source,published_at FROM catalysts {where} ORDER BY published_at DESC LIMIT ?",
+                f"SELECT id,ticker,headline,category,score,url,source,published_at,verified,verification_method FROM catalysts {where} ORDER BY published_at DESC LIMIT ?",
                 params,
             ).fetchall()
-        keys = ["id","ticker","headline","category","score","url","source","published_at"]
-        return [dict(zip(keys, row)) for row in rows]
+        keys = ["id","ticker","headline","category","score","url","source","published_at","verified","verification_method"]
+        result = [dict(zip(keys, row)) for row in rows]
+        for item in result:
+            item["verified"] = bool(item["verified"])
+        return result
 
     def get_notification_preferences(self) -> dict[str, Any]:
         with self.lock:
