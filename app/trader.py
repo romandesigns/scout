@@ -15,10 +15,9 @@ import requests
 from .config import settings
 from .db import Store
 from .models import Finding
-from .opportunity import can_notify_opportunity
+from .opportunity import is_group_a
 
 log = logging.getLogger("scout.trader")
-CONFIRMED_STAGES = {"IGNITION", "BREAKOUT", "SURGE"}
 ACTIVE_ORDER_STATES = {"new", "accepted", "pending_new", "partially_filled", "filled"}
 
 
@@ -75,12 +74,10 @@ class PaperTrader:
         return response.json() if response.content else {}
 
     async def on_finding(self, finding_id: int, finding: Finding) -> None:
-        if not can_notify_opportunity(finding):
+        if not is_group_a(finding, confirmed_only=True):
             return
         cfg = self.store.get_trader_settings()
-        if not cfg["enabled"] or not self.configured or finding.stage not in CONFIRMED_STAGES:
-            return
-        if finding.shadow_mode or finding.quality_label != "CLEAN" or finding.actionable_rank != "A":
+        if not cfg["enabled"] or not self.configured:
             return
         if not self._regular_session(finding.detected_at) or finding.price <= 0:
             return

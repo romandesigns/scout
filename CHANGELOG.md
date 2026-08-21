@@ -128,6 +128,18 @@
 
 # Changelog
 
+## 6.8.4 — Group A API parity
+
+- Applies the complete Group A contract to actionable API queries, excluding shadow, non-clean, late, and extended historical Rank A rows.
+- Excludes transient test artifacts from coordinated release packaging.
+
+## 6.8.3 — Group A execution scope
+
+- Establishes one shared Group A eligibility contract across the backend and clients.
+- Restricts opportunity notifications, actionable views, and attention items to clean, timely, non-shadow Rank A findings.
+- Restricts Alpaca paper execution to confirmed Group A `IGNITION`, `BREAKOUT`, and `SURGE` findings.
+- Keeps Group B findings visible for analysis without allowing them into the actionable or execution pipeline.
+
 ## 6.8.2 — Opportunity timing contract
 
 - Separates initial detection time from confirmed notification-delivery time.

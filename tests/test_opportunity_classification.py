@@ -2,7 +2,7 @@ import time
 
 from app.db import Store
 from app.models import Finding
-from app.opportunity import can_notify_opportunity, opportunity_class
+from app.opportunity import can_notify_opportunity, is_group_a, opportunity_class
 
 
 def finding(**overrides):
@@ -22,6 +22,15 @@ def test_first_secondary_and_late_contract():
     late = finding(timeliness_label="LATE", extension_pct=3)
     assert opportunity_class(late) == "LATE_INFORMATION_ONLY"
     assert not can_notify_opportunity(late)
+
+
+def test_group_a_is_the_shared_actionability_contract():
+    assert is_group_a(finding())
+    assert not is_group_a(finding(actionable_rank="B"))
+    assert not is_group_a(finding(quality_label="CHOPPY"))
+    assert not is_group_a(finding(shadow_mode=True))
+    assert not is_group_a(finding(stage="EARLY"), confirmed_only=True)
+    assert is_group_a(finding(stage="IGNITION"), confirmed_only=True)
 
 
 def test_provider_acceptance_is_persisted_on_finding(tmp_path):

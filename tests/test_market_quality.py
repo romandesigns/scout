@@ -95,6 +95,7 @@ class MarketQualityTests(unittest.TestCase):
             vol_ratio_15s=8, vol_ratio_30s=6, change_60s_pct=2, extension_pct=1,
             ema9=2, ema21=1.99, ema9_slope=.01, vwap=1.98, above_vwap=True,
             quiet_break=True, evidence=["orderly participation"], quality_label="CLEAN", quality_score=82,
+            actionable_rank="A",
         )
         self.assertTrue(_allowed(finding, DEFAULT_NOTIFICATION_PREFERENCES, "android"))
 
@@ -195,7 +196,7 @@ class MarketQualityTests(unittest.TestCase):
             vol_ratio_15s=7, vol_ratio_30s=5, change_60s_pct=1.2, extension_pct=1,
             ema9=2.01, ema21=2, ema9_slope=.01, vwap=2, above_vwap=True,
             quiet_break=True, evidence=["compression release"], quality_label="CLEAN",
-            quality_score=90, episode_id=7,
+            quality_score=90, actionable_rank="A", episode_id=7,
         )
         first_id = store.save_finding(Finding(stage="FIRST_LEG", **base))
         items = store.list_attention()

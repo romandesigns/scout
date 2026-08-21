@@ -424,7 +424,7 @@ function tickerDecision(finding: Finding) {
   const momentum=momentumProfile(finding);
   const quality=(finding.quality_label||"DEVELOPING").toUpperCase();
   const urgency=(finding.urgency||"").toUpperCase();
-  const actionable=["A","B"].includes((finding.actionable_rank||"").toUpperCase());
+  const actionable=(finding.actionable_rank||"").toUpperCase()==="A";
   const late=classification==="LATE_INFORMATION_ONLY"||momentum.state==="EXTENDED"||momentum.state==="LATE_RISK";
   if(quality==="ILLIQUID")return {label:"AVOID FOR NOW",tone:"red",reason:"Trading is too thin for a dependable entry"};
   if(quality==="CHOPPY")return {label:"USE CAUTION",tone:"orange",reason:"Price action is unstable"};
@@ -486,7 +486,7 @@ function FindingRow({ finding, selected, onSelect }: { finding: Finding; selecte
 // persists for every PRE_IGNITION/ACTIVITY_WATCH finding (see PROMOTION-TRACE.md).
 // Decision-support only: does not change any detector threshold or promotion rule.
 function PromotionProgress({ finding }: { finding: Finding }) {
-  const isActionable = (finding.actionable_rank || "C").toUpperCase() === "A" || (finding.actionable_rank || "").toUpperCase() === "B";
+  const isActionable = (finding.actionable_rank || "C").toUpperCase() === "A";
   const trace = finding.candidate_profile?.promotion_trace;
   const gates = trace?.gates;
   if (isActionable || !gates) return null;

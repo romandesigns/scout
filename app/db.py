@@ -501,7 +501,7 @@ class Store:
         if (f.candidate_profile or {}).get("opportunity_class") == "LATE_INFORMATION_ONLY":
             return
         priority = self._attention_priority(f.stage)
-        if priority <= 0 or (f.stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"} and f.quality_label != "CLEAN"):
+        if priority <= 0 or (f.stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "HALT_WATCH", "HALT_PRESSURE", "RESUME"} and (f.quality_label != "CLEAN" or str(f.actionable_rank or "").upper() != "A")):
             return
         day = datetime.fromtimestamp(f.detected_at).strftime("%Y%m%d")
         episode_key = f"{f.ticker.upper()}:{day}:{int(f.episode_id or 0)}"
@@ -706,7 +706,13 @@ class Store:
             where.append("detected_at<=?")
             params.append(float(before))
         if actionable_only:
-            where.append("UPPER(COALESCE(actionable_rank,'')) IN ('A','B')")
+            where.append(
+                "UPPER(COALESCE(actionable_rank,''))='A' "
+                "AND UPPER(COALESCE(quality_label,''))='CLEAN' "
+                "AND COALESCE(shadow_mode,0)=0 "
+                "AND UPPER(COALESCE(timeliness_label,'')) NOT IN ('LATE','TOO_LATE','EXTENDED','LATE_RISK') "
+                "AND MAX(COALESCE(extension_pct,0),COALESCE(base_extension_at_detection_pct,0))<8"
+            )
         if engine_version:
             where.append("engine_version=?")
             params.append(str(engine_version))

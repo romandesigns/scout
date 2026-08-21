@@ -88,6 +88,7 @@ function quietNow(finding: Finding, prefs: NotificationPreferences) {
 function coreAllowed(finding: Finding, prefs: NotificationPreferences) {
   if (opportunityClass(finding) === "LATE_INFORMATION_ONLY") return false;
   if (!USER_NOTIFY.has(finding.stage)) return false;
+  if (!["CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "HALT_WATCH", "HALT_PRESSURE", "RESUME"].includes(finding.stage) && finding.actionable_rank !== "A") return false;
   if (!["CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"].includes(finding.stage) && finding.quality_label !== "CLEAN") return false;
   if (!prefs.master_enabled) return false;
   if (signalMode(finding, prefs) !== "notify") return false;

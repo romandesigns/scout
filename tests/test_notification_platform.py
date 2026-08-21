@@ -35,6 +35,7 @@ def make_finding(**overrides) -> Finding:
         vol_ratio_15s=8, vol_ratio_30s=6, change_60s_pct=2, extension_pct=1,
         ema9=2.0, ema21=1.99, ema9_slope=.01, vwap=1.98, above_vwap=True,
         quiet_break=True, evidence=["orderly participation"], quality_label="CLEAN", quality_score=82,
+        actionable_rank="A",
     )
     base.update(overrides)
     return Finding(**base)
@@ -181,6 +182,10 @@ class DecisionNotificationTests(unittest.TestCase):
             delivered = send_web_push_all(store, finding, DEFAULT_NOTIFICATION_PREFERENCES)
         self.assertEqual(delivered, 0)
         mock_webpush.assert_not_called()
+
+    def test_group_b_never_generates_an_opportunity_notification(self):
+        finding = make_finding(actionable_rank="B")
+        self.assertFalse(notification_allowed_any_platform(finding, DEFAULT_NOTIFICATION_PREFERENCES))
 
 
 if __name__ == "__main__":
