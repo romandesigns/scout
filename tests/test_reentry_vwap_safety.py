@@ -8,8 +8,8 @@ MOMENTUM" / "FRESH ENTRY" on the live dashboard -- because the existing reentry 
 gate's `is_late_promotion_risk` check only measures extension from the *local* base, which
 had reset to near-zero after hours of fading, and had no separate check against the
 session's VWAP. This locks in the fix: a reclaim/rearm that fires while still meaningfully
-below VWAP gets blocked, but only when the experiment flag is enabled (default off,
-pending validation) -- must not change default behavior.
+below VWAP gets blocked by default. The environment flag remains a rollback lever, and the
+legacy behavior is kept explicitly testable.
 """
 import dataclasses
 from unittest.mock import patch
@@ -27,11 +27,17 @@ BIVI_FADE_RECLAIM_METRICS = {
 }
 
 
-def test_vwap_safety_gate_off_by_default_reproduces_the_bivi_bug():
-    """Documents the bug as it stood in production: with the flag at its default (off),
+def test_validated_momentum_safety_defaults_are_enabled():
+    assert settings.experiment_reentry_vwap_safety_gate is True
+    assert settings.experiment_time_decay_participation_bar is True
+
+
+def test_vwap_safety_gate_can_be_disabled_to_reproduce_the_bivi_bug():
+    """Documents the bug as it stood in production: with the gate explicitly disabled,
     a deep-fade reclaim is NOT blocked by the VWAP check -- this is the exact gap that let
-    the BIVI finding through. Confirms the fix is additive/opt-in, not already live."""
-    d = evaluate_reentry_safety("EMA_RECLAIM", BIVI_FADE_RECLAIM_METRICS)
+    the BIVI finding through. This preserves a tested emergency rollback path."""
+    with patch("app.market.settings", dataclasses.replace(settings, experiment_reentry_vwap_safety_gate=False)):
+        d = evaluate_reentry_safety("EMA_RECLAIM", BIVI_FADE_RECLAIM_METRICS)
     assert d["ready"] is True
     assert "deeply_below_vwap" not in d["blockers"]
 
@@ -89,8 +95,9 @@ CDTG_CHASE_METRICS = {
 }
 
 
-def test_vwap_safety_gate_off_by_default_reproduces_the_cdtg_bug():
-    d = evaluate_reentry_safety("VWAP_RECLAIM", CDTG_CHASE_METRICS)
+def test_vwap_safety_gate_can_be_disabled_to_reproduce_the_cdtg_bug():
+    with patch("app.market.settings", dataclasses.replace(settings, experiment_reentry_vwap_safety_gate=False)):
+        d = evaluate_reentry_safety("VWAP_RECLAIM", CDTG_CHASE_METRICS)
     assert d["ready"] is True
     assert "chasing_above_vwap" not in d["blockers"]
 

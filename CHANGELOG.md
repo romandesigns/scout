@@ -1,5 +1,15 @@
 ## 6.7.4
 
+## 6.7.6
+
+- Enabled the validated time-decaying participation bar by default so sustained bullish
+  activity can qualify earlier without relaxing the initial participation threshold.
+- Enabled the validated reentry VWAP-distance safety gate by default, blocking reclaim and
+  rearm alerts that are more than 2% below or 3% above session VWAP.
+- Preserved environment-variable rollback switches for both detector changes.
+- Revalidated the VWAP filter against the August 20 live session and passed the complete
+  147-test Python suite.
+
 - Fixed Web Push notification eligibility to check each subscriber's actual platform
   (desktop browser vs. Android) instead of one shared toggle for every subscription.
 - Reversed the v6.5.3 pause: native Tauri desktop toast is primary again (ntfy is the

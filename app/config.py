@@ -113,7 +113,10 @@ class Settings:
     # was validated against before any recommendation was made.
     experiment_adaptive_participation_bar: bool = _b("EXPERIMENT_ADAPTIVE_PARTICIPATION_BAR", False)
     experiment_adaptive_bar_max_reduction_pct: float = _f("EXPERIMENT_ADAPTIVE_BAR_MAX_REDUCTION_PCT", 0.50, 0.0)
-    experiment_time_decay_participation_bar: bool = _b("EXPERIMENT_TIME_DECAY_PARTICIPATION_BAR", False)
+    # Adopted after historical replay was the only participation variant to improve both
+    # mean value per finding and total captured value. The environment switch remains a
+    # rollback lever, while the validated behavior is now the production default.
+    experiment_time_decay_participation_bar: bool = _b("EXPERIMENT_TIME_DECAY_PARTICIPATION_BAR", True)
     experiment_time_decay_window_seconds: float = _f("EXPERIMENT_TIME_DECAY_WINDOW_SECONDS", 60.0, 10.0)
     experiment_time_decay_max_reduction_pct: float = _f("EXPERIMENT_TIME_DECAY_MAX_REDUCTION_PCT", 0.50, 0.0)
     experiment_unified_participation_gate: bool = _b("EXPERIMENT_UNIFIED_PARTICIPATION_GATE", False)
@@ -237,9 +240,11 @@ class Settings:
     # 2026-08-19: the existing reentry safety gate only checks extension from the *local*
     # base, which is blind to a ticker that's been fading for hours and formed a new tight
     # base far below both its session peak and VWAP (see MILESTONES/2026-08-19-008, the
-    # BIVI case). Add a VWAP-distance blocker as its own experiment, default off pending
-    # validation.
-    experiment_reentry_vwap_safety_gate: bool = _b("EXPERIMENT_REENTRY_VWAP_SAFETY_GATE", False)
+    # BIVI case). The VWAP-distance blocker was subsequently validated across two live
+    # sessions and adopted by default below.
+    # Adopted after two independent live-session audits found negative aggregate forward
+    # value in reentry signals far from VWAP. Keep the switch for emergency rollback.
+    experiment_reentry_vwap_safety_gate: bool = _b("EXPERIMENT_REENTRY_VWAP_SAFETY_GATE", True)
     reentry_max_below_vwap_pct: float = _f("REENTRY_MAX_BELOW_VWAP_PCT", 2.0, 0.0)
     # Retroactive validation against a real regular-hours session showed the dominant real
     # loss pattern was the mirror case -- chasing a reentry already extended well above
