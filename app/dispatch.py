@@ -11,6 +11,7 @@ from .db import Store
 from .models import Bucket, Finding
 from .events import EventHub
 from .notifiers import channel_rate_limited, notification_allowed, notification_allowed_any_platform, notification_phase, send_ntfy, send_ntfy_chart, send_resend_email, send_web_push_all
+from .opportunity import opportunity_class
 
 log = logging.getLogger("scout.dispatch")
 
@@ -191,6 +192,8 @@ class Dispatcher:
 
     async def emit(self, f: Finding, buckets: list[Bucket] | None = None, current: Bucket | None = None) -> int:
         # Persist + push first. Rendering/email must never block the first alert.
+        f.candidate_profile = dict(f.candidate_profile or {})
+        f.candidate_profile["opportunity_class"] = opportunity_class(f)
         finding_id = await asyncio.to_thread(self.store.save_finding, f)
         f.finding_id = finding_id
         if self.finding_listener:

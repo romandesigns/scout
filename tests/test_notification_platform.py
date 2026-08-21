@@ -151,7 +151,7 @@ class DecisionNotificationTests(unittest.TestCase):
         )
         message = _message(finding)
         self.assertEqual(notification_phase(finding), "setup")
-        self.assertEqual(_user_title(finding), "⚡ TEST · BULLISH SETUP")
+        self.assertEqual(_user_title(finding), "⚡ TEST · FIRST MOVE SETUP")
         self.assertIn("Trigger $2.0400 (+2.00% away)", message)
         self.assertIn("Invalid below $1.9400", message)
         self.assertIn("Scout is monitoring this episode", message)
@@ -160,8 +160,16 @@ class DecisionNotificationTests(unittest.TestCase):
         for stage in ("IGNITION", "BREAKOUT", "SURGE"):
             finding = make_finding(stage=stage, trigger_level=1.98, invalidation_level=1.92)
             self.assertEqual(notification_phase(finding), "confirmed")
-            self.assertEqual(_user_title(finding), "✅ TEST · MOMENTUM CONFIRMED")
+            self.assertEqual(_user_title(finding), "✅ TEST · FIRST MOVE CONFIRMED")
             self.assertIn("Confirmed at $2.0000", _message(finding))
+
+    def test_secondary_entry_is_labeled_and_late_move_is_suppressed(self):
+        secondary = make_finding(stage="IGNITION", leg_context="CONSOLIDATION")
+        self.assertEqual(_user_title(secondary), "✅ TEST · SECONDARY ENTRY CONFIRMED")
+        self.assertTrue(notification_allowed_any_platform(secondary, DEFAULT_NOTIFICATION_PREFERENCES))
+
+        late = make_finding(stage="IGNITION", timeliness_label="LATE")
+        self.assertFalse(notification_allowed_any_platform(late, DEFAULT_NOTIFICATION_PREFERENCES))
 
     def test_shared_gates_still_block_regardless_of_platform(self):
         """A CHOPPY (non-CLEAN) finding must still be blocked for everyone -- the platform

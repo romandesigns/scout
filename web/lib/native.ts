@@ -86,6 +86,7 @@ function quietNow(finding: Finding, prefs: NotificationPreferences) {
 // caller applies its own platform-specific toggle on top, instead of one function silently
 // assuming a single target platform for every client.
 function coreAllowed(finding: Finding, prefs: NotificationPreferences) {
+  if (opportunityClass(finding) === "LATE_INFORMATION_ONLY") return false;
   if (!USER_NOTIFY.has(finding.stage)) return false;
   if (!["CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"].includes(finding.stage) && finding.quality_label !== "CLEAN") return false;
   if (!prefs.master_enabled) return false;
@@ -94,6 +95,17 @@ function coreAllowed(finding: Finding, prefs: NotificationPreferences) {
   if (!prefs.sessions[sessionFor(finding.detected_at)]) return false;
   if (quietNow(finding, prefs)) return false;
   return true;
+}
+
+export function opportunityClass(finding: Finding) {
+  if (["CATALYST","CATALYST_WATCH","CATALYST_ACTIVE","HALT","RESUME"].includes(finding.stage)) return "EVENT" as const;
+  if (finding.opportunity_class) return finding.opportunity_class;
+  const timely=String(finding.timeliness_label||"").toUpperCase();
+  const extension=Math.max(finding.extension_pct||0,finding.base_extension_at_detection_pct||0);
+  if (["LATE","TOO_LATE","EXTENDED","LATE_RISK"].includes(timely)||extension>=8) return "LATE_INFORMATION_ONLY" as const;
+  const context=String(finding.leg_context||"").toUpperCase();
+  if (["REARM","EMA_RECLAIM","VWAP_RECLAIM","RECLAIM"].includes(finding.stage)||["RECLAIM","REENTRY","PULLBACK","CONSOLIDATION"].some(x=>context.includes(x))) return "SECONDARY_ENTRY" as const;
+  return "FIRST_MOVE" as const;
 }
 
 function decisionPhase(finding: Finding) {
@@ -113,8 +125,9 @@ export function claimClientDecision(finding: Finding) {
 }
 
 function decisionTitle(finding: Finding) {
-  if (SETUP.has(finding.stage)) return `${finding.ticker} · BULLISH SETUP`;
-  if (CONFIRMED.has(finding.stage)) return `${finding.ticker} · MOMENTUM CONFIRMED`;
+  const kind=opportunityClass(finding)==="SECONDARY_ENTRY"?"SECONDARY ENTRY":"FIRST MOVE";
+  if (SETUP.has(finding.stage)) return `${finding.ticker} · ${kind} SETUP`;
+  if (CONFIRMED.has(finding.stage)) return `${finding.ticker} · ${kind} CONFIRMED`;
   return `${finding.ticker} · ${finding.stage.replaceAll("_", " ")}`;
 }
 

@@ -128,6 +128,14 @@
 
 # Changelog
 
+## 6.8.2 — Opportunity timing contract
+
+- Separates initial detection time from confirmed notification-delivery time.
+- Classifies findings as `FIRST_MOVE`, `SECONDARY_ENTRY`, `LATE_INFORMATION_ONLY`, or `EVENT`.
+- Limits opportunity notifications and paper-trader entries to first moves and valid secondary entries.
+- Keeps late/extended detections available for analysis without presenting them as actionable alerts.
+- Shows actual delivery age in the dashboard and persists the classification with each finding.
+
 ## 6.6.3 - Late fresh-promotion suppression
 
 - Preserves the v6.6.2 optimized EARLY_SIGNAL / EARLY_RELEASE architecture unchanged.

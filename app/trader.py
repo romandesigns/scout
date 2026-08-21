@@ -15,6 +15,7 @@ import requests
 from .config import settings
 from .db import Store
 from .models import Finding
+from .opportunity import can_notify_opportunity
 
 log = logging.getLogger("scout.trader")
 CONFIRMED_STAGES = {"IGNITION", "BREAKOUT", "SURGE"}
@@ -74,6 +75,8 @@ class PaperTrader:
         return response.json() if response.content else {}
 
     async def on_finding(self, finding_id: int, finding: Finding) -> None:
+        if not can_notify_opportunity(finding):
+            return
         cfg = self.store.get_trader_settings()
         if not cfg["enabled"] or not self.configured or finding.stage not in CONFIRMED_STAGES:
             return

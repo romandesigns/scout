@@ -73,7 +73,7 @@ import {
   saveTraderSettings,
   testNotification,
 } from "@/lib/api";
-import { claimClientDecision, getNativeAutostartState, installNativeDeepLinkHandler, installNativeNotificationActionHandler, isInstalledPwa, queueNativeScoutNotification, sendNativeTestNotification, setNativeAutostart, showPwaForegroundNotification, webPushForegroundAllowed, webToastAllowed } from "@/lib/native";
+import { claimClientDecision, getNativeAutostartState, installNativeDeepLinkHandler, installNativeNotificationActionHandler, isInstalledPwa, opportunityClass, queueNativeScoutNotification, sendNativeTestNotification, setNativeAutostart, showPwaForegroundNotification, webPushForegroundAllowed, webToastAllowed } from "@/lib/native";
 import { toastManager, ScoutToastProvider } from "@/components/ui/toast";
 import { disableWebPush, enableWebPush, webPushState, type WebPushState } from "@/lib/web-push";
 import { getTwentyFourHourStocks, type TwentyFourHourStock } from "@/lib/twenty-four-hour";
@@ -420,11 +420,12 @@ function MomentumBadges({finding}:{finding:Finding}) {
 }
 
 function tickerDecision(finding: Finding) {
+  const classification=opportunityClass(finding);
   const momentum=momentumProfile(finding);
   const quality=(finding.quality_label||"DEVELOPING").toUpperCase();
   const urgency=(finding.urgency||"").toUpperCase();
   const actionable=["A","B"].includes((finding.actionable_rank||"").toUpperCase());
-  const late=momentum.state==="EXTENDED"||momentum.state==="LATE_RISK";
+  const late=classification==="LATE_INFORMATION_ONLY"||momentum.state==="EXTENDED"||momentum.state==="LATE_RISK";
   if(quality==="ILLIQUID")return {label:"AVOID FOR NOW",tone:"red",reason:"Trading is too thin for a dependable entry"};
   if(quality==="CHOPPY")return {label:"USE CAUTION",tone:"orange",reason:"Price action is unstable"};
   if(late)return {label:"DO NOT CHASE",tone:"orange",reason:"The move is already extended"};
@@ -450,6 +451,8 @@ function FindingRow({ finding, selected, onSelect }: { finding: Finding; selecte
   const momentum=momentumProfile(finding);
   const priority=urgency==="NOW"||finding.stage==="HALT_PRESSURE"||momentum.tier==="EXTREME";
   const decision=tickerDecision(finding);
+  const classification=opportunityClass(finding);
+  const classificationLabel=classification==="FIRST_MOVE"?"FIRST MOVE":classification==="SECONDARY_ENTRY"?"SECONDARY ENTRY":classification==="LATE_INFORMATION_ONLY"?"INFORMATION ONLY":"MARKET EVENT";
   const risks=(finding.rejection_reasons||[]).slice(0,2).map(readableRisk);
   return <><button className="market-row" data-selected={selected || undefined} data-priority={priority||undefined} onClick={onSelect} onContextMenu={event=>{event.preventDefault();setMenu({x:event.clientX,y:event.clientY});}}>
     <div className="flex items-center justify-between gap-2">
@@ -458,13 +461,13 @@ function FindingRow({ finding, selected, onSelect }: { finding: Finding; selecte
         <Badge data-tone={decision.tone}>{decision.label}</Badge>
         {finding.catalyst_headline&&<Badge data-tone="blue">NEWS</Badge>}
       </div>
-      <span className="scout-muted metric text-[10px]">{age(finding.detected_at)}</span>
+      <span className="scout-muted metric text-[10px]">{finding.notification_delivered_at?`notified ${age(finding.notification_delivered_at)}`:`detected ${age(finding.detected_at)}`}</span>
     </div>
     <div className="mt-1 flex items-end justify-between gap-3">
       <div><span className="metric text-[14px] font-semibold">{money(finding.price)}</span><span className="ml-2 metric text-[10px] text-[var(--green)]">{pct(finding.extension_pct)}</span></div>
       <span className="metric text-[10px] scout-muted">evidence {finding.score}/10</span>
     </div>
-    <div className="ticker-decision mt-1.5" data-tone={decision.tone}><b>{decision.reason}</b><span>{finding.stage.replaceAll("_"," ").toLowerCase()}</span></div>
+    <div className="ticker-decision mt-1.5" data-tone={decision.tone}><b>{decision.reason}</b><span>{classificationLabel} · {finding.stage.replaceAll("_"," ").toLowerCase()}</span></div>
     <div className="market-metrics mt-1.5">
       <span><b>5 sec</b> {pct(finding.change_5s_pct,1)}</span>
       <span><b>15 sec</b> {pct(finding.change_15s_pct,1)}</span>
@@ -1174,7 +1177,8 @@ export default function ScoutPage() {
             if (webPushForegroundAllowed(finding, prefsRef.current) && claimClientDecision(finding)) void showPwaForegroundNotification(finding);
           } else if (webToastAllowed(finding, prefsRef.current)) {
             if (claimClientDecision(finding)) {
-              const phase=["IGNITION","BREAKOUT","SURGE"].includes(finding.stage)?"MOMENTUM CONFIRMED":"BULLISH SETUP";
+              const kind=opportunityClass(finding)==="SECONDARY_ENTRY"?"SECONDARY ENTRY":"FIRST MOVE";
+              const phase=["IGNITION","BREAKOUT","SURGE"].includes(finding.stage)?`${kind} CONFIRMED`:`${kind} SETUP`;
               const trigger=finding.trigger_level??finding.breakout_level;
               toastManager.add({ title: `${finding.ticker} · ${phase}`, description: `${money(finding.price)}${trigger!=null?` · trigger ${money(trigger)}`:""}${finding.invalidation_level!=null?` · invalid below ${money(finding.invalidation_level)}`:""}`, timeout: 10000, data:{deepLink:`/?finding=${finding.id}&ticker=${encodeURIComponent(finding.ticker)}`} });
             }

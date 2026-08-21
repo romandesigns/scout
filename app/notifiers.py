@@ -16,6 +16,7 @@ import requests
 
 from .config import settings
 from .models import Finding
+from .opportunity import can_notify_opportunity, opportunity_class
 
 log = logging.getLogger("scout.notify")
 
@@ -216,6 +217,8 @@ def _allowed_platform_agnostic(f: Finding, prefs: dict[str, Any] | None) -> bool
     """
     if f.shadow_mode:
         return False
+    if not can_notify_opportunity(f):
+        return False
     if f.stage not in USER_NOTIFY_STAGES:
         return False
     if f.stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"} and f.quality_label != "CLEAN":
@@ -279,9 +282,10 @@ def _message(f: Finding) -> str:
     distance = ((trigger / f.price) - 1) * 100 if trigger and f.price > 0 else f.trigger_distance_pct
     structure = "above VWAP" if f.above_vwap else "VWAP not yet reclaimed"
     reason = f.notification_reason or ("; ".join(f.evidence[:2]) if f.evidence else "momentum and participation aligned")
+    classification = opportunity_class(f).replace("_", " ")
     if phase == "setup":
         lines = [
-            f"Price ${f.price:.4f} · {f.actionable_rank}-rank {f.quality_label.lower()} setup",
+            f"{classification} · Price ${f.price:.4f} · {f.actionable_rank}-rank {f.quality_label.lower()} setup",
             f"Trigger ${trigger:.4f} ({distance:+.2f}% away)" if trigger is not None and distance is not None else "Trigger is forming; open Scout for the live level",
             f"Invalid below ${f.invalidation_level:.4f}" if f.invalidation_level is not None else "Invalidation: loss of structure/VWAP",
             f"Why now: {reason}",
@@ -291,7 +295,7 @@ def _message(f: Finding) -> str:
     elif phase == "confirmed":
         gain = ((f.price / trigger) - 1) * 100 if trigger and trigger > 0 else None
         lines = [
-            f"Confirmed at ${f.price:.4f}" + (f" · {gain:+.2f}% through ${trigger:.4f}" if gain is not None else ""),
+            f"{classification} · Confirmed at ${f.price:.4f}" + (f" · {gain:+.2f}% through ${trigger:.4f}" if gain is not None else ""),
             f"Why confirmed: {reason}",
             f"Quality {f.quality_label.lower()} · {structure} · 30s RVOL {f.vol_ratio_30s:.1f}×",
             f"Invalid below ${f.invalidation_level:.4f}" if f.invalidation_level is not None else None,
@@ -307,10 +311,11 @@ def _message(f: Finding) -> str:
 
 def _user_title(f: Finding) -> str:
     phase = notification_phase(f)
+    kind = "SECONDARY ENTRY" if opportunity_class(f) == "SECONDARY_ENTRY" else "FIRST MOVE"
     if phase == "setup":
-        return f"⚡ {f.ticker} · BULLISH SETUP"
+        return f"⚡ {f.ticker} · {kind} SETUP"
     if phase == "confirmed":
-        return f"✅ {f.ticker} · MOMENTUM CONFIRMED"
+        return f"✅ {f.ticker} · {kind} CONFIRMED"
     return f"{f.ticker} · {f.stage.replace('_', ' ')}"
 
 

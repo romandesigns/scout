@@ -80,6 +80,8 @@ export type Finding = {
   hybrid_score?: number;
   hybrid_key?: string|null;
   notification_reason?: string|null;
+  notification_delivered_at?: number|null;
+  opportunity_class?: "FIRST_MOVE"|"SECONDARY_ENTRY"|"LATE_INFORMATION_ONLY"|"EVENT"|null;
   selection_context?: "finding"|"catalyst"|"gainer"|"halt"|"validation";
   selection_title?: string;
   selection_detail?: string;

@@ -72,6 +72,7 @@ FINDING_COLUMNS: list[tuple[str, str]] = [
     ("hybrid_score", "INTEGER"),
     ("hybrid_key", "TEXT"),
     ("notification_reason", "TEXT"),
+    ("notification_delivered_at", "INTEGER"),
 ]
 
 
@@ -497,6 +498,8 @@ class Store:
         }.get(stage, 0)
 
     def _upsert_attention_locked(self, finding_id: int, f: Finding) -> None:
+        if (f.candidate_profile or {}).get("opportunity_class") == "LATE_INFORMATION_ONLY":
+            return
         priority = self._attention_priority(f.stage)
         if priority <= 0 or (f.stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"} and f.quality_label != "CLEAN"):
             return
@@ -564,10 +567,16 @@ class Store:
 
     def record_delivery(self, finding_id: int, channel: str, status: str, detail: str | None = None, provider_id: str | None = None) -> int:
         with self.lock:
+            event_at = int(time.time())
             cur = self.db.execute(
                 "INSERT INTO notification_delivery_events(finding_id,channel,status,event_at,detail,provider_id) VALUES(?,?,?,?,?,?)",
-                (int(finding_id), channel[:32], status[:32], int(time.time()), (detail or "")[:1000], (provider_id or "")[:200]),
+                (int(finding_id), channel[:32], status[:32], event_at, (detail or "")[:1000], (provider_id or "")[:200]),
             )
+            if status == "provider_accepted":
+                self.db.execute(
+                    "UPDATE findings SET notification_delivered_at=COALESCE(notification_delivered_at,?) WHERE id=?",
+                    (event_at, int(finding_id)),
+                )
             self.db.commit()
             return int(cur.lastrowid)
 
@@ -664,6 +673,7 @@ class Store:
         except Exception:
             item["candidate_profile"] = {}
             item.pop("candidate_profile_json", None)
+        item["opportunity_class"] = item["candidate_profile"].get("opportunity_class")
         try:
             item["hybrid_sources"] = json.loads(item.pop("hybrid_sources_json") or "[]")
         except Exception:
@@ -712,7 +722,7 @@ class Store:
             "episode_id","reversal_phase","reversal_low","reversal_drawdown_pct","leg_context","ross_match","ross_score",
             "detection_timeframe_seconds","formation_start_at","formation_end_at","formation_low","formation_high","trigger_level","invalidation_level","halt_pressure_score","urgency","engine_version",
             "lifecycle_phase","shadow_mode","recipe_score","recipe_present_json","recipe_missing_json","trigger_distance_pct","base_extension_at_detection_pct","timeliness_label","precursor_finding_id",
-            "engine_source","hybrid_sources_json","hybrid_score","hybrid_key","notification_reason",
+            "engine_source","hybrid_sources_json","hybrid_score","hybrid_key","notification_reason","notification_delivered_at",
         ]
         sql = f"SELECT {','.join(keys)} FROM findings {clause} ORDER BY detected_at DESC LIMIT ?"
         params.append(limit)
@@ -732,7 +742,7 @@ class Store:
             "episode_id","reversal_phase","reversal_low","reversal_drawdown_pct","leg_context","ross_match","ross_score",
             "detection_timeframe_seconds","formation_start_at","formation_end_at","formation_low","formation_high","trigger_level","invalidation_level","halt_pressure_score","urgency","engine_version",
             "lifecycle_phase","shadow_mode","recipe_score","recipe_present_json","recipe_missing_json","trigger_distance_pct","base_extension_at_detection_pct","timeliness_label","precursor_finding_id",
-            "engine_source","hybrid_sources_json","hybrid_score","hybrid_key","notification_reason",
+            "engine_source","hybrid_sources_json","hybrid_score","hybrid_key","notification_reason","notification_delivered_at",
         ]
         with self.lock:
             row = self.db.execute(f"SELECT {','.join(keys)} FROM findings WHERE id=?", (int(finding_id),)).fetchone()
@@ -833,7 +843,7 @@ class Store:
             "episode_id","reversal_phase","reversal_low","reversal_drawdown_pct","leg_context","ross_match","ross_score",
             "detection_timeframe_seconds","formation_start_at","formation_end_at","formation_low","formation_high","trigger_level","invalidation_level","halt_pressure_score","urgency","engine_version",
             "lifecycle_phase","shadow_mode","recipe_score","recipe_present_json","recipe_missing_json","trigger_distance_pct","base_extension_at_detection_pct","timeliness_label","precursor_finding_id",
-            "engine_source","hybrid_sources_json","hybrid_score","hybrid_key","notification_reason",
+            "engine_source","hybrid_sources_json","hybrid_score","hybrid_key","notification_reason","notification_delivered_at",
         ]
         columns = ",".join(keys)
         sql = f"""
