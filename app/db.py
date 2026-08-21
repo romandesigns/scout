@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import threading
 import time
@@ -439,6 +440,59 @@ class Store:
         open_count = sum(1 for status, _ in rows if status in {"new", "accepted", "pending_new", "partially_filled", "filled"})
         wins = sum(1 for value in closed if value > 0)
         return {"total": len(rows), "open": open_count, "closed": len(closed), "wins": wins, "win_rate": round(wins / len(closed), 4) if closed else None, "realized_pl": round(sum(closed), 2)}
+
+    def paper_edge_validation(self, f: Finding, min_samples: int = 30) -> dict[str, Any]:
+        """Validate a like-for-like signal cohort using completed paper brackets.
+
+        Cohorts deliberately stay broad enough to accumulate evidence: lifecycle
+        stage, quality tier, and verified-catalyst presence. Results are expressed
+        in initial-risk units so different prices, sizes, and stop distances remain
+        comparable. A notification only earns `validated` after both expectancy and
+        a conservative Wilson win-rate bound clear the bracket break-even rate.
+        """
+        quality_tier = "exceptional" if int(f.quality_score or 0) >= 90 else "standard"
+        has_catalyst = bool(f.catalyst_headline and f.catalyst_url)
+        with self.lock:
+            rows = self.db.execute(
+                """
+                SELECT p.realized_pl,p.quantity,p.entry_price,p.stop_price,p.target_price,p.exit_reason
+                FROM paper_trades p JOIN findings x ON x.id=p.finding_id
+                WHERE p.status='closed' AND p.realized_pl IS NOT NULL AND x.stage=?
+                  AND (CASE WHEN COALESCE(x.quality_score,0)>=90 THEN 'exceptional' ELSE 'standard' END)=?
+                  AND (CASE WHEN x.catalyst_headline IS NOT NULL AND x.catalyst_url IS NOT NULL THEN 1 ELSE 0 END)=?
+                """,
+                (f.stage, quality_tier, 1 if has_catalyst else 0),
+            ).fetchall()
+        samples: list[tuple[float, bool, float]] = []
+        for realized, quantity, entry, stop, target, reason in rows:
+            risk = abs(float(entry or 0) - float(stop or 0)) * float(quantity or 0)
+            reward = abs(float(target or 0) - float(entry or 0)) * float(quantity or 0)
+            if risk <= 0:
+                continue
+            samples.append((float(realized) / risk, str(reason) == "target" or float(realized) > 0, reward / risk))
+        n = len(samples)
+        wins = sum(1 for _, won, _ in samples if won)
+        win_rate = wins / n if n else None
+        avg_r = sum(r for r, _, _ in samples) / n if n else None
+        avg_rr = sum(rr for _, _, rr in samples) / n if n else float(self.get_trader_settings()["risk_reward"])
+        break_even = 1 / (1 + avg_rr) if avg_rr > 0 else 1.0
+        wilson_low = None
+        if n:
+            z = 1.645  # one-sided 95% lower confidence bound
+            center = win_rate + z * z / (2 * n)
+            spread = z * math.sqrt((win_rate * (1 - win_rate) + z * z / (4 * n)) / n)
+            wilson_low = (center - spread) / (1 + z * z / n)
+        validated = bool(n >= min_samples and avg_r is not None and avg_r > 0.10 and wilson_low is not None and wilson_low > break_even)
+        return {
+            "status": "PROFIT_VALIDATED" if validated else "EVALUATING",
+            "validated": validated,
+            "cohort": f"{f.stage}:{quality_tier}:{'catalyst' if has_catalyst else 'no-catalyst'}",
+            "samples": n, "minimum_samples": min_samples, "wins": wins,
+            "win_rate": round(win_rate, 4) if win_rate is not None else None,
+            "wilson_lower": round(wilson_low, 4) if wilson_low is not None else None,
+            "break_even_rate": round(break_even, 4),
+            "average_r": round(avg_r, 4) if avg_r is not None else None,
+        }
 
     def recent_catalyst(self, ticker: str, max_age_minutes: int = 360):
         cutoff = int(time.time()) - max_age_minutes * 60

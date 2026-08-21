@@ -1,3 +1,16 @@
+## 6.8.7 — Forward profitability validation
+
+- Separate technical A-rank detection from profit-validated notification eligibility.
+- Keep paper execution as the unbiased exploration channel while suppressing momentum-entry
+  notifications until a matched cohort has at least 30 completed bracket outcomes, positive
+  average R, and a conservative win-rate bound above its actual break-even rate.
+- Normalize outcomes by initial risk and cohort them by stage, quality tier, and verified
+  catalyst presence so prices and position sizes remain comparable.
+- Mark unvalidated technical setups as `EVALUATING` and remove them from the Actionable Radar;
+  verified catalyst and market-status alerts remain informational and unaffected.
+- Enforce the same profitability gate in backend push/email/ntfy and all desktop/PWA/browser
+  foreground notification paths.
+
 ## 6.8.6 — Paper evaluation capacity
 
 - Replace Scout Trader's hidden three-position ceiling with a configurable evaluation

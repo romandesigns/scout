@@ -89,13 +89,13 @@ class MarketQualityTests(unittest.TestCase):
         )
         self.assertFalse(_allowed(finding, DEFAULT_NOTIFICATION_PREFERENCES, "android"))
 
-    def test_clean_price_signal_can_notify(self):
+    def test_clean_price_signal_can_notify_after_profit_validation(self):
         finding = Finding(
             ticker="TEST", stage="EARLY", detected_at=1_800_000_000, price=2, score=8,
             vol_ratio_15s=8, vol_ratio_30s=6, change_60s_pct=2, extension_pct=1,
             ema9=2, ema21=1.99, ema9_slope=.01, vwap=1.98, above_vwap=True,
             quiet_break=True, evidence=["orderly participation"], quality_label="CLEAN", quality_score=82,
-            actionable_rank="A",
+            actionable_rank="A", candidate_profile={"edge_validation": {"validated": True}},
         )
         self.assertTrue(_allowed(finding, DEFAULT_NOTIFICATION_PREFERENCES, "android"))
 

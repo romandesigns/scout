@@ -48,7 +48,7 @@ export type Finding = {
   volume_rate_per_minute?: number | null;
   float_shares?: number | null;
   float_turnover?: number | null;
-  candidate_profile?: { velocity?:number|null; participation?:number|null; structure?:number|null; catalyst?:number|null; quality?:number|null; supply?:number|null; promotion_trace?: { gates?: Record<string, boolean>; blockers?: string[]; next_blocker?: string | null } };
+  candidate_profile?: { velocity?:number|null; participation?:number|null; structure?:number|null; catalyst?:number|null; quality?:number|null; supply?:number|null; promotion_trace?: { gates?: Record<string, boolean>; blockers?: string[]; next_blocker?: string | null }; edge_validation?: { status?:"PROFIT_VALIDATED"|"EVALUATING"; validated?:boolean; cohort?:string; samples?:number; minimum_samples?:number; wins?:number; win_rate?:number|null; wilson_lower?:number|null; break_even_rate?:number; average_r?:number|null } };
   episode_id?: number;
   reversal_phase?: string | null;
   reversal_low?: number | null;

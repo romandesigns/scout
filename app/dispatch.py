@@ -194,6 +194,8 @@ class Dispatcher:
         # Persist + push first. Rendering/email must never block the first alert.
         f.candidate_profile = dict(f.candidate_profile or {})
         f.candidate_profile["opportunity_class"] = opportunity_class(f)
+        if f.stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "HALT_WATCH", "HALT_PRESSURE", "RESUME"}:
+            f.candidate_profile["edge_validation"] = await asyncio.to_thread(self.store.paper_edge_validation, f)
         finding_id = await asyncio.to_thread(self.store.save_finding, f)
         f.finding_id = finding_id
         if self.finding_listener:

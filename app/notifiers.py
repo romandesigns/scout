@@ -221,6 +221,11 @@ def _allowed_platform_agnostic(f: Finding, prefs: dict[str, Any] | None) -> bool
         return False
     if f.stage not in USER_NOTIFY_STAGES:
         return False
+    # Market-status and verified-catalyst events are informational. Momentum
+    # entry notifications, however, must be backed by a profitable completed
+    # paper cohort; clean/A-rank alone is not represented as a trading edge.
+    if f.stage not in SPECIAL_STAGES and not bool((f.candidate_profile or {}).get("edge_validation", {}).get("validated")):
+        return False
     if f.stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"} and f.quality_label != "CLEAN":
         return False
     if not prefs:

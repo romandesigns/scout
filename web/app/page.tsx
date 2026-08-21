@@ -425,10 +425,12 @@ function tickerDecision(finding: Finding) {
   const quality=(finding.quality_label||"DEVELOPING").toUpperCase();
   const urgency=(finding.urgency||"").toUpperCase();
   const actionable=(finding.actionable_rank||"").toUpperCase()==="A";
+  const edge=finding.candidate_profile?.edge_validation;
   const late=classification==="LATE_INFORMATION_ONLY"||momentum.state==="EXTENDED"||momentum.state==="LATE_RISK";
   if(quality==="ILLIQUID")return {label:"AVOID FOR NOW",tone:"red",reason:"Trading is too thin for a dependable entry"};
   if(quality==="CHOPPY")return {label:"USE CAUTION",tone:"orange",reason:"Price action is unstable"};
   if(late)return {label:"DO NOT CHASE",tone:"orange",reason:"The move is already extended"};
+  if(actionable&&!edge?.validated)return {label:"EVALUATING",tone:"blue",reason:`Technical setup only · profitability evidence ${edge?.samples??0}/${edge?.minimum_samples??30}`};
   if(actionable&&(urgency==="NOW"||momentum.tier==="EXTREME"))return {label:"READY NOW",tone:"green",reason:"Bullish momentum and entry conditions align"};
   if(actionable||momentum.tier==="STRONG")return {label:"ENTRY FORMING",tone:"green",reason:"Momentum is strengthening; watch the trigger"};
   if(["AWAKENING","PRE_IGNITION","EARLY","ARMED","REARM"].includes(finding.stage))return {label:"BUILDING",tone:"blue",reason:"Early bullish activity is developing"};
@@ -546,7 +548,8 @@ function MarketPulse({ findings, gainers, halts, selectedId, onSelect }: { findi
   const radarBuckets=useMemo(()=>{
     const now=Date.now()/1000;
     const developingStages=new Set(["ACTIVITY_WATCH","PRE_IGNITION","AWAKENING","FIRST_LEG_WATCH","REVERSAL_WATCH","CATALYST_WATCH"]);
-    const isDeveloping=(f:Finding)=>Boolean(f.shadow_mode)||developingStages.has(f.stage)||f.quality_label!=="CLEAN";
+    const specialStages=new Set(["CATALYST","CATALYST_WATCH","CATALYST_ACTIVE","HALT","HALT_WATCH","HALT_PRESSURE","RESUME"]);
+    const isDeveloping=(f:Finding)=>Boolean(f.shadow_mode)||developingStages.has(f.stage)||f.quality_label!=="CLEAN"||(!specialStages.has(f.stage)&&!f.candidate_profile?.edge_validation?.validated);
     const rankValue=(value?:string)=>value==="A"?3:value==="B"?2:1;
     const stageValue=(f:Finding)=>{
       const weights:Record<string,number>={IGNITION:8,BREAKOUT:7,SURGE:6,EARLY:5,FIRST_LEG:4,AWAKENING:3,PRE_IGNITION:2,ACTIVITY_WATCH:1};
