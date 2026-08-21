@@ -324,6 +324,15 @@ def _user_title(f: Finding) -> str:
     return f"{f.ticker} · {f.stage.replace('_', ' ')}"
 
 
+def _decision_chart_instruction(f: Finding) -> str | None:
+    chart = (f.candidate_profile or {}).get("decision_chart") or {}
+    if chart.get("instruction"):
+        return str(chart["instruction"])
+    if (f.candidate_profile or {}).get("multi_timeframe", {}).get("qualified"):
+        return "Open 1m · confirm on 30s · 5m context aligned"
+    return None
+
+
 def send_ntfy(f: Finding, prefs: dict[str, Any] | None = None) -> None:
     if not _allowed(f, prefs, "android"):
         return
@@ -366,7 +375,7 @@ def send_ntfy(f: Finding, prefs: dict[str, Any] | None = None) -> None:
     payload = {
         "topic": settings.ntfy_topic,
         "title": _user_title(f),
-        "message": _message(f),
+        "message": "\n".join(x for x in (_message(f), _decision_chart_instruction(f)) if x),
         "priority": priority,
         "tags": (
             ["rotating_light", "chart_with_upwards_trend"]
@@ -376,7 +385,7 @@ def send_ntfy(f: Finding, prefs: dict[str, Any] | None = None) -> None:
     }
 
     if settings.scout_client_base_url and f.finding_id:
-        payload["click"] = f"{settings.scout_client_base_url}/?finding={f.finding_id}&ticker={f.ticker}"
+        payload["click"] = f"{settings.scout_client_base_url}/?finding={f.finding_id}&ticker={f.ticker}&timeframe=60"
     elif f.catalyst_url:
         payload["click"] = f.catalyst_url
 
@@ -418,12 +427,12 @@ def _web_push_payload(f: Finding) -> dict[str, Any]:
     critical = _is_critical(f) or f.stage == "CATALYST_ACTIVE"
     return {
         "title": _user_title(f),
-        "body": _message(f),
+        "body": " · ".join(x for x in (_message(f).replace("\n", " · "), _decision_chart_instruction(f)) if x),
         "ticker": f.ticker,
         "findingId": f.finding_id,
         "stage": f.stage,
         "urgency": f.urgency,
-        "url": f"/?finding={f.finding_id}&ticker={f.ticker}",
+        "url": f"/?finding={f.finding_id}&ticker={f.ticker}&timeframe=60",
         "tag": f"scout-{f.ticker}" if settings.scout_client_base_url else f"scout-{f.ticker}-{f.stage}",
         "renotify": critical,
         "requireInteraction": critical,

@@ -140,6 +140,7 @@ function decisionBody(finding: Finding) {
   if (SETUP.has(finding.stage)) {
     const distance = trigger && finding.price ? (trigger / finding.price - 1) * 100 : finding.trigger_distance_pct;
     return [
+      "OPEN 1m · confirm 30s · context 5m",
       price,
       trigger != null ? `trigger $${trigger.toFixed(4)}${distance != null ? ` (${distance >= 0 ? "+" : ""}${distance.toFixed(2)}%)` : ""}` : "trigger forming",
       invalidation != null ? `invalid below $${invalidation.toFixed(4)}` : "invalid on structure/VWAP loss",
@@ -148,6 +149,7 @@ function decisionBody(finding: Finding) {
     ].filter(Boolean).join(" · ");
   }
   return [
+    "OPEN 1m · confirm 30s · context 5m",
     `confirmed ${price}`,
     trigger != null ? `through $${trigger.toFixed(4)}` : "momentum confirmed",
     invalidation != null ? `invalid below $${invalidation.toFixed(4)}` : "",
@@ -234,7 +236,7 @@ export async function sendNativeScoutNotification(finding: Finding, prefs: Notif
       extra: {
         finding: String(finding.id),
         ticker: finding.ticker,
-        deepLink: `stockhunter-scout://finding?finding=${finding.id}&ticker=${encodeURIComponent(finding.ticker)}`,
+        deepLink: `stockhunter-scout://finding?finding=${finding.id}&ticker=${encodeURIComponent(finding.ticker)}&timeframe=60`,
       },
     });
     return true;
@@ -267,7 +269,7 @@ export async function showPwaForegroundNotification(finding: Finding) {
       icon: "/icons/scout-192.png", badge: "/icons/scout-192.png",
       tag: `scout-${finding.ticker}`, renotify: critical,
       requireInteraction: critical, vibrate: critical ? [180, 80, 180] : [120],
-      data: { url: `/?finding=${finding.id}&ticker=${encodeURIComponent(finding.ticker)}` },
+      data: { url: `/?finding=${finding.id}&ticker=${encodeURIComponent(finding.ticker)}&timeframe=60` },
     } as NotificationOptions & { renotify?: boolean; vibrate?: number[] };
     await registration.showNotification(decisionTitle(finding), options);
     return true;

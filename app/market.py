@@ -1778,6 +1778,7 @@ class MarketWatcher:
             "quality": quality_score,
             "supply": None,
             "multi_timeframe": multi_timeframe,
+            "decision_chart": {"primary_seconds": 60, "trigger_seconds": 30, "context_seconds": 300, "instruction": "Open 1m · confirm on 30s · 5m context aligned"},
         }
 
         # First-leg context is intentionally independent of the later breakout
