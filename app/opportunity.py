@@ -34,6 +34,9 @@ def is_group_a(f: Finding, *, confirmed_only: bool = False) -> bool:
         return False
     if str(f.quality_label or "").upper() != "CLEAN":
         return False
+    multi_timeframe = (f.candidate_profile or {}).get("multi_timeframe") or {}
+    if multi_timeframe and multi_timeframe.get("qualified") is not True:
+        return False
     if opportunity_class(f) not in {"FIRST_MOVE", "SECONDARY_ENTRY"}:
         return False
     if confirmed_only and f.stage not in {"IGNITION", "BREAKOUT", "SURGE"}:

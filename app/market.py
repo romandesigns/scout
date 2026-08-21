@@ -336,6 +336,28 @@ def build_promotion_trace(
     return trace
 
 
+def evaluate_multitimeframe_structure(
+    *, five_minute_samples: int, five_minute_change_pct: float,
+    one_minute_change_pct: float, one_minute_higher_low_ratio: float,
+    change_30s_pct: float, change_15s_pct: float, change_5s_pct: float,
+    above_vwap: bool, ema_up: bool, ema_bull: bool,
+    trades_30s: int, dollar_volume_30s: float,
+) -> dict:
+    """5m context -> 1m setup -> 30s confirmation; faster tape only vetoes."""
+    five_minute_context = bool(five_minute_samples >= 12 and (above_vwap or ema_bull) and (five_minute_change_pct >= 0.0 or ema_up))
+    one_minute_structure = bool(one_minute_change_pct >= 0.0 and one_minute_higher_low_ratio >= 0.5 and (ema_up or ema_bull))
+    thirty_second_confirmation = bool(change_30s_pct >= 0.0 and trades_30s >= settings.min_30s_trades and dollar_volume_30s >= settings.min_30s_dollar_volume)
+    fast_tape_veto = bool(change_5s_pct < -0.35 or change_15s_pct < -0.50)
+    gates = {"five_minute_context": five_minute_context, "one_minute_structure": one_minute_structure, "thirty_second_confirmation": thirty_second_confirmation, "fast_tape_clear": not fast_tape_veto}
+    blockers = [name for name, passed in gates.items() if not passed]
+    return {
+        "qualified": not blockers, "gates": gates, "blockers": blockers,
+        "five_minute_samples": int(five_minute_samples), "five_minute_change_pct": round(float(five_minute_change_pct), 4),
+        "one_minute_change_pct": round(float(one_minute_change_pct), 4), "one_minute_higher_low_ratio": round(float(one_minute_higher_low_ratio), 4),
+        "change_30s_pct": round(float(change_30s_pct), 4), "fast_tape_veto": fast_tape_veto,
+    }
+
+
 
 def evaluate_early_continuation_quality(
     *,
@@ -719,6 +741,10 @@ class MarketWatcher:
         actionable = bool(
             metrics.get("full_warmup")
             and metrics.get("quality_label") == "CLEAN"
+            and (
+                not (metrics.get("candidate_profile") or {}).get("multi_timeframe")
+                or bool((metrics.get("candidate_profile") or {}).get("multi_timeframe", {}).get("qualified"))
+            )
             and recipe_score >= 7
             and float(metrics.get("vol15") or 0) >= settings.hybrid_awakening_min_vol_ratio
             and (float(metrics.get("change15") or 0) >= settings.hybrid_awakening_min_change_15s_pct or float(metrics.get("change5") or 0) > 0)
@@ -1646,6 +1672,18 @@ class MarketWatcher:
             quality_label = "CLEAN"
         else:
             quality_label = "DEVELOPING"
+        structure_rows = (closed + [s.current])[-20:]
+        one_minute_rows = structure_rows[-4:]
+        five_minute_change_pct = pct_change(structure_rows[0].open, price) if structure_rows else 0.0
+        one_minute_change_pct = pct_change(one_minute_rows[0].open, price) if one_minute_rows else 0.0
+        one_minute_pairs = list(zip(one_minute_rows, one_minute_rows[1:]))
+        one_minute_higher_low_ratio = (sum(1 for left, right in one_minute_pairs if right.low >= left.low * 0.998) / len(one_minute_pairs) if one_minute_pairs else 0.0)
+        multi_timeframe = evaluate_multitimeframe_structure(
+            five_minute_samples=len(structure_rows), five_minute_change_pct=five_minute_change_pct,
+            one_minute_change_pct=one_minute_change_pct, one_minute_higher_low_ratio=one_minute_higher_low_ratio,
+            change_30s_pct=change30, change_15s_pct=change15, change_5s_pct=change5,
+            above_vwap=above_vwap, ema_up=ema_up, ema_bull=ema_bull, trades_30s=trades30, dollar_volume_30s=dollar30,
+        )
         actionable_rank = "B" if quality_label == "CLEAN" else "C"
 
         score = 0
@@ -1697,7 +1735,7 @@ class MarketWatcher:
             evidence.append("volume accelerating")
         if dollar30 >= settings.min_30s_dollar_volume and trades30 >= settings.min_30s_trades:
             evidence.append(f"30s participation ${dollar30:,.0f} across {trades30} trades")
-        if quality_label == "CLEAN" and score >= settings.ignition_score:
+        if quality_label == "CLEAN" and score >= settings.ignition_score and multi_timeframe["qualified"]:
             actionable_rank = "A"
 
         meta = self.universe.metadata.get(s.symbol, {})
@@ -1739,6 +1777,7 @@ class MarketWatcher:
             "catalyst": 0,
             "quality": quality_score,
             "supply": None,
+            "multi_timeframe": multi_timeframe,
         }
 
         # First-leg context is intentionally independent of the later breakout

@@ -540,7 +540,7 @@ function HaltRows({ halts, findings, onSelect }: { halts:Halt[]; findings:Findin
 }
 
 function MarketPulse({ findings, gainers, halts, selectedId, onSelect }: { findings: Finding[]; gainers: Gainer[]; halts: Halt[]; selectedId?: number; onSelect: (f: Finding)=>void }) {
-  const [scope,setScope]=useState<"actionable"|"proven"|"developing"|"all">("actionable");
+  const [scope,setScope]=useState<"actionable"|"developing"|"all">("actionable");
 
   // Radar is a live decision surface, not historical storage. Old persisted
   // lifecycle records remain available in Inspector/history, but they should
@@ -553,6 +553,7 @@ function MarketPulse({ findings, gainers, halts, selectedId, onSelect }: { findi
     const isTradeGrade=(f:Finding)=>!f.shadow_mode
       && (f.actionable_rank||"").toUpperCase()==="A"
       && (f.quality_label||"").toUpperCase()==="CLEAN"
+      && f.candidate_profile?.multi_timeframe?.qualified===true
       && ["FIRST_MOVE","SECONDARY_ENTRY"].includes(opportunityClass(f));
     const rankValue=(value?:string)=>value==="A"?3:value==="B"?2:1;
     const stageValue=(f:Finding)=>{
@@ -576,18 +577,17 @@ function MarketPulse({ findings, gainers, halts, selectedId, onSelect }: { findi
       return (b.detected_at||0)-(a.detected_at||0);
     });
     const actionable=sortRows(findings.filter(f=>isTradeGrade(f)&&withinLiveWindow(f,false)));
-    const proven=sortRows(actionable.filter(f=>Boolean(f.candidate_profile?.edge_validation?.validated)));
     const developing=sortRows(findings.filter(f=>!isTradeGrade(f)&&withinLiveWindow(f,true)));
     const all=sortRows([...actionable,...developing]);
-    return {actionable,proven,developing,all};
+    return {actionable,developing,all};
   },[findings]);
 
   const visibleFindings=radarBuckets[scope];
   return <div className="flex h-full min-h-0 flex-col">
     <PanelTitle icon={<IconActivity size={14}/>} title="RADAR" actions={<IconButton label="Radar filters"><IconAdjustmentsFilled size={14}/></IconButton>}/>
-    <div className="radar-scope">{(["actionable","proven","developing","all"] as const).map(value=><button key={value} data-active={scope===value||undefined} onClick={()=>setScope(value)}><span>{value}</span><span className="radar-scope-count" aria-label={`${radarBuckets[value].length} ${value}`}>{radarBuckets[value].length}</span></button>)}</div>
+    <div className="radar-scope">{(["actionable","developing","all"] as const).map(value=><button key={value} data-active={scope===value||undefined} onClick={()=>setScope(value)}><span>{value}</span><span className="radar-scope-count" aria-label={`${radarBuckets[value].length} ${value}`}>{radarBuckets[value].length}</span></button>)}</div>
     <div className="min-h-0 flex-1 overflow-y-auto">
-      {visibleFindings.length ? visibleFindings.map(f => <FindingRow key={f.ticker} finding={f} selected={selectedId===f.id} onSelect={()=>onSelect(f)}/>) : <EmptyPane text={scope==="actionable"?"No fresh trade-grade setups":scope==="proven"?"No profit-validated setups yet":"No fresh candidates in this view"}/>}
+      {visibleFindings.length ? visibleFindings.map(f => <FindingRow key={f.ticker} finding={f} selected={selectedId===f.id} onSelect={()=>onSelect(f)}/>) : <EmptyPane text={scope==="actionable"?"No fresh trade-grade setups":"No fresh candidates in this view"}/>}
     </div>
   </div>;
 }
