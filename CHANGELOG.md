@@ -1,3 +1,12 @@
+## 6.8.6 — Paper evaluation capacity
+
+- Replace Scout Trader's hidden three-position ceiling with a configurable evaluation
+  capacity of up to 100 concurrent paper positions.
+- Migrate the legacy three-position setting to 100 positions and a $250 daily paper-loss
+  guard so confirmed clean A-rank episodes can be sampled throughout the session.
+- Expose paper trade size and evaluation capacity in the dashboard and show open trades
+  against the active capacity.
+
 ## 6.7.4
 
 ## 6.8.0

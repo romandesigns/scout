@@ -361,19 +361,25 @@ class Store:
     def get_trader_settings(self) -> dict[str, Any]:
         defaults = {
             "enabled": False, "risk_reward": 3.0, "position_notional": 100.0,
-            "max_positions": 3, "daily_loss_limit": 25.0, "max_stop_pct": 3.0,
+            "max_positions": 100, "daily_loss_limit": 250.0, "max_stop_pct": 3.0,
         }
         with self.lock:
             row = self.db.execute("SELECT value_json FROM trader_settings WHERE key='paper'").fetchone()
         if not row:
             return defaults
         try:
-            value = {**defaults, **json.loads(row[0])}
+            stored = json.loads(row[0])
+            # v1 shipped a hidden three-position ceiling. It was not a user
+            # selection, so migrate it to evaluation capacity on first read.
+            if not stored.get("evaluation_capacity_v2"):
+                stored["max_positions"] = defaults["max_positions"]
+                stored["daily_loss_limit"] = defaults["daily_loss_limit"]
+            value = {**defaults, **stored}
             return {
                 "enabled": bool(value["enabled"]),
                 "risk_reward": max(1.0, min(10.0, float(value["risk_reward"]))),
                 "position_notional": max(10.0, min(10000.0, float(value["position_notional"]))),
-                "max_positions": max(1, min(20, int(value["max_positions"]))),
+                "max_positions": max(1, min(100, int(value["max_positions"]))),
                 "daily_loss_limit": max(1.0, min(10000.0, float(value["daily_loss_limit"]))),
                 "max_stop_pct": max(0.25, min(10.0, float(value["max_stop_pct"]))),
             }
@@ -384,10 +390,11 @@ class Store:
         current = self.get_trader_settings()
         merged = {**current, **value}
         normalized = {
+            "evaluation_capacity_v2": True,
             "enabled": bool(merged["enabled"]),
             "risk_reward": round(max(1.0, min(10.0, float(merged["risk_reward"]))), 2),
             "position_notional": round(max(10.0, min(10000.0, float(merged["position_notional"]))), 2),
-            "max_positions": max(1, min(20, int(merged["max_positions"]))),
+            "max_positions": max(1, min(100, int(merged["max_positions"]))),
             "daily_loss_limit": round(max(1.0, min(10000.0, float(merged["daily_loss_limit"]))), 2),
             "max_stop_pct": round(max(0.25, min(10.0, float(merged["max_stop_pct"]))), 2),
         }

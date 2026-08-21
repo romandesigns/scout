@@ -59,7 +59,14 @@ def test_default_is_disabled_with_three_to_one_reward(store):
         value = trader.status()
     assert value["enabled"] is False
     assert value["risk_reward"] == 3.0
+    assert value["max_positions"] == 100
     assert value["mode"] == "paper"
+
+
+def test_evaluation_capacity_accepts_up_to_one_hundred_positions(store):
+    value = store.set_trader_settings({"max_positions": 100})
+    assert value["max_positions"] == 100
+    assert store.set_trader_settings({"max_positions": 101})["max_positions"] == 100
 
 
 def test_enable_validates_active_paper_account(store):
