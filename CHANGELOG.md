@@ -128,6 +128,13 @@
 
 # Changelog
 
+## 6.8.5 — Alpaca bracket execution repair
+
+- Normalizes stop and target prices to Alpaca's accepted $0.01/$0.0001 price increments.
+- Enforces the required one-cent long stop buffer before submitting bracket orders.
+- Uses decimal arithmetic for exact risk/reward geometry at price-tick boundaries.
+- Persists Alpaca HTTP status, rejection body, and attempted payload for failed paper orders.
+
 ## 6.8.4 — Group A API parity
 
 - Applies the complete Group A contract to actionable API queries, excluding shadow, non-clean, late, and extended historical Rank A rows.

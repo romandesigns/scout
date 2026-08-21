@@ -11,7 +11,7 @@ import pytest
 from app.config import settings
 from app.db import Store
 from app.models import Finding
-from app.trader import PaperTrader
+from app.trader import PaperTrader, _price_text, _round_order_price
 
 
 def confirmed(**overrides) -> Finding:
@@ -98,6 +98,42 @@ def test_confirmed_signal_submits_three_r_bracket_once(store):
     rows = store.list_paper_trades()
     assert len(rows) == 1
     assert rows[0]["status"] == "accepted"
+
+
+def test_order_prices_follow_alpaca_tick_rules_and_stop_buffer(store):
+    assert _round_order_price(3.1625, upward=False) == 3.16
+    assert _round_order_price(3.2194, upward=True) == 3.22
+    assert _price_text(3.22) == "3.22"
+    assert _round_order_price(0.93219, upward=False) == 0.9321
+    assert _round_order_price(0.95781, upward=True) == 0.9579
+    assert _price_text(0.9321) == "0.9321"
+
+    with trader_settings():
+        trader = PaperTrader(store)
+        cfg = store.set_trader_settings({"enabled": True, "risk_reward": 3})
+        with patch.object(trader, "_request", side_effect=[
+            {"status": "active", "tradable": True},
+            {"id": "paper-order-2", "status": "accepted"},
+        ]) as request:
+            trader._submit_confirmed(43, confirmed(price=2.0, invalidation_level=1.995, hybrid_key="BUFFER:1"), cfg)
+    payload = request.call_args_list[-1].kwargs["json"]
+    assert payload["stop_loss"]["stop_price"] == "1.99"
+    assert payload["take_profit"]["limit_price"] == "2.03"
+
+
+def test_alpaca_rejection_body_is_persisted(store):
+    with trader_settings():
+        trader = PaperTrader(store)
+        cfg = store.set_trader_settings({"enabled": True})
+        with patch.object(trader, "_request", side_effect=[
+            {"status": "active", "tradable": True},
+            RuntimeError('Alpaca 422: {"code":42210000,"message":"invalid stop_price"}'),
+        ]):
+            with pytest.raises(RuntimeError, match="invalid stop_price"):
+                trader._submit_confirmed(44, confirmed(hybrid_key="REJECT:1"), cfg)
+    row = store.list_paper_trades()[0]
+    assert row["status"] == "submit_failed"
+    assert row["exit_reason"] == "alpaca_rejected"
 
 
 def test_only_clean_a_rank_confirmations_are_eligible(store):

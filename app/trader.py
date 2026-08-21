@@ -6,6 +6,7 @@ import logging
 import math
 import time
 from datetime import datetime
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -19,6 +20,22 @@ from .opportunity import is_group_a
 
 log = logging.getLogger("scout.trader")
 ACTIVE_ORDER_STATES = {"new", "accepted", "pending_new", "partially_filled", "filled"}
+
+
+def _price_tick(price: float) -> Decimal:
+    return Decimal("0.0001") if Decimal(str(price)) < Decimal("1") else Decimal("0.01")
+
+
+def _round_order_price(price: float, *, upward: bool) -> float:
+    value = Decimal(str(price))
+    tick = _price_tick(price)
+    rounding = ROUND_CEILING if upward else ROUND_FLOOR
+    return float((value / tick).to_integral_value(rounding=rounding) * tick)
+
+
+def _price_text(price: float) -> str:
+    places = 4 if price < 1 else 2
+    return f"{price:.{places}f}"
 
 
 class PaperTrader:
@@ -70,7 +87,12 @@ class PaperTrader:
         if not self.paper_safe:
             raise RuntimeError("paper trader refused a non-paper Alpaca endpoint")
         response = requests.request(method, self.base + path, headers=self.headers, timeout=10, **kwargs)
-        response.raise_for_status()
+        if not response.ok:
+            try:
+                detail = response.json()
+            except Exception:
+                detail = {"message": response.text[:1000]}
+            raise RuntimeError(f"Alpaca {response.status_code}: {json.dumps(detail, separators=(',', ':'))}")
         return response.json() if response.content else {}
 
     async def on_finding(self, finding_id: int, finding: Finding) -> None:
@@ -106,11 +128,19 @@ class PaperTrader:
         signal = round(float(finding.price), 4)
         floor_stop = signal * (1 - cfg["max_stop_pct"] / 100)
         structural = float(finding.invalidation_level) if finding.invalidation_level and 0 < finding.invalidation_level < signal else floor_stop
-        stop = round(max(floor_stop, structural), 4)
-        risk = signal - stop
-        if risk <= 0:
+        # Alpaca advanced orders require a sell stop at least $0.01 below the
+        # current base price. Cap the structural stop accordingly, then round
+        # down to the security's accepted price increment.
+        stop_ceiling = signal - 0.01
+        stop = _round_order_price(min(max(floor_stop, structural), stop_ceiling), upward=False)
+        signal_decimal = Decimal(str(signal))
+        stop_decimal = Decimal(str(stop))
+        risk_decimal = signal_decimal - stop_decimal
+        if risk_decimal <= 0:
             raise RuntimeError("invalid paper trade risk geometry")
-        target = round(signal + risk * cfg["risk_reward"], 4)
+        target = _round_order_price(
+            float(signal_decimal + risk_decimal * Decimal(str(cfg["risk_reward"]))), upward=True
+        )
         quantity = max(1, math.floor(cfg["position_notional"] / signal))
         pending = {
             "episode_key": episode, "finding_id": finding_id, "ticker": finding.ticker,
@@ -123,12 +153,15 @@ class PaperTrader:
         payload = {
             "symbol": finding.ticker, "qty": str(quantity), "side": "buy", "type": "market",
             "time_in_force": "day", "order_class": "bracket", "client_order_id": client_id,
-            "take_profit": {"limit_price": str(target)}, "stop_loss": {"stop_price": str(stop)},
+            "take_profit": {"limit_price": _price_text(target)}, "stop_loss": {"stop_price": _price_text(stop)},
         }
         try:
             order = self._request("POST", "/v2/orders", json=payload)
-        except Exception:
-            self.store.update_paper_trade(client_id, status="submit_failed")
+        except Exception as exc:
+            self.store.update_paper_trade(
+                client_id, status="submit_failed", exit_reason="alpaca_rejected",
+                raw_json=json.dumps({"error": str(exc), "payload": payload}, separators=(",", ":")),
+            )
             raise
         self.store.update_paper_trade(client_id, alpaca_order_id=order.get("id"), status=order.get("status", "accepted"), raw_json=json.dumps(order))
         self.last_order_at = int(time.time())
