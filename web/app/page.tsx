@@ -540,16 +540,20 @@ function HaltRows({ halts, findings, onSelect }: { halts:Halt[]; findings:Findin
 }
 
 function MarketPulse({ findings, gainers, halts, selectedId, onSelect }: { findings: Finding[]; gainers: Gainer[]; halts: Halt[]; selectedId?: number; onSelect: (f: Finding)=>void }) {
-  const [scope,setScope]=useState<"actionable"|"developing"|"all">("actionable");
+  const [scope,setScope]=useState<"actionable"|"proven"|"developing"|"all">("actionable");
 
   // Radar is a live decision surface, not historical storage. Old persisted
   // lifecycle records remain available in Inspector/history, but they should
   // not outrank fresh opportunities in the active radar.
   const radarBuckets=useMemo(()=>{
     const now=Date.now()/1000;
-    const developingStages=new Set(["ACTIVITY_WATCH","PRE_IGNITION","AWAKENING","FIRST_LEG_WATCH","REVERSAL_WATCH","CATALYST_WATCH"]);
-    const specialStages=new Set(["CATALYST","CATALYST_WATCH","CATALYST_ACTIVE","HALT","HALT_WATCH","HALT_PRESSURE","RESUME"]);
-    const isDeveloping=(f:Finding)=>Boolean(f.shadow_mode)||developingStages.has(f.stage)||f.quality_label!=="CLEAN"||(!specialStages.has(f.stage)&&!f.candidate_profile?.edge_validation?.validated);
+    // Actionability describes the setup in front of the user. Profit validation
+    // describes the historical evidence behind that setup. They are deliberately
+    // independent: an unvalidated Group-A setup remains visible for paper evaluation.
+    const isTradeGrade=(f:Finding)=>!f.shadow_mode
+      && (f.actionable_rank||"").toUpperCase()==="A"
+      && (f.quality_label||"").toUpperCase()==="CLEAN"
+      && ["FIRST_MOVE","SECONDARY_ENTRY"].includes(opportunityClass(f));
     const rankValue=(value?:string)=>value==="A"?3:value==="B"?2:1;
     const stageValue=(f:Finding)=>{
       const weights:Record<string,number>={IGNITION:8,BREAKOUT:7,SURGE:6,EARLY:5,FIRST_LEG:4,AWAKENING:3,PRE_IGNITION:2,ACTIVITY_WATCH:1};
@@ -571,23 +575,24 @@ function MarketPulse({ findings, gainers, halts, selectedId, onSelect }: { findi
       // For otherwise comparable rows, freshest detection wins.
       return (b.detected_at||0)-(a.detected_at||0);
     });
-    const actionable=sortRows(findings.filter(f=>!isDeveloping(f)&&withinLiveWindow(f,false)));
-    const developing=sortRows(findings.filter(f=>isDeveloping(f)&&withinLiveWindow(f,true)));
+    const actionable=sortRows(findings.filter(f=>isTradeGrade(f)&&withinLiveWindow(f,false)));
+    const proven=sortRows(actionable.filter(f=>Boolean(f.candidate_profile?.edge_validation?.validated)));
+    const developing=sortRows(findings.filter(f=>!isTradeGrade(f)&&withinLiveWindow(f,true)));
     const all=sortRows([...actionable,...developing]);
-    return {actionable,developing,all};
+    return {actionable,proven,developing,all};
   },[findings]);
 
   const visibleFindings=radarBuckets[scope];
   return <div className="flex h-full min-h-0 flex-col">
     <PanelTitle icon={<IconActivity size={14}/>} title="RADAR" actions={<IconButton label="Radar filters"><IconAdjustmentsFilled size={14}/></IconButton>}/>
-    <div className="radar-scope">{(["actionable","developing","all"] as const).map(value=><button key={value} data-active={scope===value||undefined} onClick={()=>setScope(value)}><span>{value}</span><span className="radar-scope-count" aria-label={`${radarBuckets[value].length} ${value}`}>{radarBuckets[value].length}</span></button>)}</div>
+    <div className="radar-scope">{(["actionable","proven","developing","all"] as const).map(value=><button key={value} data-active={scope===value||undefined} onClick={()=>setScope(value)}><span>{value}</span><span className="radar-scope-count" aria-label={`${radarBuckets[value].length} ${value}`}>{radarBuckets[value].length}</span></button>)}</div>
     <div className="min-h-0 flex-1 overflow-y-auto">
-      {visibleFindings.length ? visibleFindings.map(f => <FindingRow key={f.ticker} finding={f} selected={selectedId===f.id} onSelect={()=>onSelect(f)}/>) : <EmptyPane text={scope==="actionable"?"No fresh actionable setups":"No fresh candidates in this view"}/>}
+      {visibleFindings.length ? visibleFindings.map(f => <FindingRow key={f.ticker} finding={f} selected={selectedId===f.id} onSelect={()=>onSelect(f)}/>) : <EmptyPane text={scope==="actionable"?"No fresh trade-grade setups":scope==="proven"?"No profit-validated setups yet":"No fresh candidates in this view"}/>}
     </div>
   </div>;
 }
 
-function CatalystList({ catalysts, findings=[], onSelect }: { catalysts: Catalyst[]; findings?:Finding[]; onSelect?: (finding:Finding)=>void }) {
+function CatalystList({ catalysts, findings=[], onSelect, emptyText="No recent catalysts" }: { catalysts: Catalyst[]; findings?:Finding[]; onSelect?: (finding:Finding)=>void; emptyText?:string }) {
   const groups=useMemo(()=>{
     const byStory=new Map<string,{primary:Catalyst;tickers:string[]}>();
     for(const catalyst of catalysts){
@@ -599,7 +604,7 @@ function CatalystList({ catalysts, findings=[], onSelect }: { catalysts: Catalys
     return Array.from(byStory.values());
   },[catalysts]);
   return <div className="min-h-0 overflow-y-auto">
-    {groups.length===0 ? <EmptyPane text="No recent catalysts"/> : groups.map(({primary:c,tickers})=>{const related=findings.find(f=>tickers.includes(f.ticker));const selection=related??contextualFinding({kind:"catalyst",ticker:c.ticker,title:c.headline,detail:`${c.category} · ${c.source}`,at:c.published_at,stage:"CATALYST_WATCH",id:-c.id});return <div key={c.id} className="event-row" role="button" tabIndex={0} data-selected={selection.id===related?.id||undefined} onClick={()=>onSelect?.(selection)} onKeyDown={event=>{if(event.key==="Enter"||event.key===" ")onSelect?.(selection)}}>
+    {groups.length===0 ? <EmptyPane text={emptyText}/> : groups.map(({primary:c,tickers})=>{const related=findings.find(f=>tickers.includes(f.ticker));const selection=related??contextualFinding({kind:"catalyst",ticker:c.ticker,title:c.headline,detail:`${c.category} · ${c.source}`,at:c.published_at,stage:"CATALYST_WATCH",id:-c.id});return <div key={c.id} className="event-row" role="button" tabIndex={0} data-selected={selection.id===related?.id||undefined} onClick={()=>onSelect?.(selection)} onKeyDown={event=>{if(event.key==="Enter"||event.key===" ")onSelect?.(selection)}}>
       <div className="flex items-center justify-between gap-2"><div className="flex items-center gap-2"><IconDiamondFilled size={10} className="text-[var(--cyan)]"/><Badge data-tone={c.score>=4?"green":"blue"}>{c.category || "Bullish"}</Badge></div><span className="text-[10px] scout-muted">{age(c.published_at)}</span></div>
       <div className="mt-1 line-clamp-2 text-[11px] leading-relaxed">{c.headline}</div>
       <div className="mt-1 flex items-center gap-1"><span className="mr-1 text-[10px] scout-muted">{c.source}</span>{tickers.slice(0,6).map(ticker=><button key={ticker} className="catalyst-ticker" onClick={event=>{event.stopPropagation();const match=findings.find(f=>f.ticker===ticker);onSelect?.(match??contextualFinding({kind:"catalyst",ticker,title:c.headline,detail:`${c.category} · ${c.source}`,at:c.published_at,stage:"CATALYST_WATCH",id:-c.id}))}}>{ticker}</button>)}{tickers.length>6&&<span className="text-[9px] scout-muted">+{tickers.length-6}</span>}</div>
@@ -854,7 +859,9 @@ function BottomDock({ tab, setTab, catalysts, findings, selected, status, valida
   return <div className="flex h-full min-h-0 flex-col">
     <div className="dock-tabbar"><div className="flex min-w-0 items-center">{tabs.map(x=><button key={x.id} data-active={tab===x.id || undefined} onClick={()=>setTab(x.id)} className="dock-tab">{x.label}</button>)}</div><div className="ml-auto flex items-center"><IconButton label={maximized?"Restore panel":"Maximize panel"} onClick={onMaximize}>{maximized?<IconMinimize size={13}/>:<IconMaximize size={13}/>}</IconButton><IconButton label="Collapse panel" onClick={onCollapse}><IconChevronDown size={13}/></IconButton></div></div>
     <div className="min-h-0 flex-1 overflow-y-auto">
-      {tab==="catalysts" && <CatalystList catalysts={catalysts} findings={findings} onSelect={onSelect}/>}
+      {tab==="catalysts" && (selected
+        ? <CatalystList catalysts={catalysts.filter(c=>c.ticker===selected.ticker)} findings={findings.filter(f=>f.ticker===selected.ticker)} onSelect={onSelect} emptyText={`No verified catalysts for ${selected.ticker}`}/>
+        : <EmptyPane text="Select a ticker to view its verified catalysts"/>)}
       {tab==="evidence" && <div className="dock-content">{selected ? selected.evidence.map(e=><div className="dock-line" key={e}><span className="event-time">{age(selected.detected_at)}</span><span className="text-[var(--blue)]">●</span><b>{selected.ticker}</b><span>{e}</span></div>) : <EmptyPane text="Select a finding"/>}</div>}
       {tab==="validation" && (validation.length ? <ValidationTable rows={validation} findings={findings} onSelect={onSelect}/> : <EmptyPane text="Validation outcomes will populate automatically"/>)}
       {tab==="events" && <TimelineList timeline={timeline} selectedTicker={selected?.ticker} findings={findings} onSelect={onSelect}/>}
@@ -1030,7 +1037,7 @@ function MobileConsole(props:WorkbenchProps) {
   return <div className="mobile-console mobile-safe min-h-screen">
     <header className="mobile-header"><div className="flex h-12 items-center justify-between px-3"><div className="flex items-center gap-2"><IconTargetArrow size={17}/><b className="tracking-[.08em]">SCOUT</b><span className="version-chip">v{CLIENT_VERSION}</span><Badge data-tone={connected?"green":"orange"}><span className="live-dot"/>{connectionLabel}</Badge>{status?.replay?.active&&<Badge data-tone="orange">SIMULATION</Badge>}{!status?.replay?.active&&status?.replay?.latest_run&&<Badge data-tone="blue">REPLAY READY</Badge>}</div><div className="flex items-center gap-1"><IconButton label="Search" onClick={openCommand}><IconSearch size={18}/></IconButton><IconButton label="Notifications" onClick={openNotifications}><IconBellFilled size={16}/></IconButton></div></div><div className="mobile-status"><span>All sessions · {status?.universe ?? "—"}</span><span className={allFeedsLive?"feed-ok":status?"feed-bad":"feed-idle"}>SIP ● BOATS ● NEWS ●</span></div></header>
     <main className="pb-20">
-      {view==="radar" && <><div className="mobile-market-tabs">{marketIcons.map(item=><button key={item.id} aria-label={item.label} data-active={marketTab===item.id || undefined} onClick={()=>setMarketTab(item.id)}>{item.icon}{item.id==="halted"&&halts.length?<span className="mobile-dot-count">{halts.length}</span>:null}</button>)}</div>{marketTab==="24h"&&<TwentyFourHourPanel rows={twentyFourHour} findings={findings} selectedId={selected?.id} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}{marketTab==="radar"&&findings.map(f=><FindingRow key={f.id} finding={f} selected={selected?.id===f.id} onSelect={()=>{setSelected(f);setView("charts");}}/>)}{marketTab==="gainers"&&<GainerRows gainers={gainers} findings={findings} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}{marketTab==="halted"&&<HaltRows halts={halts} findings={findings} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}</>}
+      {view==="radar" && <><div className="mobile-market-tabs">{marketIcons.map(item=><button key={item.id} aria-label={item.label} data-active={marketTab===item.id || undefined} onClick={()=>setMarketTab(item.id)}>{item.icon}{item.id==="halted"&&halts.length?<span className="mobile-dot-count">{halts.length}</span>:null}</button>)}</div>{marketTab==="24h"&&<TwentyFourHourPanel rows={twentyFourHour} findings={findings} selectedId={selected?.id} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}{marketTab==="radar"&&<MarketPulse findings={findings} gainers={gainers} halts={halts} selectedId={selected?.id} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}{marketTab==="gainers"&&<GainerRows gainers={gainers} findings={findings} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}{marketTab==="halted"&&<HaltRows halts={halts} findings={findings} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}</>}
       {view==="charts" && <div className="mobile-chart-page">{selected?<><div className="mobile-page-title"><div><b>{selected.ticker}</b><span className="metric ml-2">{money(selected.price)}</span></div><div className="flex gap-1">{Array.from(new Set([selected.stage,...(selected.signals||[])])).slice(0,3).map(signal=><EventIcon key={signal} event={signal}/>)}</div></div><div className="mobile-live-chart"><LiveChart finding={selected} onSelectFinding={setSelected}/></div><div className="mobile-inspector"><Inspector finding={selected} onNotifications={openNotifications}/></div></>:<EmptyPane text="Select a ticker from Radar"/>}</div>}
       {view==="catalysts" && <div className="mobile-page"><PanelTitle icon={<IconDiamondFilled size={12}/>} title="CATALYSTS"/><CatalystList catalysts={catalysts} findings={findings} onSelect={finding=>{setSelected(finding);setView("charts");}}/></div>}
       {view==="alerts" && <div className="mobile-page"><AttentionInbox items={attention} onOpen={item=>{setSelected(item.finding);void setAttentionStatus(item,'opened');setView('charts');}} onStatus={(item,next)=>void setAttentionStatus(item,next)}/></div>}

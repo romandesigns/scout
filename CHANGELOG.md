@@ -1,3 +1,10 @@
+## 6.8.8 — Actionable radar semantics
+
+- Restores strict Group-A setups to Actionable independently of profitability validation.
+- Adds a Proven radar view while retaining Evaluating labels on unvalidated setups.
+- Uses the same radar buckets on desktop, web, and mobile.
+- Restricts the ticker-context catalyst dock to verified catalysts associated with the selected ticker.
+
 ## 6.8.7 — Forward profitability validation
 
 - Separate technical A-rank detection from profit-validated notification eligibility.
