@@ -66,7 +66,7 @@ if (-not $SkipVpsDeploy) {
     $StagedProject = Join-Path $StagingBase "stockhunter-scout-$Version"
     $ServerArchive = Join-Path $StagingBase "stockhunter-scout-$Version-server.zip"
     New-Item -ItemType Directory -Force -Path $StagedProject | Out-Null
-    $RoboArgs = @($ProjectRoot,$StagedProject,"/E","/NFL","/NDL","/NJH","/NJS","/NP","/XD",".git",".next","node_modules","target","release","data","charts","__pycache__",".pytest_cache",".test-*","/XF",".env","*.pyc","*.db","*.db-wal","*.db-shm")
+    $RoboArgs = @($ProjectRoot,$StagedProject,"/E","/NFL","/NDL","/NJH","/NJS","/NP","/XD",".git",".next","node_modules","target","release","data","charts","__pycache__",".pytest_cache",".local-dev",".test-*","/XF",".env","*.pyc","*.db","*.db-wal","*.db-shm")
     $NativePreference = $PSNativeCommandUseErrorActionPreference
     $PSNativeCommandUseErrorActionPreference = $false
     & robocopy @RoboArgs
