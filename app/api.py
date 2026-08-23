@@ -10,6 +10,7 @@ from aiohttp import web
 
 from .config import settings
 from .db import Store
+from .development import evaluate_ticker, save_annotation_artifact
 from .events import EventHub
 from .market import MarketWatcher
 from .notifiers import delivery_health, send_ntfy_test, send_resend_test, send_web_push_test
@@ -236,6 +237,80 @@ class ScoutApi:
         detail = str(payload.get("surface") or "")[:200]
         await asyncio.to_thread(self.store.record_pipeline_trace, finding_id, "client_displayed", None, channel, detail)
         return web.json_response({"ok": True})
+
+    async def development_evaluations(self, request: web.Request) -> web.Response:
+        limit = _int(request.query.get("limit"), 100, 1, 500)
+        rows = await asyncio.to_thread(self.store.list_development_evaluations, limit)
+        return web.json_response({"items": rows})
+
+    async def run_development_evaluation(self, request: web.Request) -> web.Response:
+        try:
+            payload = await request.json()
+        except Exception as exc:
+            raise web.HTTPBadRequest(text=f"invalid JSON: {exc}")
+        raw = payload.get("tickers", [])
+        if isinstance(raw, str):
+            raw = raw.replace(",", " ").split()
+        tickers = list(dict.fromkeys(str(value).strip().upper() for value in raw if str(value).strip()))[:40]
+        if not tickers:
+            raise web.HTTPBadRequest(text="provide at least one ticker")
+        timeframe = _int(str(payload.get("timeframe_seconds") or 60), 60, 30, 300)
+        if timeframe not in {30, 60, 300}:
+            raise web.HTTPBadRequest(text="timeframe_seconds must be 30, 60, or 300")
+        detection_at = payload.get("detection_at")
+        try:
+            detection_at = float(detection_at) if detection_at not in (None, "") else None
+        except (TypeError, ValueError):
+            raise web.HTTPBadRequest(text="detection_at must be a Unix timestamp")
+        use_latest = bool(payload.get("use_latest_finding", True))
+        try:
+            inspection_start = float(payload["inspection_start"]) if payload.get("inspection_start") not in (None, "") else None
+            inspection_end = float(payload["inspection_end"]) if payload.get("inspection_end") not in (None, "") else None
+        except (TypeError, ValueError):
+            raise web.HTTPBadRequest(text="inspection_start and inspection_end must be Unix timestamps")
+        if (inspection_start is None) != (inspection_end is None):
+            raise web.HTTPBadRequest(text="provide both inspection_start and inspection_end")
+        if inspection_start is not None and (inspection_end <= inspection_start or inspection_end - inspection_start > 86400):
+            raise web.HTTPBadRequest(text="inspection range must be positive and no longer than 24 hours")
+        use_live_detector = bool(payload.get("use_live_detector", False))
+        detector_engine = str(payload.get("detector_engine") or "python").strip().lower()
+        if detector_engine not in {"python", "rust", "both"}:
+            raise web.HTTPBadRequest(text="detector_engine must be python, rust, or both")
+        if use_live_detector and inspection_start is None:
+            raise web.HTTPBadRequest(text="live detector replay requires an inspection start and end")
+        semaphore = asyncio.Semaphore(4)
+        async def evaluate_one(ticker: str) -> dict:
+            async with semaphore:
+                try:
+                    return await asyncio.to_thread(
+                        evaluate_ticker, self.store, self.market, ticker, detection_at, timeframe, use_latest,
+                        inspection_start, inspection_end, use_live_detector,
+                        detector_engine,
+                    )
+                except Exception as exc:
+                    return await asyncio.to_thread(self.store.save_development_evaluation, {
+                        "ticker": ticker, "finding_id": None, "detection_at": detection_at or time.time(),
+                        "timeframe_seconds": timeframe, "status": "error", "chart_path": None,
+                        "metrics": {}, "error": str(exc)[:500],
+                    })
+        results = await asyncio.gather(*(evaluate_one(ticker) for ticker in tickers))
+        return web.json_response({"items": results})
+
+    async def save_development_annotation(self, request: web.Request) -> web.Response:
+        evaluation_id = _int(request.match_info.get("evaluation_id"), 0, 1, 2_147_483_647)
+        evaluation = await asyncio.to_thread(self.store.get_development_evaluation, evaluation_id)
+        if not evaluation:
+            raise web.HTTPNotFound(text="development evaluation not found")
+        try:
+            payload = await request.json()
+            artifact = await asyncio.to_thread(
+                save_annotation_artifact, evaluation_id, evaluation["ticker"],
+                str(payload.get("image_data_url") or ""), str(payload.get("notes") or ""),
+                evaluation=evaluation,
+            )
+        except (TypeError, ValueError) as exc:
+            raise web.HTTPBadRequest(text=str(exc))
+        return web.json_response({"ok": True, **artifact})
 
     async def update_finding_review(self, request: web.Request) -> web.Response:
         finding_id = _int(request.match_info.get("finding_id"), 0, 1, 2_147_483_647)
@@ -516,13 +591,14 @@ class ScoutApi:
 
     async def chart(self, request: web.Request) -> web.StreamResponse:
         name = Path(request.match_info["name"]).name
-        path = settings.chart_dir / name
+        section = request.match_info.get("section")
+        path = settings.chart_dir / "annotations" / name if section == "annotations" else settings.chart_dir / name
         if not path.exists() or not path.is_file():
             raise web.HTTPNotFound(text="chart not found")
         return web.FileResponse(path)
 
     async def dashboard(self, request: web.Request) -> web.StreamResponse:
-        index = settings.web_out_dir / "index.html"
+        index = settings.web_out_dir / ("development.html" if request.path.rstrip("/") == "/development" else "index.html")
         if not index.exists():
             return web.json_response({
                 "ok": True,
@@ -545,7 +621,9 @@ class ScoutApi:
 
 def create_app(store: Store, market: MarketWatcher, events: EventHub, catalysts=None, dispatcher=None, trader=None) -> web.Application:
     api = ScoutApi(store, market, events, catalysts, dispatcher, trader)
-    app = web.Application(middlewares=[cors_middleware])
+    # Full-resolution annotated charts are posted as PNG data URLs. Keep this
+    # bounded, but above aiohttp's 1 MB default request limit.
+    app = web.Application(middlewares=[cors_middleware], client_max_size=16 * 1024**2)
     app.router.add_get("/healthz", api.health)
     app.router.add_get("/api/status", api.status)
     app.router.add_get("/api/replay/status", api.replay_status)
@@ -553,6 +631,9 @@ def create_app(store: Store, market: MarketWatcher, events: EventHub, catalysts=
     app.router.add_get("/api/findings/{finding_id:\\d+}", api.finding)
     app.router.add_get("/api/findings/{finding_id:\\d+}/verification", api.finding_verification)
     app.router.add_post("/api/findings/{finding_id:\\d+}/client-displayed", api.client_displayed)
+    app.router.add_get("/api/development/evaluations", api.development_evaluations)
+    app.router.add_post("/api/development/evaluations", api.run_development_evaluation)
+    app.router.add_post("/api/development/evaluations/{evaluation_id:\\d+}/annotations", api.save_development_annotation)
     app.router.add_put("/api/findings/{finding_id:\\d+}/review", api.update_finding_review)
     app.router.add_get("/api/catalysts", api.catalysts)
     app.router.add_get("/api/market/gainers", api.gainers)
@@ -577,6 +658,7 @@ def create_app(store: Store, market: MarketWatcher, events: EventHub, catalysts=
     app.router.add_put("/api/trader/settings", api.update_trader_settings)
     app.router.add_get("/api/trader/trades", api.trader_trades)
     app.router.add_get("/api/events", api.event_stream)
+    app.router.add_get("/charts/{section:annotations}/{name}", api.chart)
     app.router.add_get("/charts/{name}", api.chart)
 
     next_dir = settings.web_out_dir / "_next"
@@ -587,4 +669,5 @@ def create_app(store: Store, market: MarketWatcher, events: EventHub, catalysts=
         app.router.add_static("/icons/", icons_dir, show_index=False)
     app.router.add_get("/{name:manifest\\.webmanifest|sw\\.js}", api.pwa_asset)
     app.router.add_get("/", api.dashboard)
+    app.router.add_get("/development", api.dashboard)
     return app

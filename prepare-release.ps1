@@ -33,6 +33,9 @@ if (-not (git check-ignore --no-index .env 2>$null)) {
     throw '.env is not protected by .gitignore.'
 }
 
+python .\scripts\check_release_integrity.py
+if ($LASTEXITCODE -ne 0) { throw 'Release integrity validation failed.' }
+
 python -m pytest -q
 if ($LASTEXITCODE -ne 0) { throw 'Python tests failed.' }
 

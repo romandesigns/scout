@@ -13,6 +13,7 @@ import {
   IconDiamondFilled,
   IconDots,
   IconFlame,
+  IconFlask,
   IconHistory,
   IconLayoutBottombarExpand,
   IconLayoutColumns,
@@ -700,6 +701,7 @@ function SettingsPanel({ connected, onNotifications, scanner, saveScanner, scann
     <div className="settings-row"><span>Open detection timeframe</span><Switch checked={uiPrefs.openDetectionTimeframe} onCheckedChange={value=>setUi("openDetectionTimeframe",value)}/></div>
     <div className="settings-row"><span>Center selected detection</span><Switch checked={uiPrefs.autoCenterDetection} onCheckedChange={value=>setUi("autoCenterDetection",value)}/></div>
     <div className="settings-row"><div><span>Application version</span><div className="text-[10px] scout-muted">Desktop/PWA {CLIENT_VERSION} · Backend {backendVersion??'—'}</div></div><Badge data-tone={!backendVersion||backendVersion===CLIENT_VERSION?'green':'red'}>{!backendVersion||backendVersion===CLIENT_VERSION?'SYNCED':'MISMATCH'}</Badge></div>
+    <a href="/development"><Button className="w-full"><IconFlask size={15}/>Open Development workspace</Button></a>
     <Button className="mt-3 w-full" onClick={onNotifications}>Notification preferences</Button>
   </div></div>;
 }
@@ -896,7 +898,7 @@ function ActivityRail({ active, onActive, counts }: { active:ActivityView; onAct
     {id:"validation",label:"Validation",icon:<IconTableFilled size={15}/>,tone:"orange"},
     {id:"alerts",label:"Notifications",icon:<IconBellFilled size={15}/>,tone:"red"},
   ];
-  return <aside className="activity-rail"><div className="activity-brand"><IconTargetArrow size={18}/></div><div className="activity-stack">{items.map(item=>{const count=counts[item.id];const label=`${item.label} · ${count} item${count===1?"":"s"}`;return <div className="rail-item" key={item.id}><IconButton label={label} active={active===item.id} onClick={()=>onActive(item.id)}>{item.icon}</IconButton>{count>0&&<span className="rail-count" data-tone={item.tone}>{count>99?"99+":count}</span>}</div>})}</div><div className="activity-bottom"><IconButton label="Settings" active={active==="settings"} onClick={()=>onActive("settings")}><IconSettings size={18}/></IconButton></div></aside>;
+  return <aside className="activity-rail"><div className="activity-brand"><IconTargetArrow size={18}/></div><div className="activity-stack">{items.map(item=>{const count=counts[item.id];const label=`${item.label} · ${count} item${count===1?"":"s"}`;return <div className="rail-item" key={item.id}><IconButton label={label} active={active===item.id} onClick={()=>onActive(item.id)}>{item.icon}</IconButton>{count>0&&<span className="rail-count" data-tone={item.tone}>{count>99?"99+":count}</span>}</div>})}</div><div className="activity-bottom"><a href="/development" aria-label="Development workspace"><IconFlask size={18}/></a><IconButton label="Settings" active={active==="settings"} onClick={()=>onActive("settings")}><IconSettings size={18}/></IconButton></div></aside>;
 }
 
 function NotificationSheet({ open, prefs, status, onClose, onChange, onSave, onTest, saving, testMessage }: {

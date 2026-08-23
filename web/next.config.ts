@@ -9,6 +9,7 @@ const scoutVersion = fs.readFileSync(versionPath, "utf8").trim();
 
 const nextConfig: NextConfig = {
   output: "export",
+  allowedDevOrigins: ["127.0.0.1"],
   images: { unoptimized: true },
   trailingSlash: false,
   env: { NEXT_PUBLIC_SCOUT_VERSION: scoutVersion },

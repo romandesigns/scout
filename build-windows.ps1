@@ -16,6 +16,9 @@ $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $WebRoot = Join-Path $ProjectRoot "web"
 $ReleaseRoot = Join-Path $ProjectRoot "release\windows"
 
+python (Join-Path $ProjectRoot "scripts\check_release_integrity.py")
+if ($LASTEXITCODE -ne 0) { throw "Release integrity validation failed." }
+
 foreach ($Command in @("bun", "cargo", "rustc")) {
   if (-not (Get-Command $Command -ErrorAction SilentlyContinue)) {
     throw "$Command is required. See WINDOWS-BUILD.md for the installation command."

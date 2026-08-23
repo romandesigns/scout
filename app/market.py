@@ -20,6 +20,7 @@ from .indicators import ema, pct_change, median_positive
 from .models import Bucket, Finding, SymbolState
 from .events import EventHub
 from .hybrid import HybridMemory, RustPerceptionBridge
+from .unified_structure import unified_structure_profile
 
 log = logging.getLogger("scout.market")
 ET = ZoneInfo(settings.timezone)
@@ -978,7 +979,8 @@ class MarketWatcher:
             "as_of": time.time(),
         }
 
-    def historical_snapshot_sync(self, ticker: str, center_ts: float, bucket_seconds: int = 15) -> dict:
+    def historical_snapshot_sync(self, ticker: str, center_ts: float, bucket_seconds: int = 15,
+                                 range_start_ts: float | None = None, range_end_ts: float | None = None) -> dict:
         """Load detection-centered candles when live memory cannot cover an event.
 
         Alpaca historical trades preserve Scout's native 15-second candles. If a
@@ -987,8 +989,14 @@ class MarketWatcher:
         """
         ticker = ticker.upper()
         bucket_seconds = max(15, min(300, int(bucket_seconds)))
-        start = datetime.fromtimestamp(center_ts - 20 * 60, timezone.utc)
-        end = datetime.fromtimestamp(center_ts + 20 * 60, timezone.utc)
+        start_ts = float(range_start_ts) if range_start_ts is not None else center_ts - 20 * 60
+        end_ts = float(range_end_ts) if range_end_ts is not None else center_ts + 20 * 60
+        if end_ts <= start_ts:
+            raise ValueError("historical range end must be after start")
+        if end_ts - start_ts > 24 * 60 * 60:
+            raise ValueError("historical inspection range cannot exceed 24 hours")
+        start = datetime.fromtimestamp(start_ts, timezone.utc)
+        end = datetime.fromtimestamp(end_ts, timezone.utc)
         iso = lambda value: value.isoformat().replace("+00:00", "Z")
         params = {
             "start": iso(start), "end": iso(end), "feed": settings.alpaca_feed,
@@ -1812,6 +1820,11 @@ class MarketWatcher:
             "multi_timeframe": multi_timeframe,
             "decision_chart": {"primary_seconds": 60, "trigger_seconds": 30, "context_seconds": 300, "instruction": "Open 1m · confirm on 30s · 5m context aligned"},
         }
+        unified_profile = unified_structure_profile(
+            closed + [s.current], price=price, vwap=vwap,
+            continuation_peak=s.continuation_peak,
+        )
+        candidate_profile.update(unified_profile)
 
         # First-leg context is intentionally independent of the later breakout
         # engine. It looks for the transition out of compression while price is

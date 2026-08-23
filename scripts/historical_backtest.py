@@ -74,8 +74,25 @@ async def replay_one(ticker: str, target: date, feed: str, cache_dir: Path, outp
     findings = [
         {
             "ticker": f["ticker"], "stage": f["stage"], "detected_at": f["detected_at"],
-            "price": f["price"], "quality_label": f.get("quality_label"),
+            "price": f["price"], "score": f.get("score"),
+            "quality_label": f.get("quality_label"),
             "actionable_rank": f.get("actionable_rank"), "quality_score": f.get("quality_score"),
+            "change_3s_pct": f.get("change_3s_pct"), "change_5s_pct": f.get("change_5s_pct"),
+            "change_10s_pct": f.get("change_10s_pct"), "change_15s_pct": f.get("change_15s_pct"),
+            "change_30s_pct": f.get("change_30s_pct"), "change_60s_pct": f.get("change_60s_pct"),
+            "accel_15s_pp": f.get("accel_15s_pp"),
+            "vol_ratio_15s": f.get("vol_ratio_15s"), "vol_ratio_30s": f.get("vol_ratio_30s"),
+            "dollar_volume_15s": f.get("dollar_volume_15s"), "dollar_volume_30s": f.get("dollar_volume_30s"),
+            "trades_15s": f.get("trades_15s"), "trades_30s": f.get("trades_30s"),
+            "extension_pct": f.get("extension_pct"), "ema9_slope": f.get("ema9_slope"),
+            "above_vwap": f.get("above_vwap"), "quiet_break": f.get("quiet_break"),
+            "directional_efficiency": f.get("directional_efficiency"),
+            "active_bucket_ratio": f.get("active_bucket_ratio"),
+            "direction_reversals": f.get("direction_reversals"),
+            "source": f.get("source") or f.get("engine_source"),
+            "trigger_distance_pct": f.get("trigger_distance_pct"),
+            "base_extension_at_detection_pct": f.get("base_extension_at_detection_pct"),
+            "candidate_profile": f.get("candidate_profile"),
             "promotion_trace": (f.get("candidate_profile") or {}).get("promotion_trace"),
         }
         for f in report.get("findings", [])
@@ -112,12 +129,18 @@ def main() -> int:
     p.add_argument("--cache-dir", default="data/replay-datasets/backtest")
     p.add_argument("--replay-root", default="data/replays/backtest")
     p.add_argument("--limit", type=int, default=None, help="Only replay the first N rows (for quick smoke tests)")
+    p.add_argument("--shard-count", type=int, default=1, help="Split rows into this many deterministic shards")
+    p.add_argument("--shard-index", type=int, default=0, help="Zero-based shard to process")
     args = p.parse_args()
+
+    if args.shard_count < 1 or not 0 <= args.shard_index < args.shard_count:
+        raise SystemExit("--shard-count must be positive and --shard-index must be within it")
 
     if not settings.alpaca_key or not settings.alpaca_secret:
         raise SystemExit("ALPACA_API_KEY and ALPACA_API_SECRET are required")
 
     rows = load_rows(Path(args.movers))
+    rows = rows[args.shard_index::args.shard_count]
     print(f"Loaded {len(rows)} ground-truth rows ({sum(1 for r in rows if r.get('is_mover'))} movers, "
           f"{sum(1 for r in rows if not r.get('is_mover'))} control)")
 

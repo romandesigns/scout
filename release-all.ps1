@@ -29,6 +29,9 @@ $Failures = [System.Collections.Generic.List[string]]::new()
 $Installer = $null
 $StagingBase = $null
 
+python (Join-Path $ProjectRoot "scripts\check_release_integrity.py")
+if ($LASTEXITCODE -ne 0) { throw "Release integrity validation failed." }
+
 function Invoke-WithRetry {
   param([string]$Label,[scriptblock]$Action)
   for ($Attempt=1; $Attempt -le $DeployAttempts; $Attempt++) {

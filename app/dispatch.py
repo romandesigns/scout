@@ -11,8 +11,10 @@ from .config import settings
 from .db import Store
 from .models import Bucket, Finding
 from .events import EventHub
+from .imminent_gate import score_finding as score_imminent_finding
 from .notifiers import channel_rate_limited, notification_allowed, notification_allowed_any_platform, notification_phase, send_ntfy, send_ntfy_chart, send_resend_email, send_web_push_all
 from .opportunity import opportunity_class
+from .significance_tier import classify_tier, would_notify as preview_would_notify
 
 log = logging.getLogger("scout.dispatch")
 
@@ -201,8 +203,21 @@ class Dispatcher:
         # Persist + push first. Rendering/email must never block the first alert.
         f.candidate_profile = dict(f.candidate_profile or {})
         f.candidate_profile["opportunity_class"] = opportunity_class(f)
+        # Advisory-only significance tiering (JUNS/WEN chart-review framework,
+        # IMPLEMENTATION_DECISIONS.md 2026-08-22): never gates delivery, only
+        # labels the detection for Scout Development chart review.
+        f.candidate_profile["significance_tier"] = classify_tier(f)
+        if settings.imminent_gate_model_path:
+            f.candidate_profile["imminent_move_gate"] = await asyncio.to_thread(
+                score_imminent_finding, f, settings.imminent_gate_model_path,
+            )
         if f.stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "HALT_WATCH", "HALT_PRESSURE", "RESUME"}:
             f.candidate_profile["edge_validation"] = await asyncio.to_thread(self.store.paper_edge_validation, f)
+        # Preview of Scout's real notification gate (excluding the human's own
+        # preference toggles), computed after edge_validation so it reflects
+        # the same inputs the live gate will see. Advisory only; the actual
+        # gate below (notification_allowed*) is unaffected by this value.
+        f.candidate_profile["would_notify_preview"] = preview_would_notify(f)
         finding_id = await asyncio.to_thread(self.store.save_finding, f)
         f.finding_id = finding_id
         trace = dict(f.trace_timestamps or {})

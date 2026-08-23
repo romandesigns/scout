@@ -89,6 +89,39 @@ export type Finding = {
 
 export type DeliveryEvent = { id:number; finding_id:number; channel:string; status:string; event_at:number; detail?:string|null; provider_id?:string|null };
 export type PipelineTraceEvent = { id:number; finding_id:number; stage:string; event_at:number; channel?:string|null; detail?:string|null };
+export type DevelopmentEvaluation = {
+  id:number; ticker:string; finding_id?:number|null; detection_at:number; timeframe_seconds:30|60|300;
+  status:"complete"|"error"; chart_url?:string|null; error?:string|null; created_at:number;
+  metrics:{ verdict?:"PENDING"|"WINNER"|"FAILED"|"PARTIAL"|"NO_EDGE"; detection_price?:number;
+    detection_match?:boolean; detection_note?:string;
+    max_30s_pct?:number|null; min_30s_pct?:number|null; max_1m_pct?:number|null; min_1m_pct?:number|null;
+    max_5m_pct?:number|null; min_5m_pct?:number|null; max_15m_pct?:number|null; min_15m_pct?:number|null;
+    max_favorable_r?:number; max_adverse_r?:number; hit_1r?:boolean; hit_2r?:boolean; hit_3r?:boolean;
+    invalidated?:boolean; trigger?:number; invalidation?:number; source?:string; bars?:number;
+    first_touch?:string; available_move_pct?:number; captured_move_pct?:number; capture_efficiency_pct?:number;
+    notification_latency_ms?:number|null; order_latency_ms?:number|null;
+    detections_marked?:number; gate_passes_marked?:number; notifications_marked?:number;
+    detection_markers?:Array<{finding_id?:number;stage:string;detected_at:number;price:number;gate_status:"PASS"|"REJECT"|"UNSCORED";gate_probability?:number|null;
+      tier?:1|2|3|null;tier_label?:string;tier_reasons?:string[];reaction_bounce?:boolean;would_notify?:boolean;would_notify_reason?:string|null;
+      notification_blocked?:boolean;marker_kind?:"rejected"|"actionable"|"detected";invalidated_at?:number|null;
+      recipe_present?:string[];recipe_missing?:string[];blockers?:string[];selected:boolean}>;
+    tier_counts?:{tier_1?:number;tier_2?:number;tier_3?:number};
+    would_notify_preview_marked?:number;
+    would_notify_preview_markers?:Array<{finding_id?:number;detected_at:number;price:number;stage:string}>;
+    use_live_detector?:boolean; detector_engine?:"python"|"rust"|"both";
+    rust_evaluation_count?:number; rust_rejected_count?:number; rust_evaluation_trace_path?:string|null;
+    live_replay?:{status:string;processed_events?:number|null;findings_count:number;engine?:"python"|"rust"|"both"};
+    momentum_zones?:Array<{onset_at:number;peak_at:number;base_price:number;peak_price:number;expansion_pct:number;
+      caught:boolean;matched_finding_id?:number|null;lead_seconds?:number|null}>;
+    momentum_zones_marked?:number; momentum_zones_caught?:number; momentum_catch_rate_pct?:number|null;
+    objective_zone_metrics?:{zones:number;caught:number;recall_pct?:number|null;qualifying_detections:number;matched_detections:number;
+      precision_pct?:number|null;median_lead_seconds?:number|null;missed_reasons:Array<{onset_at:number;expansion_pct:number;best_recipe_score?:number|null;blockers:string[];missing_recipe:string[]}>};
+    unified_evidence?:{supply?:number|null;lifecycle?:number|null;compression_quality?:number|null;phase?:string|null;advisory_only:true;
+      box?:{low?:number;high?:number;width_pct?:number;breakout?:boolean;holding?:boolean;quality?:number}|null;
+      pullback?:{depth_pct?:number|null;quality?:number|null}|null};
+    inspection_start?:number|null; inspection_end?:number|null; complete_through_seconds?:number;
+    formation?:{stage?:string;rank?:string;quality?:string;score?:number;timeframe_seconds?:number;catalyst?:string|null}; };
+};
 export type FindingVerification = {
   finding:Finding;
   outcome:{max_1m_pct:number|null;max_5m_pct:number|null;max_15m_pct:number|null;max_session_pct:number|null;time_to_peak_seconds:number|null;updated_at:number|null}|null;

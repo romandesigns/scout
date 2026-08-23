@@ -22,12 +22,28 @@ def _f(name: str, default: float, minimum: float | None = None) -> float:
     return max(minimum, v) if minimum is not None else v
 
 
+def _repository_version() -> str:
+    """Use the release manifest unless deployment explicitly overrides it."""
+    for candidate in (Path(__file__).resolve().parents[1] / "VERSION", Path("/srv/VERSION")):
+        try:
+            value = candidate.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if value:
+            return value
+    return "dev"
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str = os.getenv("APP_NAME", "StockHunter Scout")
-    app_version: str = os.getenv("APP_VERSION", "6.5.5")
+    app_version: str = os.getenv("APP_VERSION", "").strip() or _repository_version()
     env: str = os.getenv("APP_ENV", "production")
     timezone: str = os.getenv("APP_TIMEZONE", "America/New_York")
+    imminent_gate_model_path: Path | None = (
+        Path(os.environ["IMMINENT_GATE_MODEL_PATH"])
+        if os.getenv("IMMINENT_GATE_MODEL_PATH", "").strip() else None
+    )
 
     data_dir: Path = Path(os.getenv("DATA_DIR", "/data"))
     chart_dir: Path = Path(os.getenv("CHART_DIR", "/charts"))

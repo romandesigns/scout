@@ -247,6 +247,19 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS ix_pipeline_trace_finding_time ON pipeline_trace_events(finding_id,event_at);
                 CREATE INDEX IF NOT EXISTS ix_pipeline_trace_stage_time ON pipeline_trace_events(stage,event_at DESC);
+                CREATE TABLE IF NOT EXISTS development_evaluations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL,
+                    finding_id INTEGER,
+                    detection_at REAL NOT NULL,
+                    timeframe_seconds INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    chart_path TEXT,
+                    metrics_json TEXT NOT NULL,
+                    error TEXT,
+                    created_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS ix_development_evaluations_time ON development_evaluations(created_at DESC);
                 CREATE TABLE IF NOT EXISTS finding_reviews (
                     finding_id INTEGER PRIMARY KEY,
                     automatic_grade INTEGER,
@@ -1141,3 +1154,47 @@ class Store:
                 item["max_session_pct"] = max(0.0, float(item["max_session_pct"]))
             out.append(item)
         return out
+
+    def save_development_evaluation(self, value: dict[str, Any]) -> dict[str, Any]:
+        now = int(time.time())
+        with self.lock:
+            cursor = self.db.execute(
+                "INSERT INTO development_evaluations(ticker,finding_id,detection_at,timeframe_seconds,status,chart_path,metrics_json,error,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                (value["ticker"].upper(), value.get("finding_id"), float(value["detection_at"]),
+                 int(value["timeframe_seconds"]), value["status"], value.get("chart_path"),
+                 json.dumps(value.get("metrics", {})), value.get("error"), now),
+            )
+            self.db.commit()
+            evaluation_id = int(cursor.lastrowid)
+        return {**value, "id": evaluation_id, "created_at": now,
+                "chart_url": f"/charts/{Path(value['chart_path']).name}" if value.get("chart_path") else None}
+
+    def list_development_evaluations(self, limit: int = 100) -> list[dict[str, Any]]:
+        limit = max(1, min(500, int(limit)))
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT id,ticker,finding_id,detection_at,timeframe_seconds,status,chart_path,metrics_json,error,created_at FROM development_evaluations ORDER BY created_at DESC,id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        keys = ["id","ticker","finding_id","detection_at","timeframe_seconds","status","chart_path","metrics_json","error","created_at"]
+        output = []
+        for row in rows:
+            item = dict(zip(keys, row))
+            item["metrics"] = json.loads(item.pop("metrics_json") or "{}")
+            item["chart_url"] = f"/charts/{Path(item['chart_path']).name}" if item.get("chart_path") else None
+            output.append(item)
+        return output
+
+    def get_development_evaluation(self, evaluation_id: int) -> dict[str, Any] | None:
+        with self.lock:
+            row = self.db.execute(
+                "SELECT id,ticker,finding_id,detection_at,timeframe_seconds,status,chart_path,metrics_json,error,created_at FROM development_evaluations WHERE id=?",
+                (int(evaluation_id),),
+            ).fetchone()
+        if not row:
+            return None
+        keys = ["id","ticker","finding_id","detection_at","timeframe_seconds","status","chart_path","metrics_json","error","created_at"]
+        item = dict(zip(keys, row))
+        item["metrics"] = json.loads(item.pop("metrics_json") or "{}")
+        item["chart_url"] = f"/charts/{Path(item['chart_path']).name}" if item.get("chart_path") else None
+        return item

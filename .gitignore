@@ -94,6 +94,8 @@ Desktop.ini
 # Temporary files
 tmp/
 temp/
+.local-dev/
+.test-tmp-*/
 *.tmp
 *.temp
 *.swp

@@ -100,6 +100,7 @@ pub struct ReplayReport {
     pub processed_events: usize,
     pub integrity: Integrity,
     pub candidates: Vec<Candidate>,
+    pub evaluations: Vec<Candidate>,
 }
 
 #[derive(Clone, Debug)]
@@ -331,10 +332,10 @@ fn evaluate(symbol: &str, window: &SymbolWindow) -> Evaluation {
     let probability_5_before_3 = (0.18 + confidence as f64 * 0.005
         + if quote_support { 0.05 } else { 0.0 }
         - (spread_pct - 1.0).max(0.0) * 0.02).clamp(0.05, 0.85);
-    let candidate = (phase > 0).then(|| Candidate {
+    let candidate = Some(Candidate {
         ticker: symbol.to_string(), detected_at: latest.ts, price: latest.price,
-        stage: if shaping && window.episode_id > 0 { "REARMED" } else if shaping { "SHAPING_UP" } else { "STIRRING" },
-        lifecycle_phase: if shaping && window.episode_id > 0 { "REARMED" } else if shaping { "TRIGGER_READY" } else { "STIRRING" },
+        stage: if shaping && window.episode_id > 0 { "REARMED" } else if shaping { "SHAPING_UP" } else if stirring { "STIRRING" } else { "REJECTED" },
+        lifecycle_phase: if shaping && window.episode_id > 0 { "REARMED" } else if shaping { "TRIGGER_READY" } else if stirring { "STIRRING" } else { "REJECTED" },
         shadow_mode: !shaping, recipe_score: score, recipe_present: present,
         recipe_missing: missing, trigger_distance_pct: trigger_distance,
         base_extension_pct: extension, trigger_level: trigger,
@@ -354,15 +355,20 @@ fn evaluate(symbol: &str, window: &SymbolWindow) -> Evaluation {
 pub struct Engine {
     states: HashMap<String, SymbolWindow>,
     pub processed_events: usize,
+    capture_evaluations: bool,
+    evaluations: Vec<Candidate>,
 }
 
 impl Default for Engine {
     fn default() -> Self {
-        Self { states: HashMap::new(), processed_events: 0 }
+        Self { states: HashMap::new(), processed_events: 0, capture_evaluations: false, evaluations: Vec::new() }
     }
 }
 
 impl Engine {
+    pub fn with_evaluation_trace() -> Self {
+        Self { capture_evaluations: true, ..Self::default() }
+    }
     /// Process one already-validated market event and return only a fresh
     /// qualification edge. The state machine is shared by replay and live
     /// streaming so production perception cannot silently diverge from the
@@ -406,7 +412,14 @@ impl Engine {
             }
 
             let evaluation = evaluate(&event.symbol, state);
-            state.last_confidence = evaluation.candidate.as_ref().map(|c| c.confidence).unwrap_or(0);
+            if self.capture_evaluations {
+                if let Some(candidate) = evaluation.candidate.as_ref() {
+                    self.evaluations.push(candidate.clone());
+                }
+            }
+            state.last_confidence = if evaluation.phase > 0 {
+                evaluation.candidate.as_ref().map(|c| c.confidence).unwrap_or(0)
+            } else { 0 };
             state.last_confidence_at = now;
             let emit = evaluation.phase > state.phase;
             if evaluation.phase > 0 { state.phase = state.phase.max(evaluation.phase); }
@@ -457,7 +470,7 @@ pub fn parse_event_line(line: &str) -> Result<MarketEvent, String> {
 }
 
 pub fn run(events: Vec<MarketEvent>, integrity: Integrity) -> ReplayReport {
-    let mut engine = Engine::default();
+    let mut engine = Engine::with_evaluation_trace();
     let mut candidates = Vec::new();
     for event in events {
         if let Some(candidate) = engine.process_event(event) {
@@ -471,6 +484,7 @@ pub fn run(events: Vec<MarketEvent>, integrity: Integrity) -> ReplayReport {
         processed_events: engine.processed_events,
         integrity,
         candidates,
+        evaluations: engine.evaluations,
     }
 }
 #[cfg(test)]
@@ -635,6 +649,7 @@ mod tests {
         let mut engine = Engine::default();
         let streamed: Vec<Candidate> = events.into_iter().filter_map(|event| engine.process_event(event)).collect();
         assert_eq!(streamed.len(), batch.candidates.len());
+        assert!(batch.evaluations.len() >= batch.candidates.len());
         assert_eq!(engine.processed_events, batch.processed_events);
     }
 

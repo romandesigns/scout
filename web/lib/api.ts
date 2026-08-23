@@ -16,6 +16,7 @@ import type {
   PushConfig,
   TraderSettings,
   PaperTrade,
+  DevelopmentEvaluation,
 } from "./types";
 
 const configured = process.env.NEXT_PUBLIC_SCOUT_API_BASE?.replace(/\/$/, "");
@@ -201,6 +202,25 @@ export async function saveTraderSettings(value:Partial<TraderSettings>):Promise<
 export async function getPaperTrades(limit=100):Promise<PaperTrade[]>{
   const payload=await getJson<{items:PaperTrade[]}>(`/api/trader/trades?limit=${limit}`);
   return payload.items;
+}
+
+export async function getDevelopmentEvaluations(limit=100):Promise<DevelopmentEvaluation[]>{
+  const payload=await getJson<{items:DevelopmentEvaluation[]}>(`/api/development/evaluations?limit=${limit}`);
+  return payload.items;
+}
+
+export async function runDevelopmentEvaluations(value:{tickers:string[];timeframe_seconds:30|60|300;detection_at?:number;use_latest_finding:boolean;inspection_start?:number;inspection_end?:number;use_live_detector?:boolean;detector_engine?:"python"|"rust"|"both"}):Promise<DevelopmentEvaluation[]>{
+  const response=await fetch(`${API_BASE}/api/development/evaluations`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(value)});
+  if(!response.ok)throw new Error(await response.text()||`${response.status} ${response.statusText}`);
+  return ((await response.json()) as {items:DevelopmentEvaluation[]}).items;
+}
+
+export type DevelopmentReviewArtifact={ok:boolean;name:string;chart_url:string;workspace_path:string;notes_path:string;review_path:string;share_prompt:string};
+
+export async function saveDevelopmentAnnotation(id:number,image_data_url:string,notes:string):Promise<DevelopmentReviewArtifact>{
+  const response=await fetch(`${API_BASE}/api/development/evaluations/${id}/annotations`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({image_data_url,notes})});
+  if(!response.ok)throw new Error(await response.text()||`${response.status} ${response.statusText}`);
+  return response.json();
 }
 
 export async function getAttention(limit=100):Promise<AttentionItem[]> {
