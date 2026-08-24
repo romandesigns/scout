@@ -356,6 +356,20 @@ class ScoutApi:
         self.events.publish("verification", row)
         return web.json_response(row)
 
+    async def update_gate_feedback(self, request: web.Request) -> web.Response:
+        """Human feedback on whether the shadow imminent-move gate's reading
+        (candidate_profile.imminent_move_gate) was accurate for this finding."""
+        finding_id = _int(request.match_info.get("finding_id"), 0, 1, 2_147_483_647)
+        payload = await request.json()
+        feedback = payload.get("feedback")
+        if feedback not in ("accurate", "inaccurate", None):
+            raise web.HTTPBadRequest(text="feedback must be 'accurate', 'inaccurate', or null")
+        row = await asyncio.to_thread(self.store.save_gate_feedback, finding_id, feedback)
+        if not row:
+            raise web.HTTPNotFound(text="finding not found")
+        self.events.publish("verification", row)
+        return web.json_response(row)
+
     async def catalysts(self, request: web.Request) -> web.Response:
         limit = _int(request.query.get("limit"), 100, 1, 500)
         ticker = request.query.get("ticker")
@@ -664,6 +678,7 @@ def create_app(store: Store, market: MarketWatcher, events: EventHub, catalysts=
     app.router.add_post("/api/development/evaluations/{evaluation_id:\\d+}/annotations", api.save_development_annotation)
     app.router.add_post("/api/development/simulate-finding", api.simulate_finding)
     app.router.add_put("/api/findings/{finding_id:\\d+}/review", api.update_finding_review)
+    app.router.add_put("/api/findings/{finding_id:\\d+}/gate-feedback", api.update_gate_feedback)
     app.router.add_get("/api/catalysts", api.catalysts)
     app.router.add_get("/api/market/gainers", api.gainers)
     app.router.add_get("/api/market/halts", api.halts)

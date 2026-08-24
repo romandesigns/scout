@@ -268,7 +268,8 @@ class Store:
                     user_agrees INTEGER,
                     reason_tags_json TEXT,
                     notes TEXT,
-                    reviewed_at INTEGER
+                    reviewed_at INTEGER,
+                    gate_feedback TEXT
                 );
                 CREATE TABLE IF NOT EXISTS web_push_subscriptions (
                     endpoint TEXT PRIMARY KEY,
@@ -285,6 +286,7 @@ class Store:
                 ("verified", "INTEGER NOT NULL DEFAULT 0"),
                 ("verification_method", "TEXT"),
             ])
+            self._ensure_columns("finding_reviews", [("gate_feedback", "TEXT")])
             # hybrid_key is a migrated column, so create its index only after
             # _ensure_columns has guaranteed that the column exists on older DBs.
             self.db.execute(
@@ -747,14 +749,14 @@ class Store:
                 (int(finding_id),),
             ).fetchone()
             review_row = self.db.execute(
-                "SELECT automatic_grade,automatic_label,user_grade,user_agrees,reason_tags_json,notes,reviewed_at FROM finding_reviews WHERE finding_id=?",
+                "SELECT automatic_grade,automatic_label,user_grade,user_agrees,reason_tags_json,notes,reviewed_at,gate_feedback FROM finding_reviews WHERE finding_id=?",
                 (int(finding_id),),
             ).fetchone()
         outcome = dict(zip(["max_1m_pct","max_5m_pct","max_15m_pct","max_session_pct","time_to_peak_seconds","updated_at"], outcome_row)) if outcome_row else None
         grade, label, reasons = self._automatic_grade(finding, outcome)
         review = None
         if review_row:
-            review = dict(zip(["automatic_grade","automatic_label","user_grade","user_agrees","reason_tags_json","notes","reviewed_at"], review_row))
+            review = dict(zip(["automatic_grade","automatic_label","user_grade","user_agrees","reason_tags_json","notes","reviewed_at","gate_feedback"], review_row))
             try: review["reason_tags"] = json.loads(review.pop("reason_tags_json") or "[]")
             except Exception: review["reason_tags"] = []
         return {"finding": finding, "outcome": outcome, "automatic_grade": grade, "automatic_label": label, "grade_reasons": reasons, "delivery": self.finding_delivery(finding_id), "review": review, "legacy_delivery_audit": not bool(self.finding_delivery(finding_id))}
@@ -769,6 +771,22 @@ class Store:
             self.db.execute(
                 "INSERT INTO finding_reviews(finding_id,automatic_grade,automatic_label,user_grade,user_agrees,reason_tags_json,notes,reviewed_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(finding_id) DO UPDATE SET automatic_grade=excluded.automatic_grade,automatic_label=excluded.automatic_label,user_grade=excluded.user_grade,user_agrees=excluded.user_agrees,reason_tags_json=excluded.reason_tags_json,notes=excluded.notes,reviewed_at=excluded.reviewed_at",
                 (int(finding_id), grade, label, user_grade, None if user_agrees is None else int(user_agrees), json.dumps(reason_tags), notes[:4000], int(time.time())),
+            )
+            self.db.commit()
+        return self.finding_verification(finding_id)
+
+    def save_gate_feedback(self, finding_id: int, feedback: str | None) -> dict[str, Any] | None:
+        """Record whether a human found the shadow imminent-move gate's reading
+        (candidate_profile.imminent_move_gate) accurate for this finding, without
+        disturbing any existing general finding review on the same row."""
+        verification = self.finding_verification(finding_id)
+        if not verification:
+            return None
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO finding_reviews(finding_id,gate_feedback,reviewed_at) VALUES(?,?,?) "
+                "ON CONFLICT(finding_id) DO UPDATE SET gate_feedback=excluded.gate_feedback, reviewed_at=excluded.reviewed_at",
+                (int(finding_id), feedback, int(time.time())),
             )
             self.db.commit()
         return self.finding_verification(finding_id)

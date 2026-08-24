@@ -59,6 +59,12 @@ export async function saveFindingReview(id:number,value:{user_grade?:number|null
   return response.json();
 }
 
+export async function saveGateFeedback(id:number,feedback:"accurate"|"inaccurate"|null):Promise<FindingVerification> {
+  const response=await fetch(`${API_BASE}/api/findings/${id}/gate-feedback`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({feedback})});
+  if(!response.ok)throw new Error(await response.text()||`${response.status} ${response.statusText}`);
+  return response.json();
+}
+
 export async function reportClientDisplayed(id:number,channel:string,surface:string):Promise<void> {
   if(!id)return;
   await fetch(`${API_BASE}/api/findings/${id}/client-displayed`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({channel,surface}),keepalive:true});
