@@ -2,6 +2,7 @@
 
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Line, PolarAngleAxis, PolarGrid, Radar, RadarChart, RadialBar, RadialBarChart, XAxis, YAxis } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
+import { ScoutTooltip } from "@/components/ui/tooltip";
 import type { Finding, ValidationRow } from "@/lib/types";
 
 const axis={fontSize:9,fill:"var(--muted-2)"};
@@ -30,6 +31,19 @@ export function VelocityChart({finding}:{finding:Finding}){
 export function ParticipationChart({finding}:{finding:Finding}){
   const data=[{window:"15s",dollars:finding.dollar_volume_15s??0,trades:finding.trades_15s??0,rvol:finding.vol_ratio_15s??0},{window:"30s",dollars:finding.dollar_volume_30s??0,trades:finding.trades_30s??0,rvol:finding.vol_ratio_30s??0}];
   return <ChartContainer className="h-[135px]" config={{dollars:{color:"var(--cyan)"},trades:{color:"var(--blue)"},rvol:{color:"var(--orange)"}}}><ComposedChart data={data} margin={{top:8,right:8,bottom:0,left:-16}}><CartesianGrid vertical={false} stroke="rgba(139,159,181,.08)"/><XAxis dataKey="window" tick={axis} axisLine={false} tickLine={false}/><YAxis tick={axis} axisLine={false} tickLine={false}/><Area type="monotone" dataKey="dollars" name="$ volume" stroke="var(--cyan)" fill="var(--cyan)" fillOpacity={.12}/><Line type="monotone" dataKey="trades" name="Trades" stroke="var(--blue)" dot={{r:2}}/><Line type="monotone" dataKey="rvol" name="RVOL" stroke="var(--orange)" dot={{r:2}}/><ChartTooltip content={<ChartTooltipContent/>}/></ComposedChart></ChartContainer>;
+}
+
+export function SignalMicroChart({values,tone="green",label="Short-window move"}:{values:Array<number|null|undefined>;tone?:"green"|"blue"|"orange"|"red";label?:string}){
+  const color=`var(--${tone})`;
+  const data=values.map((value,index)=>({window:["5s","15s","30s"][index]??String(index+1),value:value??0}));
+  return <ChartContainer aria-label={label} className="signal-micro-chart" config={{value:{label,color}}}><AreaChart data={data} margin={{top:3,right:2,bottom:1,left:2}}><defs><linearGradient id={`micro-${tone}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity={.34}/><stop offset="100%" stopColor={color} stopOpacity={.02}/></linearGradient></defs><Area type="monotone" dataKey="value" stroke={color} strokeWidth={1.7} fill={`url(#micro-${tone})`} dot={false}/><ChartTooltip content={<ChartTooltipContent/>}/></AreaChart></ChartContainer>;
+}
+
+export function EvidenceRadial({value,max=10,tone="blue",label="Evidence"}:{value:number;max?:number;tone?:"green"|"blue"|"orange"|"red";label?:string}){
+  const safe=Math.max(0,Math.min(max,value));
+  const percent=max?Math.round(safe/max*100):0;
+  const color=`var(--${tone})`;
+  return <ScoutTooltip content={`${label}: ${safe}/${max}`}><div className="evidence-radial" role="img" aria-label={`${label} ${safe} of ${max}`}><ChartContainer config={{value:{label,color}}}><RadialBarChart data={[{value:percent,fill:color}]} startAngle={90} endAngle={-270} innerRadius="70%" outerRadius="100%"><RadialBar dataKey="value" background={{fill:"rgba(139,159,181,.10)"}} cornerRadius={8}/></RadialBarChart></ChartContainer><b>{safe}</b></div></ScoutTooltip>;
 }
 
 export function ValidationOutcomeChart({rows}:{rows:ValidationRow[]}){

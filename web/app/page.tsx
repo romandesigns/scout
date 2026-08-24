@@ -4,12 +4,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import {
   IconActivity,
+  IconAlertTriangle,
+  IconArchive,
   IconAdjustmentsFilled,
   IconBellFilled,
   IconBolt,
   IconChartBar,
   IconChevronDown,
   IconChevronUp,
+  IconCheck,
+  IconEye,
+  IconFileText,
+  IconBuildingBank,
+  IconBriefcase,
+  IconHeartbeat,
   IconDiamondFilled,
   IconDots,
   IconFlame,
@@ -47,7 +55,7 @@ import { Select } from "@/components/ui/select";
 import { ScoutTooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { LiveChart } from "@/components/live-chart";
 import { PwaRuntime } from "@/components/pwa-runtime";
-import { CandidateProfileChart, ParticipationChart, QualityGauge, TimeOfDayOutcomeChart, ValidationOutcomeChart, VelocityChart } from "@/components/scout-data-charts";
+import { CandidateProfileChart, EvidenceRadial, ParticipationChart, QualityGauge, SignalMicroChart, TimeOfDayOutcomeChart, ValidationOutcomeChart, VelocityChart } from "@/components/scout-data-charts";
 import {
   API_BASE,
   API_CONFIGURED,
@@ -444,6 +452,17 @@ function MomentumBadges({finding}:{finding:Finding}) {
   return <span className="flex flex-wrap items-center gap-1"><Badge data-tone={momentumTone}><IconFlame size={10}/>{momentumLabel}</Badge><Badge data-tone={stateTone}>{stateLabel}</Badge></span>;
 }
 
+function MetricChip({label,value,tone="blue",help}:{label:string;value:string;tone?:"green"|"blue"|"orange"|"red";help:string}) {
+  return <ScoutTooltip content={help}><span className="metric-chip" data-tone={tone} tabIndex={0}><small>{label}</small><b>{value}</b></span></ScoutTooltip>;
+}
+
+function moveTone(...values:Array<number|null|undefined>):"green"|"blue"|"orange"|"red" {
+  const latest=values.find(value=>value!=null)??0;
+  if(latest<0)return "red";
+  if(latest>=1)return "green";
+  return "blue";
+}
+
 function tickerDecision(finding: Finding) {
   const classification=opportunityClass(finding);
   const momentum=momentumProfile(finding);
@@ -516,21 +535,22 @@ function FindingRow({ finding, selected, onSelect, watching, onToggleWatch }: { 
       </div>
       <span className="scout-muted metric text-[10px]">{finding.notification_delivered_at?`notified ${age(finding.notification_delivered_at)}`:`detected ${age(finding.detected_at)}`}</span>
     </div>
-    <div className="mt-1 flex items-end justify-between gap-3">
-      <div><span className="metric text-[14px] font-semibold">{money(finding.price)}</span><span className="ml-2 metric text-[10px] text-[var(--green)]">{pct(finding.extension_pct)}</span></div>
-      <span className="metric text-[10px] scout-muted">evidence {finding.score}/10</span>
+    <div className="market-summary">
+      <div><span className="metric text-[14px] font-semibold">{money(finding.price)}</span><span className="ml-2 metric text-[10px]" data-move={(finding.extension_pct??0)<0?"down":"up"}>{pct(finding.extension_pct)}</span></div>
+      <SignalMicroChart values={[finding.change_5s_pct,finding.change_15s_pct,finding.change_30s_pct]} tone={moveTone(finding.change_5s_pct,finding.change_15s_pct)} label={`${finding.ticker} short-window move`}/>
+      <EvidenceRadial value={finding.score||0} tone={decision.tone as "green"|"blue"|"orange"|"red"}/>
     </div>
-    <div className="ticker-decision mt-1.5" data-tone={decision.tone}><b>{decision.reason}</b><span>{classificationLabel} · {finding.stage.replaceAll("_"," ").toLowerCase()}</span></div>
-    {chart.instruction&&<div className="mt-1 text-[10px] font-semibold text-[var(--blue)]">CHART · {chart.instruction}</div>}
+    <div className="ticker-decision mt-1" data-tone={decision.tone}><b>{decision.reason}</b><span>{classificationLabel} · {finding.stage.replaceAll("_"," ").toLowerCase()}</span></div>
+    {chart.instruction&&<ScoutTooltip content={`Chart plan: ${chart.instruction}`}><div className="chart-plan"><IconChartBar size={12}/><span>{chart.primary===60?"1m":`${chart.primary}s`}</span><IconEye size={11}/><span>{chart.trigger}s</span><span className="scout-muted">· context {chart.context===300?"5m":`${chart.context}s`}</span></div></ScoutTooltip>}
     <div className="market-metrics mt-1.5">
-      <span><b>5 sec</b> {pct(finding.change_5s_pct,1)}</span>
-      <span><b>15 sec</b> {pct(finding.change_15s_pct,1)}</span>
-      <span><b>30 sec</b> {pct(finding.change_30s_pct,1)}</span>
-      <span><b>Volume</b> {finding.vol_ratio_15s?.toFixed(1) ?? "—"}×</span>
+      <MetricChip label="5s" value={pct(finding.change_5s_pct,1)} tone={moveTone(finding.change_5s_pct)} help="Price change over the last 5 seconds"/>
+      <MetricChip label="15s" value={pct(finding.change_15s_pct,1)} tone={moveTone(finding.change_15s_pct)} help="Price change over the last 15 seconds"/>
+      <MetricChip label="30s" value={pct(finding.change_30s_pct,1)} tone={moveTone(finding.change_30s_pct)} help="Price change over the last 30 seconds"/>
+      <MetricChip label="RVOL" value={`${finding.vol_ratio_15s?.toFixed(1) ?? "—"}×`} tone={(finding.vol_ratio_15s??0)>=2?"green":"orange"} help="Relative volume versus the normal pace"/>
     </div>
     {momentum.tier!=="NORMAL"&&<div className="mt-1 text-[9px] font-semibold text-[var(--green)]">Momentum strength {momentum.score}/13{momentum.state==="FRESH"?" · entry window open":` · ${momentum.state.replaceAll("_"," ").toLowerCase()}`}</div>}
     {finding.leg_context && <div className="mt-1 text-[9px] font-semibold tracking-wide text-[var(--green)]">{finding.leg_context.replaceAll("_"," ")} · {age(finding.detected_at)} AGO</div>}
-    {risks.length ? <div className="mt-1 truncate text-[9px] text-[var(--orange)]">Caution: {risks.join(" · ")}</div> : null}
+    {risks.length ? <ScoutTooltip content={risks.join(" · ")}><div className="risk-line"><IconAlertTriangle size={11}/><span>{risks.join(" · ")}</span></div></ScoutTooltip> : null}
     <PromotionProgress finding={finding}/>
   </button>{menu&&<div className="stock-context-menu" style={{left:menu.x,top:menu.y}} onMouseLeave={()=>setMenu(null)}><Button variant="ghost" onClick={()=>{onSelect();setMenu(null);}}>Open in active chart</Button><Button variant="ghost" onClick={()=>{onSelect();setMenu(null);}}>Inspect event</Button>{onToggleWatch&&<Button variant="ghost" onClick={()=>{onToggleWatch();setMenu(null);}}>{watching?"Remove from watchlist":"Add to watchlist"}</Button>}<Button variant="ghost" onClick={()=>{void navigator.clipboard.writeText(finding.ticker);setMenu(null);}}>Copy ticker</Button><Button variant="ghost" onClick={()=>{void navigator.clipboard.writeText(`${finding.ticker} ${finding.stage} ${money(finding.price)} ${clock(finding.detected_at)}`);setMenu(null);}}>Copy alert summary</Button><Button variant="ghost" onClick={()=>{window.open(`https://www.tradingview.com/symbols/${finding.ticker}/`,`_blank`,`noopener,noreferrer`);setMenu(null);}}>Open external chart</Button></div>}</>;
 }
@@ -566,15 +586,26 @@ function GainerRows({ gainers, findings, onSelect }: { gainers:Gainer[]; finding
     const selection=scout??contextualFinding({kind:"gainer",ticker:g.symbol,title:`Top gainer · ${g.symbol}`,detail:"No Scout detection is linked to this market-gainer row.",at:Date.now()/1000,price:g.price,stage:"MARKET_GAINER"});
     return <button key={g.symbol} className="market-row" data-selected={undefined} onClick={()=>onSelect(selection)}>
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2"><span className="rank">{i+1}</span><b>{g.symbol}</b>{scout && <Badge data-tone="blue">SCOUT</Badge>}</div>
+        <div className="flex items-center gap-2"><span className="rank">{i+1}</span><b>{g.symbol}</b>{scout ? <ScoutTooltip content={`Scout detected ${scout.stage.replaceAll("_"," ").toLowerCase()}`}><Badge data-tone="blue"><IconTargetArrow size={10}/>SCOUT</Badge></ScoutTooltip> : <Badge data-tone="gray">MARKET</Badge>}</div>
         <b className="metric text-[var(--green)]">{pct(g.percent_change)}</b>
       </div>
-      <div className="mt-1 flex justify-between text-[10px]">
-        <span className="scout-muted">{scout ? `${scout.stage} @ ${money(scout.price)}${lead != null ? ` · lead ${lead.toFixed(1)}pp` : ""}` : "Not detected"}</span>
+      <div className="gainer-bar" aria-label={`${g.symbol} gain ${pct(g.percent_change)}`}><i style={{width:`${Math.min(100,Math.max(4,g.percent_change??0))}%`}}/></div>
+      <div className="mt-1 flex justify-between gap-2 text-[10px]">
+        <span className="truncate scout-muted">{scout ? `${scout.stage.replaceAll("_"," ")} · lead ${lead?.toFixed(1)??"—"}pp` : "Outside Scout detection"}</span>
         <span className="metric">{money(g.price)}</span>
       </div>
     </button>;
   })}</>;
+}
+
+function catalystVisual(category:string) {
+  const value=category.toUpperCase();
+  if(value.includes("EARNING"))return {icon:<IconChartBar size={12}/>,tone:"blue" as const,label:"Earnings or guidance"};
+  if(value.includes("FDA")||value.includes("REGUL"))return {icon:<IconHeartbeat size={12}/>,tone:"red" as const,label:"FDA or regulatory event"};
+  if(value.includes("M&A")||value.includes("STRATEGIC"))return {icon:<IconBuildingBank size={12}/>,tone:"green" as const,label:"M&A or strategic event"};
+  if(value.includes("CONTRACT")||value.includes("ORDER")||value.includes("PARTNERSHIP"))return {icon:<IconBriefcase size={12}/>,tone:"green" as const,label:"Commercial agreement"};
+  if(value.includes("SEC")||value.includes("FILING"))return {icon:<IconFileText size={12}/>,tone:"orange" as const,label:"SEC filing"};
+  return {icon:<IconDiamondFilled size={11}/>,tone:"blue" as const,label:"Market catalyst"};
 }
 
 function HaltRows({ halts, findings, onSelect }: { halts:Halt[]; findings:Finding[]; onSelect:(finding:Finding)=>void }) {
@@ -648,10 +679,10 @@ function CatalystList({ catalysts, findings=[], onSelect, emptyText="No recent c
     return Array.from(byStory.values());
   },[catalysts]);
   return <div className="min-h-0 overflow-y-auto">
-    {groups.length===0 ? <EmptyPane text={emptyText}/> : groups.map(({primary:c,tickers})=>{const related=findings.find(f=>tickers.includes(f.ticker));const selection=related??contextualFinding({kind:"catalyst",ticker:c.ticker,title:c.headline,detail:`${c.category} · ${c.source}`,at:c.published_at,stage:"CATALYST_WATCH",id:-c.id});return <div key={c.id} className="event-row" role="button" tabIndex={0} data-selected={selection.id===related?.id||undefined} onClick={()=>onSelect?.(selection)} onKeyDown={event=>{if(event.key==="Enter"||event.key===" ")onSelect?.(selection)}}>
-      <div className="flex items-center justify-between gap-2"><div className="flex items-center gap-2"><IconDiamondFilled size={10} className="text-[var(--cyan)]"/><Badge data-tone={c.score>=4?"green":"blue"}>{c.category || "Bullish"}</Badge></div><span className="text-[10px] scout-muted">{age(c.published_at)}</span></div>
+    {groups.length===0 ? <EmptyPane text={emptyText}/> : groups.map(({primary:c,tickers})=>{const visual=catalystVisual(c.category||"");const related=findings.find(f=>tickers.includes(f.ticker));const selection=related??contextualFinding({kind:"catalyst",ticker:c.ticker,title:c.headline,detail:`${c.category} · ${c.source}`,at:c.published_at,stage:"CATALYST_WATCH",id:-c.id});return <div key={c.id} className="event-row catalyst-row" role="button" tabIndex={0} data-selected={selection.id===related?.id||undefined} data-tone={visual.tone} onClick={()=>onSelect?.(selection)} onKeyDown={event=>{if(event.key==="Enter"||event.key===" ")onSelect?.(selection)}}>
+      <div className="flex items-center justify-between gap-2"><div className="flex min-w-0 items-center gap-2"><ScoutTooltip content={visual.label}><span className="catalyst-icon" data-tone={visual.tone}>{visual.icon}</span></ScoutTooltip><Badge data-tone={visual.tone}>{c.category || "Bullish"}</Badge></div><span className="text-[10px] scout-muted">{age(c.published_at)}</span></div>
       <div className="mt-1 line-clamp-2 text-[11px] leading-relaxed">{c.headline}</div>
-      <div className="mt-1 flex items-center gap-1"><span className="mr-1 text-[10px] scout-muted">{c.source}</span>{tickers.slice(0,6).map(ticker=><button key={ticker} className="catalyst-ticker" onClick={event=>{event.stopPropagation();const match=findings.find(f=>f.ticker===ticker);onSelect?.(match??contextualFinding({kind:"catalyst",ticker,title:c.headline,detail:`${c.category} · ${c.source}`,at:c.published_at,stage:"CATALYST_WATCH",id:-c.id}))}}>{ticker}</button>)}{tickers.length>6&&<span className="text-[9px] scout-muted">+{tickers.length-6}</span>}</div>
+      <div className="mt-1 flex items-center gap-1 overflow-hidden"><span className="mr-1 shrink-0 text-[10px] scout-muted">{c.source}</span>{tickers.slice(0,4).map(ticker=><button key={ticker} className="catalyst-ticker" onClick={event=>{event.stopPropagation();const match=findings.find(f=>f.ticker===ticker);onSelect?.(match??contextualFinding({kind:"catalyst",ticker,title:c.headline,detail:`${c.category} · ${c.source}`,at:c.published_at,stage:"CATALYST_WATCH",id:-c.id}))}}>{ticker}</button>)}{tickers.length>4&&<ScoutTooltip content={tickers.slice(4).join(", ")}><span className="text-[9px] scout-muted">+{tickers.length-4}</span></ScoutTooltip>}</div>
     </div>})}
   </div>;
 }
@@ -675,8 +706,17 @@ function ValidationPanel({ rows, findings, selectedId, onSelect }: { rows:Valida
 
 function AttentionInbox({ items, onOpen, onStatus }: { items:AttentionItem[]; onOpen:(item:AttentionItem)=>void; onStatus:(item:AttentionItem,status:AttentionStatus)=>void }) {
   const visible=items.filter(item=>!['dismissed','expired'].includes(item.status));
-  return <div className="flex h-full min-h-0 flex-col"><PanelTitle icon={<IconBellFilled size={13}/>} title="OPPORTUNITY INBOX" subtitle={`${visible.filter(x=>x.status==='unread').length} new · ${visible.filter(x=>x.status==='watching').length} watching`}/><div className="min-h-0 flex-1 overflow-y-auto">
-    {visible.length===0?<EmptyPane text="No opportunities need attention"/>:visible.map(item=>{const f=item.finding;return <article className="attention-row" data-priority={item.priority>=90||undefined} key={item.id}><div className="flex justify-between gap-2"><span className="flex min-w-0 items-center gap-2"><b>{f.ticker}</b><EventIcon event={f.stage}/>{f.leg_context&&<Badge data-tone="green">{f.leg_context.replaceAll('_',' ')}</Badge>}</span><span className="text-[9px] scout-muted">{age(item.updated_at)}</span></div><div className="attention-metrics">{money(f.price)} · RVOL {f.vol_ratio_15s?.toFixed(1)??'—'}× · {pct(f.change_15s_pct,1)} / 15s · {compactMoney(f.dollar_volume_15s)} / {f.trades_15s??'—'} trades</div><div className="attention-actions"><button onClick={()=>onOpen(item)}>Open</button><button data-active={item.status==='watching'||undefined} onClick={()=>onStatus(item,item.status==='watching'?'acknowledged':'watching')}>{item.status==='watching'?'Unwatch':'Watch'}</button><button onClick={()=>onStatus(item,'dismissed')}>Dismiss</button></div></article>})}
+  const unread=visible.filter(item=>item.status==='unread');
+  const markAllViewed=()=>unread.forEach(item=>onStatus(item,'acknowledged'));
+  const dismissAll=()=>{if(visible.length&&window.confirm(`Dismiss all ${visible.length} visible opportunities?`))visible.forEach(item=>onStatus(item,'dismissed'));};
+  const actions=<><ScoutTooltip content="Keep every opportunity but clear the new count"><button className="bulk-action" disabled={!unread.length} onClick={markAllViewed}><IconCheck size={12}/><span>Viewed all</span></button></ScoutTooltip><ScoutTooltip content="Dismiss every visible opportunity"><button className="bulk-action danger" disabled={!visible.length} onClick={dismissAll}><IconArchive size={12}/><span>Dismiss all</span></button></ScoutTooltip></>;
+  return <div className="flex h-full min-h-0 flex-col"><PanelTitle icon={<IconBellFilled size={13}/>} title="OPPORTUNITY INBOX" subtitle={`${unread.length} new · ${visible.filter(x=>x.status==='watching').length} watching`} actions={actions}/><div className="min-h-0 flex-1 overflow-y-auto">
+    {visible.length===0?<EmptyPane text="No opportunities need attention"/>:visible.map(item=>{const f=item.finding;const momentum=momentumProfile(f);return <article className="attention-row" data-priority={item.priority>=90||undefined} data-viewed={item.status!=='unread'||undefined} key={item.id}>
+      <div className="flex justify-between gap-2"><span className="flex min-w-0 items-center gap-2"><b className="ticker-symbol">{f.ticker}</b><EventIcon event={f.stage}/>{f.leg_context&&<Badge data-tone="green">{f.leg_context.replaceAll('_',' ')}</Badge>}</span><span className="text-[9px] scout-muted">{age(item.updated_at)}</span></div>
+      <div className="attention-summary"><div><b>{money(f.price)}</b><span data-move={(f.change_15s_pct??0)<0?"down":"up"}>{pct(f.change_15s_pct,1)} / 15s</span></div><SignalMicroChart values={[f.change_5s_pct,f.change_15s_pct,f.change_30s_pct]} tone={moveTone(f.change_5s_pct,f.change_15s_pct)} label={`${f.ticker} opportunity momentum`}/><EvidenceRadial value={momentum.score} max={13} tone={momentum.tier==="EXTREME"?"orange":"green"} label="Momentum power"/></div>
+      <div className="attention-metrics"><MetricChip label="RVOL" value={`${f.vol_ratio_15s?.toFixed(1)??'—'}×`} tone={(f.vol_ratio_15s??0)>=2?"green":"orange"} help="Relative volume"/><MetricChip label="$ VOL" value={compactMoney(f.dollar_volume_15s)} help="Dollar volume over 15 seconds"/><MetricChip label="TRADES" value={String(f.trades_15s??'—')} help="Trades over 15 seconds"/></div>
+      <div className="attention-actions"><button onClick={()=>onOpen(item)}><IconChartBar size={12}/>Open</button><button data-active={item.status==='watching'||undefined} onClick={()=>onStatus(item,item.status==='watching'?'acknowledged':'watching')}><IconEye size={12}/>{item.status==='watching'?'Unwatch':'Watch'}</button><button onClick={()=>onStatus(item,'dismissed')}><IconArchive size={12}/>Dismiss</button></div>
+    </article>})}
   </div></div>;
 }
 
@@ -785,9 +825,37 @@ function WatchlistPanel({ watchlist, findings, gainers, onSelect, onAdd, onRemov
 }
 
 
-function TwentyFourHourPanel({rows,findings,selectedId,onSelect}:{rows:TwentyFourHourStock[];findings:Finding[];selectedId?:number;onSelect:(finding:Finding)=>void}) {
+function LegacyTwentyFourHourPanel({rows,findings,selectedId,onSelect}:{rows:TwentyFourHourStock[];findings:Finding[];selectedId?:number;onSelect:(finding:Finding)=>void}) {
   const byTicker=new Map(findings.map(f=>[f.ticker,f]));
   return <div className="flex h-full min-h-0 flex-col"><PanelTitle icon={<IconHistory size={14}/>} title="24H STOCKS" subtitle={`${rows.length} BOATS verified`}/><div className="notice-box mx-2 mt-2 text-[10px]">Only symbols verified by a BOATS trade in the current trading session. Every symbol remains subject to Scout&apos;s normal quality, catalyst, stage, continuation, late-risk and notification pipeline.</div><div className="min-h-0 flex-1 overflow-y-auto">{rows.length?rows.map(row=>{const finding=(row.latest_finding?.id?findings.find(f=>f.id===row.latest_finding!.id):undefined)||byTicker.get(row.ticker);const clickable=Boolean(finding);return <button key={row.ticker} className="finding-row w-full" disabled={!clickable} onClick={()=>finding&&onSelect(finding)} data-selected={finding?.id===selectedId||undefined}><div className="min-w-0 flex-1"><div className="flex items-center gap-1.5"><b>{row.ticker}</b><Badge data-tone="blue">24H</Badge><Badge data-tone={row.actionable_rank==="A"?"green":row.actionable_rank==="B"?"orange":"gray"}>{row.actionable_rank}</Badge><span className="truncate text-[9px] scout-muted">{row.stage}</span>{finding&&<MomentumBadges finding={finding}/>}</div><div className="mt-1 flex gap-2 text-[9px] scout-muted"><span>5s {pct(row.change_5s_pct,2)}</span><span>15s {pct(row.change_15s_pct,2)}</span><span>RVOL {row.vol_ratio_15s?.toFixed(1)??"—"}×</span></div><div className="mt-1 flex gap-2 text-[9px]"><span>{row.quality_label} {row.quality_score}</span><span className="scout-muted">BOATS {age(row.last_boats_trade_at)}</span></div></div><div className="text-right"><div className="metric">{money(row.price)}</div><div className="text-[9px] scout-muted">{row.last_feed?.toUpperCase()||"—"}</div></div></button>}):<EmptyPane text="No BOATS-verified 24H stocks in the current session yet"/>}</div></div>;
+}
+
+function TwentyFourHourPanel({rows,findings,selectedId,onSelect}:{rows:TwentyFourHourStock[];findings:Finding[];selectedId?:number;onSelect:(finding:Finding)=>void}) {
+  const byTicker=useMemo(()=>new Map(findings.map(f=>[f.ticker,f])),[findings]);
+  return <div className="flex h-full min-h-0 flex-col">
+    <PanelTitle icon={<IconHistory size={14}/>} title="24H STOCKS" subtitle={`${rows.length} BOATS verified`}/>
+    <ScoutTooltip content="Only symbols verified by a BOATS trade this session. Scout quality, catalyst, stage, continuation and risk gates still apply."><div className="list-context-note"><IconHistory size={12}/><span>BOATS-verified this session</span><IconEye size={11}/></div></ScoutTooltip>
+    <div className="min-h-0 flex-1 overflow-y-auto">{rows.length?rows.map(row=>{
+      const finding=(row.latest_finding?.id?findings.find(f=>f.id===row.latest_finding!.id):undefined)||byTicker.get(row.ticker);
+      const rowTone=row.actionable_rank==="A"?"green":row.actionable_rank==="B"?"orange":"blue";
+      return <button key={row.ticker} className="market-row twenty-four-row" disabled={!finding} onClick={()=>finding&&onSelect(finding)} data-selected={finding?.id===selectedId||undefined}>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1.5"><b className="ticker-symbol">{row.ticker}</b><Badge data-tone="blue">24H</Badge><ScoutTooltip content={`Scout actionability rank ${row.actionable_rank}`}><Badge data-tone={rowTone}>{row.actionable_rank}</Badge></ScoutTooltip><span className="truncate text-[9px] scout-muted">{row.stage.replaceAll("_"," ")}</span></div>
+          <div className="text-right"><div className="metric font-semibold">{money(row.price)}</div><div className="text-[8px] scout-muted">{row.last_feed?.toUpperCase()||"—"}</div></div>
+        </div>
+        <div className="market-summary compact">
+          <SignalMicroChart values={[row.change_5s_pct,row.change_15s_pct,row.change_30s_pct]} tone={moveTone(row.change_5s_pct,row.change_15s_pct)} label={`${row.ticker} short-window move`}/>
+          <div className="market-metrics">
+            <MetricChip label="5s" value={pct(row.change_5s_pct,1)} tone={moveTone(row.change_5s_pct)} help="5-second price change"/>
+            <MetricChip label="15s" value={pct(row.change_15s_pct,1)} tone={moveTone(row.change_15s_pct)} help="15-second price change"/>
+            <MetricChip label="RVOL" value={`${row.vol_ratio_15s?.toFixed(1)??"—"}×`} tone={(row.vol_ratio_15s??0)>=2?"green":"orange"} help="Relative volume"/>
+          </div>
+          <EvidenceRadial value={Math.round((row.quality_score||0)/10)} tone={rowTone} label={`${row.quality_label} quality`}/>
+        </div>
+        <div className="row-foot"><span>{row.quality_label}</span><span>BOATS {age(row.last_boats_trade_at)}</span>{finding&&<MomentumBadges finding={finding}/>}</div>
+      </button>;
+    }):<EmptyPane text="No BOATS-verified 24H stocks in the current session yet"/>}</div>
+  </div>;
 }
 
 function PrimarySidebar({ view, findings, twentyFourHour, gainers, halts, catalysts, validation, selected, onSelect, connected, onNotifications, scanner, saveScanner, scannerBusy, scannerMessage, attention, setAttentionStatus, backendVersion, watchlist, onAddWatch, onRemoveWatch }: {
@@ -1082,7 +1150,9 @@ function OpportunitySpotlight({items,onOpen,onStatus}:{items:AttentionItem[];onO
   if(!item)return null;
   const f=item.finding;
   const momentum=momentumProfile(f);
-  return <aside className="opportunity-spotlight" aria-live="polite"><div className="spotlight-kicker"><IconBolt size={14}/> OPPORTUNITY <span>{queue.length} new</span></div><div className="spotlight-title"><b>{f.ticker}</b><EventIcon event={f.stage}/>{f.leg_context&&<Badge data-tone="green">{f.leg_context.replaceAll('_',' ')}</Badge>}<MomentumBadges finding={f}/><time>{age(item.updated_at)}</time></div><div className="spotlight-price">{money(f.price)} <span>{pct(f.change_15s_pct,1)} / 15s</span></div><div className="spotlight-evidence">RVOL {f.vol_ratio_15s?.toFixed(1)??'—'}× · {compactMoney(f.dollar_volume_15s)} · {f.trades_15s??'—'} trades{momentum.tier!=="NORMAL"?` · POWER ${momentum.score}/13`:""}</div><div className="spotlight-actions"><Button onClick={()=>onOpen(item)}>Open chart</Button><Button variant="ghost" onClick={()=>onStatus(item,'watching')}>Watch</Button><Button variant="ghost" onClick={()=>onStatus(item,'dismissed')}>Dismiss</Button></div><div className="spotlight-rule">Charts and Inspector stay unchanged until you open it.</div></aside>;
+  const markAllViewed=()=>queue.forEach(entry=>onStatus(entry,'acknowledged'));
+  const dismissAll=()=>{if(window.confirm(`Dismiss all ${queue.length} new opportunities?`))queue.forEach(entry=>onStatus(entry,'dismissed'));};
+  return <aside className="opportunity-spotlight" aria-live="polite"><div className="spotlight-kicker"><IconBolt size={14}/> OPPORTUNITY <span>{queue.length} new</span><ScoutTooltip content="Mark all new opportunities viewed"><button onClick={markAllViewed}><IconCheck size={12}/></button></ScoutTooltip><ScoutTooltip content="Dismiss all new opportunities"><button onClick={dismissAll}><IconArchive size={12}/></button></ScoutTooltip></div><div className="spotlight-title"><b>{f.ticker}</b><EventIcon event={f.stage}/>{f.leg_context&&<Badge data-tone="green">{f.leg_context.replaceAll('_',' ')}</Badge>}<MomentumBadges finding={f}/><time>{age(item.updated_at)}</time></div><div className="spotlight-visual"><div className="spotlight-price">{money(f.price)} <span>{pct(f.change_15s_pct,1)} / 15s</span></div><SignalMicroChart values={[f.change_5s_pct,f.change_15s_pct,f.change_30s_pct]} tone={moveTone(f.change_5s_pct,f.change_15s_pct)} label={`${f.ticker} opportunity momentum`}/><EvidenceRadial value={momentum.score} max={13} tone={momentum.tier==="EXTREME"?"orange":"green"} label="Power"/></div><div className="spotlight-evidence"><MetricChip label="RVOL" value={`${f.vol_ratio_15s?.toFixed(1)??'—'}×`} tone={(f.vol_ratio_15s??0)>=2?"green":"orange"} help="Relative volume"/><MetricChip label="$ VOL" value={compactMoney(f.dollar_volume_15s)} help="15-second dollar volume"/><MetricChip label="TRADES" value={String(f.trades_15s??'—')} help="15-second trades"/></div><div className="spotlight-actions"><Button onClick={()=>onOpen(item)}><IconChartBar size={13}/>Open chart</Button><Button variant="ghost" onClick={()=>onStatus(item,'watching')}><IconEye size={13}/>Watch</Button><Button variant="ghost" onClick={()=>onStatus(item,'dismissed')}><IconArchive size={13}/>Dismiss</Button></div><ScoutTooltip content="Charts and Inspector remain unchanged until this opportunity is opened."><div className="spotlight-rule"><IconEye size={11}/>Preview only</div></ScoutTooltip></aside>;
 }
 
 function DesktopWorkbench(props:WorkbenchProps) {

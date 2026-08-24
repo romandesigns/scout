@@ -1,3 +1,13 @@
+## 6.11.1 — Scannable market lists and opportunity controls
+
+- Replace repeated Radar and 24H stock prose with compact momentum charts, evidence
+  gauges, semantic metric chips, contextual icons, and tooltips.
+- Give catalyst categories distinct visual roles and simplify Top Gainers with compact
+  gain bars and clearer Scout detection state.
+- Add synchronized mark-all-viewed and dismiss-all controls to the Opportunity Inbox
+  and spotlight, with confirmation before bulk dismissal.
+- Preserve responsive touch targets while reducing the reading burden of dense lists.
+
 ## 6.8.8 — Actionable radar semantics
 
 - Restores strict Group-A setups to Actionable independently of profitability validation.
