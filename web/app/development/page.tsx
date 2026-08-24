@@ -2,11 +2,13 @@
 
 import {useCallback,useEffect,useMemo,useState} from "react";
 import {IconArrowLeft,IconBug,IconChartCandle,IconFlask,IconRefresh,IconReportAnalytics,IconZoomIn} from "@tabler/icons-react";
+import {Bar,BarChart,CartesianGrid,Cell,PolarAngleAxis,PolarGrid,Radar,RadarChart,RadialBar,RadialBarChart,Tooltip as RechartsTooltip,XAxis,YAxis} from "recharts";
 import {API_BASE,getDevelopmentEvaluations,getStatus,runDevelopmentEvaluations} from "@/lib/api";
 import type {DevelopmentEvaluation,ScoutStatus} from "@/lib/types";
 import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
 import {Badge} from "@/components/ui/badge";
+import {ChartContainer,ChartTooltipContent} from "@/components/ui/chart";
 import {ChartAnnotationEditor} from "@/components/chart-annotation-editor";
 
 type Tab="chart-review"|"insights"|"debugging"|"testing";
@@ -42,7 +44,8 @@ export default function DevelopmentPage(){
       const saved=localStorage.getItem(INSPECTION_RANGE_STORAGE_KEY);
       if(saved){
         const value=JSON.parse(saved) as {enabled?:boolean;start?:string;end?:string;liveDetector?:boolean;detectorEngine?:"python"|"rust"|"both"};
-        setInspectRange(Boolean(value.enabled));setRangeStart(value.start||"");setRangeEnd(value.end||"");
+        const hasSavedRange=Boolean(value.enabled&&value.start&&value.end);
+        setInspectRange(hasSavedRange);setRangeStart(value.start||"");setRangeEnd(value.end||"");
         setUseLiveDetector(Boolean(value.liveDetector));
         setDetectorEngine(value.detectorEngine||"rust");
       }
@@ -83,36 +86,36 @@ export default function DevelopmentPage(){
     avgR:mature.length?mature.reduce((sum,item)=>sum+(item.metrics.max_favorable_r||0),0)/mature.length:0,
     hit3:mature.length?mature.filter(item=>item.metrics.hit_3r).length/mature.length*100:0,
   }),[complete,mature]);
-  return <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
-    <header className="flex h-14 items-center justify-between border-b border-[var(--border)] px-5">
-      <div className="flex items-center gap-3"><a href="/" className="rounded-md p-2 hover:bg-[var(--muted)]" title="Back to Scout"><IconArrowLeft size={18}/></a><IconFlask className="text-[var(--blue)]" size={20}/><div><b>SCOUT DEVELOPMENT</b><div className="text-[10px] scout-muted">Testing · debugging · insights · reproducible formation audits</div></div></div>
+  return <main className="scout-shell development-shell">
+    <header className="development-titlebar">
+      <div className="development-titlebar-left"><a href="/" className="icon-button" title="Back to Scout"><IconArrowLeft size={16}/></a><span className="development-brand-mark"><IconFlask size={15}/></span><div><b className="development-title">SCOUT DEVELOPMENT</b><div className="development-subtitle">Formation audits · detector validation · replay evidence</div></div></div>
       <div className="flex items-center gap-2"><Badge data-tone={status?"green":"red"}>{status?`BACKEND ${status.version}`:"OFFLINE"}</Badge><Button variant="ghost" onClick={()=>void refresh()}><IconRefresh size={15}/> Refresh</Button></div>
     </header>
-    <nav className="flex gap-1 border-b border-[var(--border)] px-5 py-2">{tabs.map(item=><Button key={item.id} variant={tab===item.id?"default":"ghost"} onClick={()=>setTab(item.id)}>{item.icon}{item.label}</Button>)}</nav>
-    <section className="mx-auto max-w-[1680px] p-5">
-      {tab==="chart-review"&&<div className="grid gap-4 xl:grid-cols-[390px_1fr]">
-        <aside className="space-y-4 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4">
+    <nav className="development-tabs">{tabs.map(item=><Button key={item.id} variant={tab===item.id?"default":"ghost"} onClick={()=>setTab(item.id)}>{item.icon}{item.label}</Button>)}</nav>
+    <section className="development-content">
+      {tab==="chart-review"&&<div className="development-layout">
+        <aside className="development-sidebar">
           <div><h2 className="font-semibold">Formation evaluator</h2><p className="mt-1 text-xs scout-muted">Enter tickers and reconstruct standardized charts from Alpaca market data around Scout&apos;s original detection.</p></div>
-          <label className="block text-xs">Tickers<Input className="mt-1" value={tickers} onChange={event=>setTickers(event.target.value)} onKeyDown={event=>{if(event.key==="Enter"&&!busy){event.preventDefault();void run();}}} placeholder="PACB, IVVD, GOSS"/></label>
-          <div className="grid grid-cols-3 gap-2">{([30,60,300] as const).map(value=><Button key={value} variant={timeframe===value?"default":"ghost"} onClick={()=>setTimeframe(value)}>{value===30?"30 sec":value===60?"1 min":"5 min"}</Button>)}</div>
-          <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={useLatest} onChange={event=>setUseLatest(event.target.checked)}/>Use each ticker&apos;s latest Scout detection</label>
-          {!useLatest&&<label className="block text-xs">Detection time<Input className="mt-1" type="datetime-local" value={when} onChange={event=>setWhen(event.target.value)}/></label>}
-          <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={inspectRange} onChange={event=>setInspectRange(event.target.checked)}/>Inspect a specific chart section</label>
-          {inspectRange&&<div className="grid gap-2"><label className="block text-xs">Section start<Input className="mt-1" type="datetime-local" value={rangeStart} onChange={event=>setRangeStart(event.target.value)}/></label><label className="block text-xs">Section end<Input className="mt-1" type="datetime-local" value={rangeEnd} onChange={event=>setRangeEnd(event.target.value)}/></label><div className="text-[10px] scout-muted">Up to 24 hours. When detection matching is enabled, Scout selects the latest detection inside this range.</div>
-            <label className="flex items-start gap-2 text-xs"><input type="checkbox" className="mt-0.5" checked={useLiveDetector} onChange={event=>setUseLiveDetector(event.target.checked)}/><span>Run Scout&apos;s live detector over this window <span className="scout-muted">(slower — replays real tick data through the actual production detector instead of looking up stored detections; answers &quot;what would Scout have flagged here&quot; for a ticker/date Scout never actually watched. Capped at 4 hours.)</span></span></label>
+          <label className="development-control"><span className="development-control-label">Tickers</span><Input aria-describedby="ticker-help" value={tickers} onChange={event=>setTickers(event.target.value)} onKeyDown={event=>{if(event.key==="Enter"&&!busy){event.preventDefault();void run();}}} placeholder="PACB, IVVD, GOSS"/><span id="ticker-help" className="development-help">Comma- or space-separated symbols</span></label>
+          <fieldset className="development-fieldset"><legend>Chart timeframe</legend><div className="grid grid-cols-3 gap-2">{([30,60,300] as const).map(value=><Button key={value} type="button" aria-pressed={timeframe===value} variant={timeframe===value?"default":"ghost"} onClick={()=>setTimeframe(value)}>{value===30?"30 sec":value===60?"1 min":"5 min"}</Button>)}</div></fieldset>
+          <label className="development-check"><input type="checkbox" checked={useLatest} onChange={event=>setUseLatest(event.target.checked)}/><span>Use each ticker&apos;s latest Scout detection</span></label>
+          {!useLatest&&<label className="development-control"><span className="development-control-label">Detection time</span><Input type="datetime-local" value={when} onChange={event=>setWhen(event.target.value)}/></label>}
+          <label className="development-check"><input type="checkbox" checked={inspectRange} onChange={event=>setInspectRange(event.target.checked)}/><span>Inspect a specific chart section</span></label>
+          {inspectRange&&<div className="development-range"><div className="grid gap-2 sm:grid-cols-2"><label className="development-control"><span className="development-control-label">Section start</span><Input type="datetime-local" value={rangeStart} onChange={event=>setRangeStart(event.target.value)}/></label><label className="development-control"><span className="development-control-label">Section end</span><Input type="datetime-local" value={rangeEnd} onChange={event=>setRangeEnd(event.target.value)}/></label></div><div className="development-help">Up to 24 hours. Scout selects the latest detection inside this range.</div>
+            <label className="development-check development-check-detail"><input type="checkbox" checked={useLiveDetector} onChange={event=>setUseLiveDetector(event.target.checked)}/><span>Run Scout&apos;s live detector over this window <span className="scout-muted">Slower tick-level replay through the production detector; capped at 4 hours.</span></span></label>
             {useLiveDetector&&<label className="block text-xs">Replay engine<select className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--background)] p-2" value={detectorEngine} onChange={event=>setDetectorEngine(event.target.value as "python"|"rust"|"both")}><option value="rust">Rust recipes (recommended)</option><option value="both">Rust + Python comparison</option><option value="python">Python detector only</option></select></label>}
           </div>}
-          <Button className="w-full" disabled={busy} onClick={()=>void run()}>{busy?(inspectRange&&useLiveDetector?"Running live detector…":"Building audits…"):(inspectRange&&useLiveDetector?"Run Scout's live detector":"Run Alpaca chart audit")}</Button>
-          {message&&<div className="rounded-md border border-[var(--border)] p-3 text-xs scout-muted">{message}</div>}
-          <div className="rounded-md bg-[var(--muted)] p-3 text-xs"><b>What is captured</b><ul className="mt-2 space-y-1 scout-muted"><li>By default: every Scout detection already <b>stored</b> in the visible range</li><li>With the live detector on: every detection Scout&apos;s <b>real production engine finds right now</b>, replaying that window&apos;s actual trades — for a ticker/date Scout never watched live, nothing is stored either way</li><li>Significance tier: structural breakout, continuation pulse, or reaction bounce</li><li>Where Scout&apos;s notification gate would have fired (preview)</li><li><b>Real bullish momentum zones</b> — computed straight from price/volume, independent of Scout — shaded green if a Tier 1/2 or would-notify detection caught it inside its lead window, orange if not, so you can see detector accuracy directly on the chart</li><li>15–30 second target area after each detection</li><li>Shadow ML gate pass, reject, or unscored status</li><li>Trigger and invalidation</li><li>30s, 1m, 5m and 15m excursion</li><li>Maximum favorable/adverse R</li></ul></div>
+          <Button className="w-full" aria-busy={busy} disabled={busy} onClick={()=>void run()}>{busy?(inspectRange&&useLiveDetector?"Running live detector…":"Building audits…"):(inspectRange&&useLiveDetector?"Run Scout's live detector":"Run Alpaca chart audit")}</Button>
+          {message&&<div className="development-message" role="status" aria-live="polite">{message}</div>}
+          <details className="development-captured"><summary>What is captured</summary><ul className="mt-2 space-y-1 scout-muted"><li>Stored Scout detections in the selected range</li><li>Optional production-detector replay over real tick data</li><li>Significance, notification preview, momentum zones, and excursion metrics</li></ul></details>
         </aside>
-        <div className="space-y-4">
-          {!items.length&&<div className="flex min-h-[420px] items-center justify-center rounded-lg border border-dashed border-[var(--border)] scout-muted">Run an audit to create the first chart review.</div>}
-          {items.map(item=><article key={item.id} className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--panel)]">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] p-3"><div className="flex items-center gap-2"><b>{item.ticker}</b><Badge data-tone={tone(item.metrics.verdict)}>{item.status==="error"?"ERROR":item.metrics.verdict||"COMPLETE"}</Badge>{item.metrics.use_live_detector&&<Badge data-tone="blue">LIVE DETECTOR REPLAY</Badge>}<span className="text-xs scout-muted">{item.timeframe_seconds}s · {new Date(item.detection_at*1000).toLocaleString()}</span></div>{item.finding_id&&<a className="text-xs text-[var(--blue)]" href={`/?ticker=${item.ticker}&finding=${item.finding_id}`}>Open Scout detection →</a>}</div>
-            {item.status==="error"?<div className="p-5 text-sm text-[var(--red)]">{item.error}</div>:<div className="grid xl:grid-cols-[1fr_250px]">
+        <div className="development-results">
+          {!items.length&&<div className="development-empty"><IconChartCandle size={20}/><span>Run an audit to create the first chart review.</span></div>}
+          {items.map(item=><article key={item.id} className="development-card">
+            <div className="development-card-header"><div className="flex items-center gap-2"><b className="ticker-symbol">{item.ticker}</b><Badge data-tone={tone(item.metrics.verdict)}>{item.status==="error"?"ERROR":item.metrics.verdict||"COMPLETE"}</Badge>{item.metrics.use_live_detector&&<Badge data-tone="blue">LIVE DETECTOR REPLAY</Badge>}<span className="text-xs scout-muted">{item.timeframe_seconds}s · {new Date(item.detection_at*1000).toLocaleString()}</span></div>{item.finding_id&&<a className="text-xs text-[var(--blue)]" href={`/?ticker=${item.ticker}&finding=${item.finding_id}`}>Open Scout detection →</a>}</div>
+            {item.status==="error"?<div className="p-5 text-sm text-[var(--red)]">{item.error}</div>:<div className="development-card-body">
               <div>{item.metrics.detection_note&&<div className="border-b border-[var(--border)] px-3 py-2 text-xs scout-muted">{item.metrics.detection_note}</div>}{item.chart_url&&<button type="button" className="group relative block w-full cursor-zoom-in" onClick={()=>setExpandedChart({evaluationId:item.id,ticker:item.ticker,src:`${API_BASE}${item.chart_url}`,alt:`${item.ticker} formation audit with marked detections`})} aria-label={`Enlarge and annotate ${item.ticker} formation audit chart`}><img src={`${API_BASE}${item.chart_url}`} alt={`${item.ticker} formation audit with marked detections`} className="w-full bg-white/5"/><span className="absolute right-3 top-3 flex items-center gap-1 rounded-md bg-black/75 px-2 py-1 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"><IconZoomIn size={15}/> Enlarge & annotate</span></button>}<div className="flex flex-wrap gap-3 border-t border-[var(--border)] px-3 py-2 text-[10px] scout-muted"><span><b className="text-[#ff5d73]">Red</b> Tier 1 breakout</span><span><b className="text-[#4aa8ff]">Blue</b> Tier 2 continuation</span><span><b className="text-[#6b7686]">Gray</b> Tier 3 bounce</span><span><b className="text-[#39d2c0]">Cyan star</b> would notify (preview)</span><span><b className="text-[#2ed6a1]">Green shading</b> real momentum, caught</span><span><b className="text-[#ffb020]">Orange shading</b> real momentum, missed</span><span>Shading = +15s to +30s area</span></div></div>
-              <div className="grid grid-cols-2 gap-px bg-[var(--border)] text-xs xl:grid-cols-1">{[
+              <EvaluationVisuals metrics={item.metrics}/><div className="development-metrics grid grid-cols-2 gap-px text-xs xl:grid-cols-1">{[
                 ["Detections marked",String(item.metrics.detections_marked||0)],["Rust evaluations",String(item.metrics.rust_evaluation_count||0)],["Rust rejected",String(item.metrics.rust_rejected_count||0)],["Tier 1 / 2 / 3",`${item.metrics.tier_counts?.tier_1||0} / ${item.metrics.tier_counts?.tier_2||0} / ${item.metrics.tier_counts?.tier_3||0}`],["Would notify (preview)",String(item.metrics.would_notify_preview_marked||0)],["Gate passes",String(item.metrics.gate_passes_marked||0)],
                 ["Real momentum zones",String(item.metrics.momentum_zones_marked||0)],["Caught by Scout",`${item.metrics.momentum_zones_caught||0}/${item.metrics.momentum_zones_marked||0}`],["Detector recall",item.metrics.objective_zone_metrics?.recall_pct==null?"—":`${num(item.metrics.objective_zone_metrics.recall_pct,0)}%`],["Detector precision",item.metrics.objective_zone_metrics?.precision_pct==null?"—":`${num(item.metrics.objective_zone_metrics.precision_pct,0)}%`],["Median lead",item.metrics.objective_zone_metrics?.median_lead_seconds==null?"—":`${num(item.metrics.objective_zone_metrics.median_lead_seconds,0)}s`],
                 ["Lifecycle",item.metrics.unified_evidence?.phase||"—"],["Supply family",item.metrics.unified_evidence?.supply==null?"—":`${num(item.metrics.unified_evidence.supply,0)}/100`],["Compression",item.metrics.unified_evidence?.compression_quality==null?"—":`${num(item.metrics.unified_evidence.compression_quality,0)}/100`],["Box quality",item.metrics.unified_evidence?.box?.quality==null?"—":`${num(item.metrics.unified_evidence.box.quality,0)}/100`],["Pullback quality",item.metrics.unified_evidence?.pullback?.quality==null?"—":`${num(item.metrics.unified_evidence.pullback.quality,0)}/100`],
@@ -129,6 +132,49 @@ export default function DevelopmentPage(){
     {expandedChart&&<ChartAnnotationEditor {...expandedChart} onClose={()=>setExpandedChart(null)}/>} 
   </main>;
 }
+
+type EvaluationMetrics=DevelopmentEvaluation["metrics"];
+const chartAxis={fontSize:9,fill:"var(--muted-2)"};
+const chartGrid={stroke:"rgba(139,159,181,.08)"};
+const scored=(value:number|undefined|null)=>value==null?null:Math.max(0,Math.min(100,value));
+
+function EvaluationVisuals({metrics}:{metrics:EvaluationMetrics}){
+  const excursion=[
+    {window:"30s",value:metrics.max_30s_pct??null},{window:"1m",value:metrics.max_1m_pct??null},
+    {window:"5m",value:metrics.max_5m_pct??null},{window:"15m",value:metrics.max_15m_pct??null},
+  ];
+  const tiers=[
+    {name:"Tier 1",value:metrics.tier_counts?.tier_1??0},{name:"Tier 2",value:metrics.tier_counts?.tier_2??0},
+    {name:"Tier 3",value:metrics.tier_counts?.tier_3??0},{name:"Notify",value:metrics.would_notify_preview_marked??0},
+    {name:"Gate",value:metrics.gate_passes_marked??0},
+  ];
+  const precision=scored(metrics.objective_zone_metrics?.precision_pct);
+  const recall=scored(metrics.objective_zone_metrics?.recall_pct);
+  const capture=scored(metrics.capture_efficiency_pct);
+  const gauge=[{name:"Capture",value:capture??0,fill:"var(--green)"}];
+  const evidence=[
+    ["Supply family",metrics.unified_evidence?.supply],
+    ["Compression",metrics.unified_evidence?.compression_quality],
+    ["Box quality",metrics.unified_evidence?.box?.quality],
+    ["Pullback quality",metrics.unified_evidence?.pullback?.quality],
+  ] as const;
+  return <div className="development-visuals">
+    <div className="development-stat-grid">
+      <StatTile label="MFE" value={metrics.max_favorable_r==null?"—":`${num(metrics.max_favorable_r)}R`} tone="green"/>
+      <StatTile label="MAE" value={metrics.max_adverse_r==null?"—":`${num(metrics.max_adverse_r)}R`} tone="red"/>
+      <StatTile label="Capture efficiency" value={capture==null?"—":`${num(capture,1)}%`} tone="blue"/>
+      <div className="development-stat-tile"><span>Outcome</span><Badge data-tone={tone(metrics.verdict)}>{metrics.verdict||"UNSCORED"}</Badge><small>{metrics.first_touch||"No first-touch result"}</small></div>
+    </div>
+    <div className="development-chart-grid">
+      <div className="development-chart-panel"><div className="development-chart-heading"><span>FORWARD EXCURSION</span><small>maximum favorable move</small></div><ChartContainer className="h-[132px]" config={{move:{color:"var(--green)"}}}><BarChart data={excursion} margin={{top:8,right:8,bottom:0,left:-18}}><CartesianGrid vertical={false} {...chartGrid}/><XAxis dataKey="window" tick={chartAxis} axisLine={false} tickLine={false}/><YAxis tick={chartAxis} axisLine={false} tickLine={false}/><Bar dataKey="value" name="Move %" fill="var(--green)" radius={[3,3,0,0]}><Cell fill="var(--green)"/><Cell fill="var(--blue)"/><Cell fill="var(--cyan)"/><Cell fill="var(--orange)"/></Bar><RechartsTooltip content={<ChartTooltipContent/>}/></BarChart></ChartContainer></div>
+      <div className="development-chart-panel"><div className="development-chart-heading"><span>DETECTION COVERAGE</span><small>marked events by class</small></div><ChartContainer className="h-[132px]" config={{coverage:{color:"var(--blue)"}}}><RadarChart data={tiers} outerRadius="66%"><PolarGrid stroke="rgba(139,159,181,.12)"/><PolarAngleAxis dataKey="name" tick={chartAxis}/><Radar dataKey="value" name="Count" stroke="var(--blue)" fill="var(--blue)" fillOpacity={.24}/><RechartsTooltip content={<ChartTooltipContent/>}/></RadarChart></ChartContainer></div>
+      <div className="development-chart-panel development-gauge-panel"><div className="development-chart-heading"><span>CAPTURE QUALITY</span><small>available move retained</small></div>{capture==null?<div className="development-unscored">No capture score</div>:<div className="development-gauge"><ChartContainer className="h-[132px]" config={{capture:{color:"var(--green)"}}}><RadialBarChart data={gauge} startAngle={220} endAngle={-40} innerRadius="66%" outerRadius="94%"><RadialBar dataKey="value" background={{fill:"rgba(139,159,181,.10)"}} cornerRadius={5}/></RadialBarChart></ChartContainer><strong>{num(capture,1)}%</strong></div>}</div>
+    </div>
+    <div className="development-evidence-panel"><div className="development-chart-heading"><span>STRUCTURE EVIDENCE</span><small>{metrics.unified_evidence?.phase||"advisory context"}</small></div><div className="development-evidence-grid">{evidence.map(([label,value])=><div key={label} className="development-evidence-row"><div><span>{label}</span><b>{value==null?"—":num(value,0)}</b></div><div className="development-progress"><i style={{width:`${scored(value)??0}%`}}/></div></div>)}<div className="development-evidence-row"><div><span>Detector recall</span><b>{recall==null?"—":`${num(recall,0)}%`}</b></div><div className="development-progress"><i data-tone="blue" style={{width:`${recall??0}%`}}/></div></div><div className="development-evidence-row"><div><span>Detector precision</span><b>{precision==null?"—":`${num(precision,0)}%`}</b></div><div className="development-progress"><i data-tone="cyan" style={{width:`${precision??0}%`}}/></div></div></div></div>
+  </div>;
+}
+
+function StatTile({label,value,tone:tileTone}:{label:string;value:string;tone:"green"|"red"|"blue"}){return <div className="development-stat-tile"><span>{label}</span><strong data-tone={tileTone}>{value}</strong></div>}
 
 function JsonCard({title,value}:{title:string;value:unknown}){return <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4"><h3 className="font-semibold">{title}</h3><pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded bg-black/20 p-3 text-[11px] text-[var(--muted-foreground)]">{JSON.stringify(value??{},null,2)}</pre></div>}
 function ToolCard({title,text,action}:{title:string;text:string;action:()=>void}){return <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5"><h3 className="font-semibold">{title}</h3><p className="my-3 text-xs scout-muted">{text}</p><Button onClick={action}>Open</Button></div>}

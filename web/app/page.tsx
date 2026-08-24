@@ -460,6 +460,19 @@ function decisionChart(finding?:Finding) {
   };
 }
 
+function isTradeGradeRadarFinding(finding:Finding) {
+  return !finding.shadow_mode
+    && (finding.actionable_rank||"").toUpperCase()==="A"
+    && (finding.quality_label||"").toUpperCase()==="CLEAN"
+    && finding.candidate_profile?.multi_timeframe?.qualified===true
+    && ["FIRST_MOVE","SECONDARY_ENTRY"].includes(opportunityClass(finding));
+}
+
+function isWithinRadarWindow(finding:Finding, developing=false) {
+  const freshness=Math.max(0,Date.now()/1000-(finding.detected_at||0));
+  return freshness <= (developing ? 2*60*60 : 45*60);
+}
+
 function FindingRow({ finding, selected, onSelect }: { finding: Finding; selected: boolean; onSelect: () => void }) {
   const [menu,setMenu]=useState<{x:number;y:number}|null>(null);
   const urgency=finding.urgency||(finding.extension_pct!=null&&finding.extension_pct>=8?"EXTENDED":finding.stage==="FIRST_LEG"?"NOW":finding.quality_label==="CLEAN"?"CONFIRMED":"WATCH");
@@ -561,22 +574,14 @@ function MarketPulse({ findings, gainers, halts, selectedId, onSelect }: { findi
   // lifecycle records remain available in Inspector/history, but they should
   // not outrank fresh opportunities in the active radar.
   const radarBuckets=useMemo(()=>{
-    const now=Date.now()/1000;
     // Actionability describes the setup in front of the user. Profit validation
     // describes the historical evidence behind that setup. They are deliberately
     // independent: an unvalidated Group-A setup remains visible for paper evaluation.
-    const isTradeGrade=(f:Finding)=>!f.shadow_mode
-      && (f.actionable_rank||"").toUpperCase()==="A"
-      && (f.quality_label||"").toUpperCase()==="CLEAN"
-      && f.candidate_profile?.multi_timeframe?.qualified===true
-      && ["FIRST_MOVE","SECONDARY_ENTRY"].includes(opportunityClass(f));
     const rankValue=(value?:string)=>value==="A"?3:value==="B"?2:1;
     const stageValue=(f:Finding)=>{
       const weights:Record<string,number>={IGNITION:8,BREAKOUT:7,SURGE:6,EARLY:5,FIRST_LEG:4,AWAKENING:3,PRE_IGNITION:2,ACTIVITY_WATCH:1};
       return weights[f.stage]??0;
     };
-    const freshness=(f:Finding)=>Math.max(0,now-(f.detected_at||0));
-    const withinLiveWindow=(f:Finding,developing:boolean)=>freshness(f) <= (developing ? 2*60*60 : 45*60);
     const sortRows=(rows:Finding[])=>rows.slice().sort((a,b)=>{
       const priorityDelta=rankValue(b.actionable_rank)-rankValue(a.actionable_rank);
       if(priorityDelta) return priorityDelta;
@@ -591,8 +596,8 @@ function MarketPulse({ findings, gainers, halts, selectedId, onSelect }: { findi
       // For otherwise comparable rows, freshest detection wins.
       return (b.detected_at||0)-(a.detected_at||0);
     });
-    const actionable=sortRows(findings.filter(f=>isTradeGrade(f)&&withinLiveWindow(f,false)));
-    const developing=sortRows(findings.filter(f=>!isTradeGrade(f)&&withinLiveWindow(f,true)));
+    const actionable=sortRows(findings.filter(f=>isTradeGradeRadarFinding(f)&&isWithinRadarWindow(f,false)));
+    const developing=sortRows(findings.filter(f=>!isTradeGradeRadarFinding(f)&&isWithinRadarWindow(f,true)));
     const all=sortRows([...actionable,...developing]);
     return {actionable,developing,all};
   },[findings]);
@@ -1018,7 +1023,7 @@ function DesktopWorkbench(props:WorkbenchProps) {
   const [dockTab,setDockTab]=useState<DockTab>("catalysts");
   const connectionLabel=connected?"LIVE":API_CONFIGURED?"OFFLINE":"DEMO";
   const feedClass=(value:boolean|null|undefined)=>value===true?"feed-ok":value===false?"feed-bad":"feed-idle";
-  const railCounts={radar:findings.filter(f=>f.quality_label==="CLEAN"&&f.stage!=="ACTIVITY_WATCH").length,"24h":twentyFourHour.length,ross:findings.filter(f=>f.ross_match).length,catalysts:catalysts.length,gainers:gainers.length,halts:halts.length,validation:validation.length,alerts:attention.filter(item=>!["dismissed","expired","acknowledged"].includes(item.status)).length};
+  const railCounts={radar:findings.filter(f=>isTradeGradeRadarFinding(f)&&isWithinRadarWindow(f,false)).length,"24h":twentyFourHour.length,ross:findings.filter(f=>f.ross_match).length,catalysts:catalysts.length,gainers:gainers.length,halts:halts.length,validation:validation.length,alerts:attention.filter(item=>!["dismissed","expired","acknowledged"].includes(item.status)).length};
 
   return <div className="desktop-workbench h-screen min-h-[680px] overflow-hidden">
     <header className="titlebar">

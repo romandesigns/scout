@@ -4,6 +4,7 @@ COPY VERSION /VERSION
 COPY web/package.json ./package.json
 RUN bun install
 COPY web ./
+RUN rm -f .env.local
 ENV NEXT_PUBLIC_SCOUT_SAME_ORIGIN=1
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN bun run build
@@ -30,8 +31,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /srv
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 COPY VERSION ./VERSION
