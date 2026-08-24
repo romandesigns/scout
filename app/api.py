@@ -13,6 +13,7 @@ from .db import Store
 from .development import evaluate_ticker, save_annotation_artifact
 from .events import EventHub
 from .market import MarketWatcher
+from .models import Finding
 from .notifiers import delivery_health, send_ntfy_test, send_resend_test, send_web_push_test
 from .replay import replay_status
 
@@ -242,6 +243,33 @@ class ScoutApi:
         limit = _int(request.query.get("limit"), 100, 1, 500)
         rows = await asyncio.to_thread(self.store.list_development_evaluations, limit)
         return web.json_response({"items": rows})
+
+    async def simulate_finding(self, request: web.Request) -> web.Response:
+        """Fire one real Finding through the production dispatch path (persist,
+        gate, queue ntfy/webpush, publish SSE) so a human can confirm Tauri,
+        an installed PWA, and a plain browser tab all receive the identical
+        event simultaneously. Local/dev testing only.
+
+        Uses stage CATALYST_ACTIVE so it bypasses the profitability-validation
+        gate real momentum alerts require (app/notifiers.py SPECIAL_STAGES),
+        and ticker ZZTEST so it can never be mistaken for a real detection.
+        """
+        if not settings.enable_finding_simulation:
+            raise web.HTTPForbidden(text="simulate_finding is disabled (set ENABLE_FINDING_SIMULATION=true)")
+        if not self.dispatcher:
+            raise web.HTTPServiceUnavailable(text="dispatcher not configured")
+        now = time.time()
+        f = Finding(
+            ticker="ZZTEST", stage="CATALYST_ACTIVE", detected_at=now, price=5.00, score=10,
+            vol_ratio_15s=8.0, vol_ratio_30s=6.0, change_60s_pct=2.0, extension_pct=1.5,
+            ema9=4.95, ema21=4.80, ema9_slope=0.05, vwap=4.90, above_vwap=True, quiet_break=True,
+            evidence=["Synthetic test finding for cross-platform notification sync verification"],
+            catalyst_headline="Scout notification sync test \u2014 safe to ignore",
+            catalyst_category="Test", catalyst_score=5, catalyst_url="https://example.com/scout-test",
+            quality_label="CLEAN", actionable_rank="A",
+        )
+        finding_id = await self.dispatcher.emit(f)
+        return web.json_response({"ok": True, "finding_id": finding_id, "ticker": f.ticker})
 
     async def run_development_evaluation(self, request: web.Request) -> web.Response:
         try:
@@ -634,6 +662,7 @@ def create_app(store: Store, market: MarketWatcher, events: EventHub, catalysts=
     app.router.add_get("/api/development/evaluations", api.development_evaluations)
     app.router.add_post("/api/development/evaluations", api.run_development_evaluation)
     app.router.add_post("/api/development/evaluations/{evaluation_id:\\d+}/annotations", api.save_development_annotation)
+    app.router.add_post("/api/development/simulate-finding", api.simulate_finding)
     app.router.add_put("/api/findings/{finding_id:\\d+}/review", api.update_finding_review)
     app.router.add_get("/api/catalysts", api.catalysts)
     app.router.add_get("/api/market/gainers", api.gainers)

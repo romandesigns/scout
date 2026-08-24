@@ -39,6 +39,8 @@ class Settings:
     app_name: str = os.getenv("APP_NAME", "StockHunter Scout")
     app_version: str = os.getenv("APP_VERSION", "").strip() or _repository_version()
     env: str = os.getenv("APP_ENV", "production")
+    # Test-only trigger for /api/development/simulate-finding; off unless explicitly enabled.
+    enable_finding_simulation: bool = _b("ENABLE_FINDING_SIMULATION", False)
     timezone: str = os.getenv("APP_TIMEZONE", "America/New_York")
     imminent_gate_model_path: Path | None = (
         Path(os.environ["IMMINENT_GATE_MODEL_PATH"])
