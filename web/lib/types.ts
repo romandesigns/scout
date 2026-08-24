@@ -82,7 +82,7 @@ export type Finding = {
   notification_reason?: string|null;
   notification_delivered_at?: number|null;
   opportunity_class?: "FIRST_MOVE"|"SECONDARY_ENTRY"|"LATE_INFORMATION_ONLY"|"EVENT"|null;
-  selection_context?: "finding"|"catalyst"|"gainer"|"halt"|"validation";
+  selection_context?: "finding"|"catalyst"|"gainer"|"halt"|"validation"|"watchlist";
   selection_title?: string;
   selection_detail?: string;
 };

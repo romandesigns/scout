@@ -95,8 +95,8 @@ import type {
   TraderSettings,
 } from "@/lib/types";
 
-type ActivityView = "radar" | "24h" | "ross" | "catalysts" | "gainers" | "halts" | "validation" | "alerts" | "settings";
-type MobileView = "radar" | "charts" | "catalysts" | "alerts" | "settings";
+type ActivityView = "radar" | "24h" | "ross" | "catalysts" | "gainers" | "halts" | "validation" | "watchlist" | "alerts" | "settings";
+type MobileView = "radar" | "charts" | "catalysts" | "watchlist" | "alerts" | "settings";
 type MarketTab = "radar" | "24h" | "ross" | "gainers" | "halted";
 type DockTab = "catalysts" | "evidence" | "validation" | "events";
 type GroupMode = 1 | 2 | 4;
@@ -141,6 +141,26 @@ function persistUiPreferences(value: UiPreferences) {
   applyUiPreferences(value);
 }
 
+const WATCHLIST_KEY = "stockhunter-scout-watchlist-v1";
+
+function readWatchlist(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(WATCHLIST_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistWatchlist(value: string[]) {
+  if (typeof window !== "undefined") {
+    try { window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(value)); } catch {}
+  }
+}
+
 type WorkbenchProps = {
   findings: Finding[];
   catalysts: Catalyst[];
@@ -161,6 +181,9 @@ type WorkbenchProps = {
   scannerMessage:string;
   attention:AttentionItem[];
   setAttentionStatus:(item:AttentionItem,status:AttentionStatus)=>Promise<void>;
+  watchlist:string[];
+  onAddWatch:(ticker:string)=>void;
+  onRemoveWatch:(ticker:string)=>void;
 };
 
 const CLIENT_VERSION=process.env.NEXT_PUBLIC_SCOUT_VERSION||"dev";
@@ -473,7 +496,7 @@ function isWithinRadarWindow(finding:Finding, developing=false) {
   return freshness <= (developing ? 2*60*60 : 45*60);
 }
 
-function FindingRow({ finding, selected, onSelect }: { finding: Finding; selected: boolean; onSelect: () => void }) {
+function FindingRow({ finding, selected, onSelect, watching, onToggleWatch }: { finding: Finding; selected: boolean; onSelect: () => void; watching?: boolean; onToggleWatch?: () => void }) {
   const [menu,setMenu]=useState<{x:number;y:number}|null>(null);
   const urgency=finding.urgency||(finding.extension_pct!=null&&finding.extension_pct>=8?"EXTENDED":finding.stage==="FIRST_LEG"?"NOW":finding.quality_label==="CLEAN"?"CONFIRMED":"WATCH");
   const momentum=momentumProfile(finding);
@@ -489,6 +512,7 @@ function FindingRow({ finding, selected, onSelect }: { finding: Finding; selecte
         <span className="ticker-symbol">{finding.ticker}</span>
         <Badge data-tone={decision.tone}>{decision.label}</Badge>
         {finding.catalyst_headline&&<Badge data-tone="blue">NEWS</Badge>}
+        {watching&&<IconPin size={10} className="text-[var(--blue)]"/>}
       </div>
       <span className="scout-muted metric text-[10px]">{finding.notification_delivered_at?`notified ${age(finding.notification_delivered_at)}`:`detected ${age(finding.detected_at)}`}</span>
     </div>
@@ -508,7 +532,7 @@ function FindingRow({ finding, selected, onSelect }: { finding: Finding; selecte
     {finding.leg_context && <div className="mt-1 text-[9px] font-semibold tracking-wide text-[var(--green)]">{finding.leg_context.replaceAll("_"," ")} · {age(finding.detected_at)} AGO</div>}
     {risks.length ? <div className="mt-1 truncate text-[9px] text-[var(--orange)]">Caution: {risks.join(" · ")}</div> : null}
     <PromotionProgress finding={finding}/>
-  </button>{menu&&<div className="stock-context-menu" style={{left:menu.x,top:menu.y}} onMouseLeave={()=>setMenu(null)}><Button variant="ghost" onClick={()=>{onSelect();setMenu(null);}}>Open in active chart</Button><Button variant="ghost" onClick={()=>{onSelect();setMenu(null);}}>Inspect event</Button><Button variant="ghost" onClick={()=>{void navigator.clipboard.writeText(finding.ticker);setMenu(null);}}>Copy ticker</Button><Button variant="ghost" onClick={()=>{void navigator.clipboard.writeText(`${finding.ticker} ${finding.stage} ${money(finding.price)} ${clock(finding.detected_at)}`);setMenu(null);}}>Copy alert summary</Button><Button variant="ghost" onClick={()=>{window.open(`https://www.tradingview.com/symbols/${finding.ticker}/`,`_blank`,`noopener,noreferrer`);setMenu(null);}}>Open external chart</Button></div>}</>;
+  </button>{menu&&<div className="stock-context-menu" style={{left:menu.x,top:menu.y}} onMouseLeave={()=>setMenu(null)}><Button variant="ghost" onClick={()=>{onSelect();setMenu(null);}}>Open in active chart</Button><Button variant="ghost" onClick={()=>{onSelect();setMenu(null);}}>Inspect event</Button>{onToggleWatch&&<Button variant="ghost" onClick={()=>{onToggleWatch();setMenu(null);}}>{watching?"Remove from watchlist":"Add to watchlist"}</Button>}<Button variant="ghost" onClick={()=>{void navigator.clipboard.writeText(finding.ticker);setMenu(null);}}>Copy ticker</Button><Button variant="ghost" onClick={()=>{void navigator.clipboard.writeText(`${finding.ticker} ${finding.stage} ${money(finding.price)} ${clock(finding.detected_at)}`);setMenu(null);}}>Copy alert summary</Button><Button variant="ghost" onClick={()=>{window.open(`https://www.tradingview.com/symbols/${finding.ticker}/`,`_blank`,`noopener,noreferrer`);setMenu(null);}}>Open external chart</Button></div>}</>;
 }
 
 // Surfaces how close a not-yet-actionable candidate is to clearing Scout's promotion
@@ -567,7 +591,7 @@ function HaltRows({ halts, findings, onSelect }: { halts:Halt[]; findings:Findin
   })}</>;
 }
 
-function MarketPulse({ findings, gainers, halts, selectedId, onSelect }: { findings: Finding[]; gainers: Gainer[]; halts: Halt[]; selectedId?: number; onSelect: (f: Finding)=>void }) {
+function MarketPulse({ findings, gainers, halts, selectedId, onSelect, watchlist, onToggleWatch }: { findings: Finding[]; gainers: Gainer[]; halts: Halt[]; selectedId?: number; onSelect: (f: Finding)=>void; watchlist?:string[]; onToggleWatch?:(ticker:string)=>void }) {
   const [scope,setScope]=useState<"actionable"|"developing"|"all">("actionable");
 
   // Radar is a live decision surface, not historical storage. Old persisted
@@ -607,7 +631,7 @@ function MarketPulse({ findings, gainers, halts, selectedId, onSelect }: { findi
     <PanelTitle icon={<IconActivity size={14}/>} title="RADAR" actions={<IconButton label="Radar filters"><IconAdjustmentsFilled size={14}/></IconButton>}/>
     <div className="radar-scope">{(["actionable","developing","all"] as const).map(value=><button key={value} data-active={scope===value||undefined} onClick={()=>setScope(value)}><span>{value}</span><span className="radar-scope-count" aria-label={`${radarBuckets[value].length} ${value}`}>{radarBuckets[value].length}</span></button>)}</div>
     <div className="min-h-0 flex-1 overflow-y-auto">
-      {visibleFindings.length ? visibleFindings.map(f => <FindingRow key={f.ticker} finding={f} selected={selectedId===f.id} onSelect={()=>onSelect(f)}/>) : <EmptyPane text={scope==="actionable"?"No fresh trade-grade setups":"No fresh candidates in this view"}/>}
+      {visibleFindings.length ? visibleFindings.map(f => <FindingRow key={f.ticker} finding={f} selected={selectedId===f.id} onSelect={()=>onSelect(f)} watching={watchlist?.includes(f.ticker)} onToggleWatch={onToggleWatch?()=>onToggleWatch(f.ticker):undefined}/>) : <EmptyPane text={scope==="actionable"?"No fresh trade-grade setups":"No fresh candidates in this view"}/>}
     </div>
   </div>;
 }
@@ -715,25 +739,72 @@ function EmptyPane({ text }: { text:string }) {
   return <div className="empty-pane"><IconActivity size={18}/><span>{text}</span></div>;
 }
 
+function WatchlistPanel({ watchlist, findings, gainers, onSelect, onAdd, onRemove }: {
+  watchlist:string[]; findings:Finding[]; gainers:Gainer[]; onSelect:(f:Finding)=>void; onAdd:(ticker:string)=>void; onRemove:(ticker:string)=>void;
+}) {
+  const [input,setInput]=useState("");
+  const findingByTicker=useMemo(()=>{
+    const map=new Map<string,Finding>();
+    for(const f of findings){
+      const existing=map.get(f.ticker);
+      if(!existing||(f.detected_at||0)>(existing.detected_at||0))map.set(f.ticker,f);
+    }
+    return map;
+  },[findings]);
+  const gainerByTicker=useMemo(()=>new Map(gainers.map(g=>[g.symbol,g])),[gainers]);
+  function submit(event:React.FormEvent){
+    event.preventDefault();
+    onAdd(input);
+    setInput("");
+  }
+  return <div className="flex h-full min-h-0 flex-col">
+    <PanelTitle icon={<IconPin size={13}/>} title="WATCHLIST" subtitle={`${watchlist.length} ticker${watchlist.length===1?"":"s"}`}/>
+    <form className="watchlist-add-row" onSubmit={submit}>
+      <input value={input} onChange={e=>setInput(e.target.value.toUpperCase())} placeholder="Add ticker…" maxLength={10} aria-label="Add ticker to watchlist"/>
+      <Button type="submit" disabled={!input.trim()}>Add</Button>
+    </form>
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      {watchlist.length ? watchlist.map(ticker=>{
+        const finding=findingByTicker.get(ticker);
+        if(finding) return <FindingRow key={ticker} finding={finding} selected={false} onSelect={()=>onSelect(finding)} watching onToggleWatch={()=>onRemove(ticker)}/>;
+        const gainer=gainerByTicker.get(ticker);
+        const placeholder=contextualFinding({kind:"watchlist",ticker,title:`Watching ${ticker}`,detail:"No live Scout detection for this ticker yet.",at:Date.now()/1000,price:gainer?.price,stage:"WATCHLIST"});
+        return <div className="watchlist-placeholder-row" key={ticker}>
+          <button className="market-row w-full" onClick={()=>onSelect(placeholder)}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="ticker-symbol">{ticker}</span>
+              <span className="scout-muted metric text-[10px]">{gainer?money(gainer.price):"Not currently active"}</span>
+            </div>
+            <div className="mt-1 text-[9px] scout-muted">No live Scout detection yet — full detail will appear here once one fires.</div>
+          </button>
+          <IconButton label={`Remove ${ticker} from watchlist`} onClick={()=>onRemove(ticker)}><IconX size={13}/></IconButton>
+        </div>;
+      }) : <EmptyPane text="Add a ticker above to start tracking it"/>}
+    </div>
+  </div>;
+}
+
 
 function TwentyFourHourPanel({rows,findings,selectedId,onSelect}:{rows:TwentyFourHourStock[];findings:Finding[];selectedId?:number;onSelect:(finding:Finding)=>void}) {
   const byTicker=new Map(findings.map(f=>[f.ticker,f]));
   return <div className="flex h-full min-h-0 flex-col"><PanelTitle icon={<IconHistory size={14}/>} title="24H STOCKS" subtitle={`${rows.length} BOATS verified`}/><div className="notice-box mx-2 mt-2 text-[10px]">Only symbols verified by a BOATS trade in the current trading session. Every symbol remains subject to Scout&apos;s normal quality, catalyst, stage, continuation, late-risk and notification pipeline.</div><div className="min-h-0 flex-1 overflow-y-auto">{rows.length?rows.map(row=>{const finding=(row.latest_finding?.id?findings.find(f=>f.id===row.latest_finding!.id):undefined)||byTicker.get(row.ticker);const clickable=Boolean(finding);return <button key={row.ticker} className="finding-row w-full" disabled={!clickable} onClick={()=>finding&&onSelect(finding)} data-selected={finding?.id===selectedId||undefined}><div className="min-w-0 flex-1"><div className="flex items-center gap-1.5"><b>{row.ticker}</b><Badge data-tone="blue">24H</Badge><Badge data-tone={row.actionable_rank==="A"?"green":row.actionable_rank==="B"?"orange":"gray"}>{row.actionable_rank}</Badge><span className="truncate text-[9px] scout-muted">{row.stage}</span>{finding&&<MomentumBadges finding={finding}/>}</div><div className="mt-1 flex gap-2 text-[9px] scout-muted"><span>5s {pct(row.change_5s_pct,2)}</span><span>15s {pct(row.change_15s_pct,2)}</span><span>RVOL {row.vol_ratio_15s?.toFixed(1)??"—"}×</span></div><div className="mt-1 flex gap-2 text-[9px]"><span>{row.quality_label} {row.quality_score}</span><span className="scout-muted">BOATS {age(row.last_boats_trade_at)}</span></div></div><div className="text-right"><div className="metric">{money(row.price)}</div><div className="text-[9px] scout-muted">{row.last_feed?.toUpperCase()||"—"}</div></div></button>}):<EmptyPane text="No BOATS-verified 24H stocks in the current session yet"/>}</div></div>;
 }
 
-function PrimarySidebar({ view, findings, twentyFourHour, gainers, halts, catalysts, validation, selected, onSelect, connected, onNotifications, scanner, saveScanner, scannerBusy, scannerMessage, attention, setAttentionStatus, backendVersion }: {
+function PrimarySidebar({ view, findings, twentyFourHour, gainers, halts, catalysts, validation, selected, onSelect, connected, onNotifications, scanner, saveScanner, scannerBusy, scannerMessage, attention, setAttentionStatus, backendVersion, watchlist, onAddWatch, onRemoveWatch }: {
   view:ActivityView; findings:Finding[]; twentyFourHour:TwentyFourHourStock[]; gainers:Gainer[]; halts:Halt[]; catalysts:Catalyst[]; validation:ValidationRow[];
   selected?:Finding; onSelect:(f:Finding)=>void; connected:boolean; onNotifications:()=>void;
   scanner:ScannerSettings; saveScanner:(value:ScannerSettings)=>Promise<void>; scannerBusy:boolean; scannerMessage:string;
   attention:AttentionItem[]; setAttentionStatus:(item:AttentionItem,status:AttentionStatus)=>Promise<void>; backendVersion?:string;
+  watchlist:string[]; onAddWatch:(ticker:string)=>void; onRemoveWatch:(ticker:string)=>void;
 }) {
-  if (view === "radar") return <MarketPulse findings={findings} gainers={gainers} halts={halts} selectedId={selected?.id} onSelect={onSelect}/>;
+  if (view === "radar") return <MarketPulse findings={findings} gainers={gainers} halts={halts} selectedId={selected?.id} onSelect={onSelect} watchlist={watchlist} onToggleWatch={ticker=>watchlist.includes(ticker)?onRemoveWatch(ticker):onAddWatch(ticker)}/>;
   if (view === "24h") return <TwentyFourHourPanel rows={twentyFourHour} findings={findings} selectedId={selected?.id} onSelect={onSelect}/>;
-  if (view === "ross") { const rows=findings.filter(f=>f.ross_match).sort((a,b)=>(b.ross_score||0)-(a.ross_score||0)); return <div className="flex h-full min-h-0 flex-col"><PanelTitle icon={<IconFlame size={14}/>} title="ROSS SCREENER" subtitle={`${rows.length} matches`}/><div className="min-h-0 flex-1 overflow-y-auto">{rows.length?rows.map(f=><FindingRow key={f.ticker} finding={f} selected={selected?.id===f.id} onSelect={()=>onSelect(f)}/>):<EmptyPane text="No stocks currently meet the Ross criteria"/>}</div></div>; }
+  if (view === "ross") { const rows=findings.filter(f=>f.ross_match).sort((a,b)=>(b.ross_score||0)-(a.ross_score||0)); return <div className="flex h-full min-h-0 flex-col"><PanelTitle icon={<IconFlame size={14}/>} title="ROSS SCREENER" subtitle={`${rows.length} matches`}/><div className="min-h-0 flex-1 overflow-y-auto">{rows.length?rows.map(f=><FindingRow key={f.ticker} finding={f} selected={selected?.id===f.id} onSelect={()=>onSelect(f)} watching={watchlist.includes(f.ticker)} onToggleWatch={()=>watchlist.includes(f.ticker)?onRemoveWatch(f.ticker):onAddWatch(f.ticker)}/>):<EmptyPane text="No stocks currently meet the Ross criteria"/>}</div></div>; }
   if (view === "catalysts") return <div className="flex h-full min-h-0 flex-col"><PanelTitle icon={<IconDiamondFilled size={12}/>} title="CATALYSTS"/><CatalystList catalysts={catalysts} findings={findings} onSelect={onSelect}/></div>;
   if (view === "gainers") return <div className="flex h-full min-h-0 flex-col"><PanelTitle icon={<IconTrendingUp size={14}/>} title="TOP GAINERS"/><div className="min-h-0 flex-1 overflow-y-auto"><GainerRows gainers={gainers} findings={findings} onSelect={onSelect}/></div></div>;
   if (view === "halts") return <div className="flex h-full min-h-0 flex-col"><PanelTitle icon={<IconPlayerPauseFilled size={12}/>} title="HALTED"/><div className="min-h-0 flex-1 overflow-y-auto"><HaltRows halts={halts} findings={findings} onSelect={onSelect}/></div></div>;
   if (view === "validation") return <ValidationPanel rows={validation} findings={findings} selectedId={selected?.id} onSelect={onSelect}/>;
+  if (view === "watchlist") return <WatchlistPanel watchlist={watchlist} findings={findings} gainers={gainers} onSelect={onSelect} onAdd={onAddWatch} onRemove={onRemoveWatch}/>;
   if (view === "alerts") return <AttentionInbox items={attention} onOpen={item=>{onSelect(item.finding);void setAttentionStatus(item,'opened');}} onStatus={(item,status)=>void setAttentionStatus(item,status)}/>;
   return <SettingsPanel connected={connected} onNotifications={onNotifications} scanner={scanner} saveScanner={saveScanner} scannerBusy={scannerBusy} scannerMessage={scannerMessage} backendVersion={backendVersion}/>;
 }
@@ -901,6 +972,7 @@ function ActivityRail({ active, onActive, counts }: { active:ActivityView; onAct
     {id:"gainers",label:"Top gainers",icon:<IconTrendingUp size={18}/>},
     {id:"halts",label:"Halted",icon:<IconPlayerPauseFilled size={15}/>,tone:"red"},
     {id:"validation",label:"Validation",icon:<IconTableFilled size={15}/>,tone:"orange"},
+    {id:"watchlist",label:"Watchlist",icon:<IconPin size={16}/>,tone:"blue"},
     {id:"alerts",label:"Notifications",icon:<IconBellFilled size={15}/>,tone:"red"},
   ];
   return <aside className="activity-rail"><div className="activity-brand"><IconTargetArrow size={18}/></div><div className="activity-stack">{items.map(item=>{const count=counts[item.id];const label=`${item.label} · ${count} item${count===1?"":"s"}`;return <div className="rail-item" key={item.id}><IconButton label={label} active={active===item.id} onClick={()=>onActive(item.id)}>{item.icon}</IconButton>{count>0&&<span className="rail-count" data-tone={item.tone}>{count>99?"99+":count}</span>}</div>})}</div><div className="activity-bottom"><a href="/development" aria-label="Development workspace"><IconFlask size={18}/></a><IconButton label="Settings" active={active==="settings"} onClick={()=>onActive("settings")}><IconSettings size={18}/></IconButton></div></aside>;
@@ -1014,7 +1086,7 @@ function OpportunitySpotlight({items,onOpen,onStatus}:{items:AttentionItem[];onO
 }
 
 function DesktopWorkbench(props:WorkbenchProps) {
-  const { findings,twentyFourHour,gainers,halts,catalysts,validation,timeline,selected,setSelected,status,connected,openNotifications,openCommand,scanner,saveScanner,scannerBusy,scannerMessage,attention,setAttentionStatus }=props;
+  const { findings,twentyFourHour,gainers,halts,catalysts,validation,timeline,selected,setSelected,status,connected,openNotifications,openCommand,scanner,saveScanner,scannerBusy,scannerMessage,attention,setAttentionStatus,watchlist,onAddWatch,onRemoveWatch }=props;
   const [activity,setActivity]=useState<ActivityView>("radar");
   const [showPrimary,setShowPrimary]=useState(true);
   const [showInspector,setShowInspector]=useState(true);
@@ -1023,7 +1095,7 @@ function DesktopWorkbench(props:WorkbenchProps) {
   const [dockTab,setDockTab]=useState<DockTab>("catalysts");
   const connectionLabel=connected?"LIVE":API_CONFIGURED?"OFFLINE":"DEMO";
   const feedClass=(value:boolean|null|undefined)=>value===true?"feed-ok":value===false?"feed-bad":"feed-idle";
-  const railCounts={radar:findings.filter(f=>isTradeGradeRadarFinding(f)&&isWithinRadarWindow(f,false)).length,"24h":twentyFourHour.length,ross:findings.filter(f=>f.ross_match).length,catalysts:catalysts.length,gainers:gainers.length,halts:halts.length,validation:validation.length,alerts:attention.filter(item=>!["dismissed","expired","acknowledged"].includes(item.status)).length};
+  const railCounts={radar:findings.filter(f=>isTradeGradeRadarFinding(f)&&isWithinRadarWindow(f,false)).length,"24h":twentyFourHour.length,ross:findings.filter(f=>f.ross_match).length,catalysts:catalysts.length,gainers:gainers.length,halts:halts.length,validation:validation.length,watchlist:watchlist.length,alerts:attention.filter(item=>!["dismissed","expired","acknowledged"].includes(item.status)).length};
 
   return <div className="desktop-workbench h-screen min-h-[680px] overflow-hidden">
     <header className="titlebar">
@@ -1036,7 +1108,7 @@ function DesktopWorkbench(props:WorkbenchProps) {
       <ActivityRail active={activity} onActive={setActivity} counts={railCounts}/>
       <div className="min-w-0 flex-1">
         <Group orientation="horizontal" className="h-full">
-          {showPrimary && <><Panel id="primary" defaultSize="268px" minSize="220px" maxSize="390px"><div className="surface-wrap surface-primary"><div className="workbench-surface"><PrimarySidebar view={activity} findings={findings} twentyFourHour={twentyFourHour} gainers={gainers} halts={halts} catalysts={catalysts} validation={validation} selected={selected} onSelect={setSelected} connected={connected} onNotifications={openNotifications} scanner={scanner} saveScanner={saveScanner} scannerBusy={scannerBusy} scannerMessage={scannerMessage} attention={attention} setAttentionStatus={setAttentionStatus} backendVersion={status?.version}/></div></div></Panel><Separator className="workbench-gutter workbench-gutter-v"/></>}
+          {showPrimary && <><Panel id="primary" defaultSize="268px" minSize="220px" maxSize="390px"><div className="surface-wrap surface-primary"><div className="workbench-surface"><PrimarySidebar view={activity} findings={findings} twentyFourHour={twentyFourHour} gainers={gainers} halts={halts} catalysts={catalysts} validation={validation} selected={selected} onSelect={setSelected} connected={connected} onNotifications={openNotifications} scanner={scanner} saveScanner={saveScanner} scannerBusy={scannerBusy} scannerMessage={scannerMessage} attention={attention} setAttentionStatus={setAttentionStatus} backendVersion={status?.version} watchlist={watchlist} onAddWatch={onAddWatch} onRemoveWatch={onRemoveWatch}/></div></div></Panel><Separator className="workbench-gutter workbench-gutter-v"/></>}
           <Panel id="main" minSize="420px"><div className="surface-wrap surface-main"><div className="workbench-surface overflow-hidden">
             {dockMax && dockOpen ? <BottomDock tab={dockTab} setTab={setDockTab} catalysts={catalysts} findings={findings} selected={selected} status={status} validation={validation} timeline={timeline} onSelect={setSelected} onCollapse={()=>{setDockOpen(false);setDockMax(false)}} onMaximize={()=>setDockMax(false)} maximized/> : <Group orientation="vertical" className="h-full"><Panel id="workspace" minSize="260px"><ChartWorkspace findings={findings} selected={selected} onSelect={setSelected}/></Panel>{dockOpen && <><Separator className="workbench-gutter workbench-gutter-h"/><Panel id="dock" defaultSize="205px" minSize="120px" maxSize="45%"><div className="h-full pt-[3px]"><div className="dock-surface"><BottomDock tab={dockTab} setTab={setDockTab} catalysts={catalysts} findings={findings} selected={selected} status={status} validation={validation} timeline={timeline} onSelect={setSelected} onCollapse={()=>setDockOpen(false)} onMaximize={()=>setDockMax(true)} maximized={false}/></div></div></Panel></>}</Group>}
           </div>{!dockOpen && <button className="dock-collapsed" onClick={()=>setDockOpen(true)}><span>Catalysts</span><span>Evidence</span><span>Validation</span><span>Events</span><IconChevronUp size={13}/></button>}</div></Panel>
@@ -1049,19 +1121,20 @@ function DesktopWorkbench(props:WorkbenchProps) {
 }
 
 function MobileConsole(props:WorkbenchProps) {
-  const {findings,twentyFourHour,gainers,halts,catalysts,selected,setSelected,status,connected,openNotifications,openCommand,scanner,saveScanner,scannerBusy,scannerMessage,attention,setAttentionStatus}=props;
+  const {findings,twentyFourHour,gainers,halts,catalysts,selected,setSelected,status,connected,openNotifications,openCommand,scanner,saveScanner,scannerBusy,scannerMessage,attention,setAttentionStatus,watchlist,onAddWatch,onRemoveWatch}=props;
   const [view,setView]=useState<MobileView>("radar");
   const [marketTab,setMarketTab]=useState<MarketTab>("radar");
   const connectionLabel=connected?"LIVE":API_CONFIGURED?"OFFLINE":"DEMO";
   const allFeedsLive=status?.feeds.sip===true&&status?.feeds.boats!==false&&status?.feeds.news===true;
   const marketIcons:{id:MarketTab;label:string;icon:React.ReactNode}[]=[{id:"radar",label:"Radar",icon:<IconBolt size={20}/>},{id:"24h",label:"24H Stocks",icon:<IconHistory size={19}/>},{id:"gainers",label:"Top gainers",icon:<IconTrendingUp size={20}/>},{id:"halted",label:"Halted",icon:<IconPlayerPauseFilled size={17}/>}];
-  const nav:{id:MobileView;label:string;icon:React.ReactNode}[]=[{id:"radar",label:"Radar",icon:<IconBolt size={22}/>},{id:"charts",label:"Charts",icon:<IconChartBar size={22}/>},{id:"catalysts",label:"Catalysts",icon:<IconDiamondFilled size={18}/>},{id:"alerts",label:"Notifications",icon:<IconBellFilled size={18}/>},{id:"settings",label:"Settings",icon:<IconSettings size={21}/>}];
+  const nav:{id:MobileView;label:string;icon:React.ReactNode}[]=[{id:"radar",label:"Radar",icon:<IconBolt size={22}/>},{id:"charts",label:"Charts",icon:<IconChartBar size={22}/>},{id:"catalysts",label:"Catalysts",icon:<IconDiamondFilled size={18}/>},{id:"watchlist",label:"Watchlist",icon:<IconPin size={19}/>},{id:"alerts",label:"Notifications",icon:<IconBellFilled size={18}/>},{id:"settings",label:"Settings",icon:<IconSettings size={21}/>}];
   return <div className="mobile-console mobile-safe min-h-screen">
     <header className="mobile-header"><div className="flex h-12 items-center justify-between px-3"><div className="flex items-center gap-2"><IconTargetArrow size={17}/><b className="tracking-[.08em]">SCOUT</b><span className="version-chip">v{CLIENT_VERSION}</span><Badge data-tone={connected?"green":"orange"}><span className="live-dot"/>{connectionLabel}</Badge>{status?.replay?.active&&<Badge data-tone="orange">SIMULATION</Badge>}{!status?.replay?.active&&status?.replay?.latest_run&&<Badge data-tone="blue">REPLAY READY</Badge>}</div><div className="flex items-center gap-1"><IconButton label="Search" onClick={openCommand}><IconSearch size={18}/></IconButton><IconButton label="Notifications" onClick={openNotifications}><IconBellFilled size={16}/></IconButton></div></div><div className="mobile-status"><span>All sessions · {status?.universe ?? "—"}</span><span className={allFeedsLive?"feed-ok":status?"feed-bad":"feed-idle"}>SIP ● BOATS ● NEWS ●</span></div></header>
     <main className="pb-20">
       {view==="radar" && <><div className="mobile-market-tabs">{marketIcons.map(item=><button key={item.id} aria-label={item.label} data-active={marketTab===item.id || undefined} onClick={()=>setMarketTab(item.id)}>{item.icon}{item.id==="halted"&&halts.length?<span className="mobile-dot-count">{halts.length}</span>:null}</button>)}</div>{marketTab==="24h"&&<TwentyFourHourPanel rows={twentyFourHour} findings={findings} selectedId={selected?.id} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}{marketTab==="radar"&&<MarketPulse findings={findings} gainers={gainers} halts={halts} selectedId={selected?.id} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}{marketTab==="gainers"&&<GainerRows gainers={gainers} findings={findings} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}{marketTab==="halted"&&<HaltRows halts={halts} findings={findings} onSelect={finding=>{setSelected(finding);setView("charts");}}/>}</>}
       {view==="charts" && <div className="mobile-chart-page">{selected?<><div className="mobile-page-title"><div><b>{selected.ticker}</b><span className="metric ml-2">{money(selected.price)}</span>{decisionChart(selected).instruction&&<div className="mt-1 text-[10px] font-semibold text-[var(--blue)]">{decisionChart(selected).instruction}</div>}</div><div className="flex gap-1">{Array.from(new Set([selected.stage,...(selected.signals||[])])).slice(0,3).map(signal=><EventIcon key={signal} event={signal}/>)}</div></div><div className="mobile-live-chart"><LiveChart finding={selected} timeframeSeconds={decisionChart(selected).primary} onSelectFinding={setSelected}/></div><div className="mobile-inspector"><Inspector finding={selected} onNotifications={openNotifications}/></div></>:<EmptyPane text="Select a ticker from Radar"/>}</div>}
       {view==="catalysts" && <div className="mobile-page"><PanelTitle icon={<IconDiamondFilled size={12}/>} title="CATALYSTS"/><CatalystList catalysts={catalysts} findings={findings} onSelect={finding=>{setSelected(finding);setView("charts");}}/></div>}
+      {view==="watchlist" && <div className="mobile-page"><WatchlistPanel watchlist={watchlist} findings={findings} gainers={gainers} onSelect={finding=>{setSelected(finding);setView("charts");}} onAdd={onAddWatch} onRemove={onRemoveWatch}/></div>}
       {view==="alerts" && <div className="mobile-page"><AttentionInbox items={attention} onOpen={item=>{setSelected(item.finding);void setAttentionStatus(item,'opened');setView('charts');}} onStatus={(item,next)=>void setAttentionStatus(item,next)}/></div>}
       {view==="settings" && <div className="mobile-page"><SettingsPanel connected={connected} onNotifications={openNotifications} scanner={scanner} saveScanner={saveScanner} scannerBusy={scannerBusy} scannerMessage={scannerMessage} backendVersion={status?.version}/></div>}
     </main>
@@ -1095,6 +1168,25 @@ export default function ScoutPage() {
   const [scannerBusy,setScannerBusy]=useState(false);
   const [scannerMessage,setScannerMessage]=useState("");
   const [attention,setAttention]=useState<AttentionItem[]>([]);
+  const [watchlist,setWatchlist]=useState<string[]>([]);
+  useEffect(()=>{setWatchlist(readWatchlist());},[]);
+  const addWatch=useCallback((ticker:string)=>{
+    const normalized=ticker.trim().toUpperCase();
+    if(!normalized)return;
+    setWatchlist(current=>{
+      if(current.includes(normalized))return current;
+      const next=[...current,normalized];
+      persistWatchlist(next);
+      return next;
+    });
+  },[]);
+  const removeWatch=useCallback((ticker:string)=>{
+    setWatchlist(current=>{
+      const next=current.filter(t=>t!==ticker);
+      persistWatchlist(next);
+      return next;
+    });
+  },[]);
   const refreshInFlight=useRef<Promise<void>|null>(null);
   const lastRefreshAt=useRef(0);
 
@@ -1265,6 +1357,7 @@ export default function ScoutPage() {
     findings:visibleFindings,twentyFourHour,gainers:visibleGainers,halts,catalysts,validation,timeline,selected,setSelected,status,connected,
     openNotifications:()=>setNotificationOpen(true),openCommand:()=>setCommandOpen(true),
     scanner,saveScanner:applyScannerRange,scannerBusy,scannerMessage,attention,setAttentionStatus,
+    watchlist,onAddWatch:addWatch,onRemoveWatch:removeWatch,
   };
 
   return <ScoutToastProvider><TooltipProvider><div className="scout-shell">
