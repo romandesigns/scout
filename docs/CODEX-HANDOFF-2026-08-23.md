@@ -54,25 +54,46 @@ system was healthy.
 - First run (6 live days, 2026-08-17→08-21 train, 08-21 validation, 08-24 test):
   134,885 train rows, **40.4% precision / 27.4% recall on validation (ROC AUC 0.938)**,
   40.0%/13.0%/0.744 on the small test split. Base rate is ~1%, so this is a ~40x lift in
-  signal concentration. **Not deployed anywhere — model+report only exist at
-  `data/optimization/outcome_gate.joblib` / `outcome_gate_report.json`.**
+  signal concentration.
 - Only 6 distinct calendar dates of live data existed, which is thin. This led to the
-  historical-backtest expansion below.
+  historical-backtest expansion below, and **later a second, deployed model version (v2)
+  — see §2c/§3a, both now COMPLETE, not in-progress.**
 
-### 2c. Historical backtest pilot (still running — see §3)
+### 2c. Historical backtest pilot — COMPLETE, model retrained and DEPLOYED
 Discovered Scout already has a full offline pipeline for exactly this
 (`scripts/historical_mover_finder.py` → `scripts/sample_movers.py` →
 `scripts/historical_backtest.py` → `scripts/backtest_scorer.py`, orchestrated by
 `run-historical-backtest.ps1`), which pulls real Alpaca SIP data and replays it through
-Scout's actual production detector. Kicked off a 5-trading-day pilot
-(2026-08-10→08-14) redirected to an external drive (`H:\scout-backtest\`, 931 GB free)
-since the default cache/output paths point at the repo's `data/` folder.
+Scout's actual production detector. Ran a 5-trading-day pilot (2026-08-10→08-14)
+redirected to an external drive (`H:\scout-backtest\`, 931 GB free) since the default
+cache/output paths point at the repo's `data/` folder. **Completed**: 793 ticker-day
+replays, 49,178 findings, ~7 GB cached ticks.
 
-**This is still in progress — see §3 for exact state and how to resume.**
+Wrote `scripts/label_backtest_outcomes.py`: computes `max_1m/5m/15m/session_pct` labels
+from the cached `.ndjson` tick data for each backtest finding, using the exact same
+forward-window definition as `app/market.py::_update_outcomes` (bisect + suffix-max for
+O(1)-ish per-finding lookups instead of re-scanning the whole file — the first, naive
+version was too slow and was rewritten). Output:
+`H:\scout-backtest\output\labeled-findings-pilot.jsonl` (49,178 labeled rows).
 
-The eventual next step (not started): once `findings-pilot.jsonl` exists, write a small
-script to compute `max_1m/5m/15m/session_pct` labels from the cached `.ndjson` tick data
-for each backtest finding (same definition as the live `outcomes` table), then pool that
+Extended `scripts/train_outcome_gate.py` with a repeatable `--extra-jsonl` flag so the
+backtest-labeled rows pool with the live DB rows before the chronological train/
+validation/test split. Retrained (`outcome_gate_v2.joblib` /
+`outcome_gate_v2_report.json`): 184,063 train rows across 9 train dates (was 4),
+validation precision 42.1% / recall 27.7% / ROC AUC 0.936 (essentially unchanged from
+the 6-day v1 result — good sign it wasn't a lucky sample), test precision 35.0% on a
+much larger 6,203-alert test split (was 535).
+
+**DEPLOYED as a shadow gate on 2026-08-24** (user-approved): copied
+`outcome_gate_v2.joblib` to both the local Docker data volume and the VPS
+(`/opt/apps/scout/data/optimization/outcome_gate_v2.joblib` via scp), set
+`IMMINENT_GATE_MODEL_PATH=/data/optimization/outcome_gate_v2.joblib` in both `.env`
+files, restarted both containers. Verified working end-to-end on both: real findings'
+`candidate_profile.imminent_move_gate` now shows `{"status":"scored","shadow_only":true,
+"probability":...,"threshold":0.9214...,"would_pass":...}`. **Still shadow-only — does
+not gate/block any alert delivery, only annotates findings for future analysis.** Next
+step for whoever picks this up: let it accumulate live shadow predictions vs. real
+outcomes for a few weeks before considering an actual gating decision.
 with the live DB data and retrain `train_outcome_gate.py` on a much larger date range.
 
 ### 2d. Web UI changes (committed, deployed locally, deploy to VPS in progress — see §3)
@@ -127,32 +148,18 @@ To actually test the pipeline live, added a **gated, local-only** test endpoint:
 
 ## 3. Operations currently in progress (as of this handoff)
 
-### 3a. Historical backtest pilot — background OS process, NOT tied to this chat session
+### 3a. Historical backtest pilot — COMPLETE (finished much faster than estimated)
 - Command: `scripts.historical_backtest` replaying `H:\scout-backtest\output\movers-pilot-sample.jsonl`
   (793 ticker-day rows, sampled from 2026-08-10→08-14 with `CapPerTier=150`,
   `ControlCap=300`) into `H:\scout-backtest\output\findings-pilot.jsonl`, caching raw
   Alpaca SIP ticks under `H:\scout-backtest\cache\` and per-run replay state under
   `H:\scout-backtest\replays\`.
-- Started ~2026-08-23 22:30 local time. Measured pace: ~2.25 min/ticker-day →
-  **estimated total runtime ~29 hours** (i.e., likely finishes sometime 2026-08-24 evening
-  or into 2026-08-25). This is a real, unavoidable pace — it's bound by sequential Alpaca
-  API pulls, not compute.
-- A separate PowerShell monitor loop is also running (10-minute poll interval), printing
-  progress and will print `BACKTEST_COMPLETE: ...` once
-  `H:\scout-backtest\output\findings-pilot.jsonl` exists.
-- **To check progress**: `Get-ChildItem H:\scout-backtest\cache -File | Measure-Object
-  -Property Length -Sum` (file count ≈ ticker-days completed out of 793), or read
-  `H:\scout-backtest\output\stage3.log`.
-- **To resume/finish this thread once it completes**: write the tick→outcome labeling
-  script described in §2c, pool with live DB data, retrain
-  `scripts/train_outcome_gate.py` across the combined dataset, and report validation
-  metrics vs. the 6-day baseline (40.4% precision / ROC AUC 0.938).
-- This process survives the chat session ending (it's a plain Windows background
-  process) but **will not survive a reboot or the terminal being killed**. If the user's
-  machine restarts, this needs to be restarted from `scripts.historical_mover_finder`
-  (stage already done, output cached at `H:\scout-backtest\output\movers-pilot-sample.jsonl`)
-  → re-run `scripts.historical_backtest` with the same args (it will skip any
-  `.ndjson` files already cached, so resuming is cheap for completed tickers).
+- Started ~2026-08-23 22:30, finished ~2026-08-24 03:40 (~5h10m total, not the ~29h
+  originally estimated — pace accelerated a lot once it reached lighter-volume control
+  tickers with far fewer trades to pull/replay than the heavy movers sampled first).
+- Result: 793/793 replayed, 49,178 findings written to `findings-pilot.jsonl`.
+- Labeled and pooled into a retrained model — see §2c for the full result and the
+  now-deployed `outcome_gate_v2` model. No further action needed on this thread.
 
 ### 3b. Full release pipeline (`release-all.ps1`) — COMPLETE
 - Triggered by explicit user request ("push everything live... rebuilt tauri"), then
@@ -174,11 +181,11 @@ To actually test the pipeline live, added a **gated, local-only** test endpoint:
 ## 4. Open items / considerations for whoever picks this up
 
 1. **Outcome-gate model is not wired into production.** It's a research artifact
-   (`data/optimization/outcome_gate.joblib`). Before considering deployment as a real
-   shadow gate (via `IMMINENT_GATE_MODEL_PATH`), it needs: (a) the backtest-expanded
-   training set from §2c/§3a, (b) more than 6-8 calendar dates of validation, and (c)
-   explicit user sign-off per their standing instruction ("implement but wait for
-   confirmation before committing/pushing/deploying").
+1. **Outcome-gate model (`outcome_gate_v2`) IS deployed as a shadow gate** (both local
+   and VPS, see §2c) as of 2026-08-24, with explicit user sign-off. It only annotates
+   `candidate_profile.imminent_move_gate` — it does not gate/block any alert delivery.
+   Next decision point: after a few weeks of live shadow scores vs. real outcomes, decide
+   whether to actually threshold on it for real gating.
 2. **Paper trading is inactive.** If the user wants the ML pipeline to eventually learn
    from real P&L (their original stated goal), Scout Trader needs to actually be enabled
    (`app/trader.py`, gated by Alpaca paper credentials + a dashboard toggle) and run for
@@ -200,6 +207,16 @@ To actually test the pipeline live, added a **gated, local-only** test endpoint:
 7. **`release-all-output.log` and `release-all-output-2.log`** are leftover artifacts of
    this session in the repo root — not gitignored; delete them or `git rm --cached` if
    they show up in `git status`.
+9. **`IMMINENT_GATE_MODEL_PATH=/data/optimization/outcome_gate_v2.joblib`** is now set in
+   both the local `.env` and the VPS's `/opt/apps/scout/.env` (appended directly via ssh,
+   not through `release-all.ps1`). The model file itself
+   (`outcome_gate_v2.joblib`, ~432KB) was scp'd to
+   `/opt/apps/scout/data/optimization/` on the VPS — it is **not tracked in git** (lives
+   only in the `data/` bind-mount on each machine). If the VPS is ever redeployed from a
+   fresh clone without copying this file across, the shadow gate will silently fall back
+   to `{"status":"error",...}` (fail-open, per `app/imminent_gate.py`'s design) rather
+   than break anything — but the shadow scoring will stop working until the file is
+   restored.
 8. **Open question raised at the end of this session, not yet resolved**: whether the
    platform is genuinely "ready for live sessions." Infrastructure/deploy health is
    confirmed good, but whether the VPS's own `paper_trades` table has enough history to
@@ -218,4 +235,7 @@ To actually test the pipeline live, added a **gated, local-only** test endpoint:
 | `web/app/globals.css` | Item dividers, mobile-first sizing, watchlist styles |
 | `web/lib/types.ts` | Added `"watchlist"` to `selection_context` union |
 | `H:\scout-backtest\` | External-drive staging area for the historical backtest pilot |
-| `data/optimization/outcome_gate.joblib` / `_report.json` | First-pass trained model + metrics (6-day dataset) |
+| `data/optimization/outcome_gate.joblib` / `_report.json` | v1 model + metrics (6-day dataset, superseded) |
+| `scripts/label_backtest_outcomes.py` | New: labels backtest findings with `max_1m/5m/15m/session_pct` (bisect + suffix-max) |
+| `data/optimization/outcome_gate_v2.joblib` / `_v2_report.json` | **Deployed** model (11-date pooled dataset) + metrics; also copied to VPS |
+| `docs/CODEX-HANDOFF-2026-08-23.md` | This document |

@@ -69,6 +69,16 @@ def label_rows(rows: list[dict], *, label_field: str, expansion_pct: float, acti
     return selected
 
 
+def load_extra_jsonl(paths: list[str]) -> list[dict]:
+    """Load pre-labeled rows (e.g. from scripts.label_backtest_outcomes) that already
+    match load_rows()'s output shape, so they can be pooled with live DB rows."""
+    rows: list[dict] = []
+    for path in paths:
+        with open(path, encoding="utf-8") as handle:
+            rows.extend(json.loads(line) for line in handle if line.strip())
+    return rows
+
+
 def split_metrics(labels: np.ndarray, probability: np.ndarray, threshold: float) -> dict:
     predicted = probability >= threshold
     tp = int(np.sum(predicted & (labels == 1)))
@@ -106,6 +116,7 @@ def choose_threshold(labels: np.ndarray, probability: np.ndarray, target_precisi
 def main() -> int:
     parser = argparse.ArgumentParser(description="Train a shadow gate over Scout's own captured outcomes")
     parser.add_argument("--db", default="data/state.db")
+    parser.add_argument("--extra-jsonl", action="append", default=[], help="Pre-labeled rows (e.g. from scripts.label_backtest_outcomes) to pool with live DB rows")
     parser.add_argument("--model", required=True)
     parser.add_argument("--report", required=True)
     parser.add_argument("--label-field", default="max_5m_pct", choices=["max_1m_pct", "max_5m_pct", "max_15m_pct", "max_session_pct"])
@@ -117,7 +128,7 @@ def main() -> int:
     args = parser.parse_args()
 
     rows = label_rows(
-        load_rows(Path(args.db)), label_field=args.label_field,
+        load_rows(Path(args.db)) + load_extra_jsonl(args.extra_jsonl), label_field=args.label_field,
         expansion_pct=args.expansion_pct, actionable_only=args.actionable_only,
     )
     dates = sorted({row["date"] for row in rows})
