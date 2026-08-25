@@ -16,7 +16,7 @@ import requests
 
 from .config import settings
 from .models import Finding
-from .opportunity import can_notify_opportunity, opportunity_class
+from .opportunity import can_notify_opportunity, is_continuation_watch, opportunity_class
 
 log = logging.getLogger("scout.notify")
 
@@ -138,7 +138,7 @@ CRITICAL_STAGES = {"FIRST_LEG", "SURGE", "IGNITION", "HALT_WATCH", "HALT_PRESSUR
 SETUP_STAGES = {"EARLY"}
 CONFIRMATION_STAGES = {"IGNITION", "BREAKOUT", "SURGE"}
 SPECIAL_STAGES = {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME", "HALT_WATCH", "HALT_PRESSURE"}
-USER_NOTIFY_STAGES = SETUP_STAGES | CONFIRMATION_STAGES | SPECIAL_STAGES
+USER_NOTIFY_STAGES = SETUP_STAGES | CONFIRMATION_STAGES | SPECIAL_STAGES | {"REVERSAL_WATCH"}
 
 
 def notification_phase(f: Finding) -> str | None:
@@ -146,6 +146,8 @@ def notification_phase(f: Finding) -> str | None:
         return "setup"
     if f.stage in CONFIRMATION_STAGES:
         return "confirmed"
+    if f.stage == "REVERSAL_WATCH":
+        return "continuation"
     if f.stage in SPECIAL_STAGES:
         return f.stage.lower()
     return None
@@ -224,9 +226,9 @@ def _allowed_platform_agnostic(f: Finding, prefs: dict[str, Any] | None) -> bool
     # Market-status and verified-catalyst events are informational. Momentum
     # entry notifications, however, must be backed by a profitable completed
     # paper cohort; clean/A-rank alone is not represented as a trading edge.
-    if f.stage not in SPECIAL_STAGES and not bool((f.candidate_profile or {}).get("edge_validation", {}).get("validated")):
+    if f.stage not in SPECIAL_STAGES and not is_continuation_watch(f) and not bool((f.candidate_profile or {}).get("edge_validation", {}).get("validated")):
         return False
-    if f.stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"} and f.quality_label != "CLEAN":
+    if f.stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"} and not is_continuation_watch(f) and f.quality_label != "CLEAN":
         return False
     if not prefs:
         return True

@@ -110,6 +110,23 @@ class MarketQualityTests(unittest.TestCase):
         self.assertFalse(_allowed(Finding(stage="RECLAIM", **base), DEFAULT_NOTIFICATION_PREFERENCES, "android"))
         self.assertFalse(_allowed(Finding(stage="REVERSAL_WATCH", **base), DEFAULT_NOTIFICATION_PREFERENCES, "android"))
 
+    def test_strong_reversal_watch_can_notify_as_continuation(self):
+        finding = Finding(
+            ticker="TEST", stage="REVERSAL_WATCH", detected_at=1_800_000_000, price=2.01, score=10,
+            vol_ratio_15s=8, vol_ratio_30s=6, change_60s_pct=5, extension_pct=5,
+            ema9=2.0, ema21=1.95, ema9_slope=.02, vwap=1.9, above_vwap=True,
+            quiet_break=True, evidence=["fresh continuation"],
+            quality_label="CHOPPY", quality_score=85, actionable_rank="C", shadow_mode=False,
+            rejection_reasons=["GAP NOISE"], candidate_profile={
+                "velocity": 100, "participation": 89, "structure": 90,
+                "multi_timeframe": {"qualified": True}, "box": {"breakout": True},
+                "promotion_trace": {"gates": {
+                    "fresh_impulse": True, "bullish_confirmed": True, "not_bearish_short": True,
+                }},
+            },
+        )
+        self.assertTrue(_allowed(finding, DEFAULT_NOTIFICATION_PREFERENCES, "android"))
+
     def test_validation_keeps_immature_horizons_pending_and_floors_max(self):
         store = Store(Path(self.tmp.name) / "validation.db")
         self.stores.append(store)

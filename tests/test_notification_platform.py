@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 from app.config import settings
@@ -196,6 +197,26 @@ class DecisionNotificationTests(unittest.TestCase):
     def test_special_event_notification_does_not_claim_trade_edge(self):
         finding = make_finding(stage="HALT", candidate_profile={})
         self.assertTrue(notification_allowed_any_platform(finding, DEFAULT_NOTIFICATION_PREFERENCES))
+
+
+class ClientNotificationParityTests(unittest.TestCase):
+    def test_client_continuation_gate_tracks_server_contract(self):
+        source = (Path(__file__).resolve().parents[1] / "web/lib/native.ts").read_text(encoding="utf-8")
+        self.assertIn('...SPECIAL, "REVERSAL_WATCH"', source)
+        for gate in (
+            "multi_timeframe?.qualified === true", "Number(profile.velocity || 0) >= 80",
+            "Number(profile.participation || 0) >= 80", "Number(profile.structure || 0) >= 80",
+            "Boolean(profile.box?.breakout)", "gates.fresh_impulse === true",
+            "gates.bullish_confirmed === true", "gates.not_bearish_short === true",
+            '"LOW PARTICIPATION", "SPARSE PRINTS", "STALE TRADES"',
+        ):
+            self.assertIn(gate, source)
+
+    def test_service_worker_suppresses_push_banner_while_client_is_visible(self):
+        source = (Path(__file__).resolve().parents[1] / "web/public/sw.js").read_text(encoding="utf-8")
+        visibility_gate = 'windows.some(client=>client.visibilityState==="visible")'
+        self.assertIn(visibility_gate, source)
+        self.assertLess(source.index(visibility_gate), source.index("self.registration.showNotification"))
 
 
 if __name__ == "__main__":

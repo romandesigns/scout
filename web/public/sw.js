@@ -1,4 +1,4 @@
-const VERSION="6.11.1";
+const VERSION="6.11.2";
 const SHELL=`scout-shell-${VERSION}`;
 const APP_SHELL=["/","/manifest.webmanifest","/icons/scout-192.png","/icons/scout-512.png"];
 
@@ -17,7 +17,10 @@ self.addEventListener("fetch",event=>{
 self.addEventListener("push",event=>{
   let payload={};
   try{payload=event.data?.json()||{};}catch{payload={body:event.data?.text()||"New Scout opportunity"};}
-  event.waitUntil(self.registration.showNotification(payload.title||"Scout opportunity",{body:payload.body||"Open Scout to review.",icon:"/icons/scout-192.png",badge:"/icons/scout-192.png",tag:payload.tag||payload.ticker||"scout",renotify:payload.renotify!==false,requireInteraction:Boolean(payload.requireInteraction),vibrate:payload.vibrate||[120],data:{url:payload.url||"/?view=alerts",findingId:payload.findingId,ticker:payload.ticker,stage:payload.stage},actions:[{action:"open",title:"Open event"},{action:"dismiss",title:"Dismiss"}]}).then(()=>payload.findingId?fetch(`/api/findings/${payload.findingId}/client-displayed`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({channel:"webpush",surface:"service-worker"})}).catch(()=>{}):undefined));
+  event.waitUntil(clients.matchAll({type:"window",includeUncontrolled:true}).then(windows=>{
+    if(windows.some(client=>client.visibilityState==="visible"))return;
+    return self.registration.showNotification(payload.title||"Scout opportunity",{body:payload.body||"Open Scout to review.",icon:"/icons/scout-192.png",badge:"/icons/scout-192.png",tag:payload.tag||payload.ticker||"scout",renotify:payload.renotify!==false,requireInteraction:Boolean(payload.requireInteraction),vibrate:payload.vibrate||[120],data:{url:payload.url||"/?view=alerts",findingId:payload.findingId,ticker:payload.ticker,stage:payload.stage},actions:[{action:"open",title:"Open event"},{action:"dismiss",title:"Dismiss"}]}).then(()=>payload.findingId?fetch(`/api/findings/${payload.findingId}/client-displayed`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({channel:"webpush",surface:"service-worker"})}).catch(()=>{}):undefined);
+  }));
 });
 self.addEventListener("notificationclick",event=>{
   event.notification.close();

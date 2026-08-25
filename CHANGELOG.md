@@ -1,3 +1,9 @@
+## 6.11.2 — Qualified continuation alerts and chart history ranges
+
+- Allow only strongly qualified `REVERSAL_WATCH` findings to notify as continuation opportunities across server, desktop, browser, and installed-PWA clients.
+- Suppress duplicate service-worker push banners while an installed PWA window is visible.
+- Pass explicit historical chart ranges through the API and add cross-client notification parity coverage.
+
 ## 6.11.1 — Scannable market lists and opportunity controls
 
 - Replace repeated Radar and 24H stock prose with compact momentum charts, evidence

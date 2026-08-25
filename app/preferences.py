@@ -29,7 +29,7 @@ DEFAULT_NOTIFICATION_PREFERENCES: dict[str, Any] = {
     },
     "signals": {
         "ACTIVITY_WATCH": "silent",
-        "REVERSAL_WATCH": "silent",
+        "REVERSAL_WATCH": "notify",
         "FIRST_LEG_WATCH": "silent",
         "PRE_IGNITION": "silent",
         "AWAKENING": "silent",

@@ -21,9 +21,33 @@ def opportunity_class(f: Finding) -> str:
     return "FIRST_MOVE"
 
 
+def is_continuation_watch(f: Finding) -> bool:
+    if f.stage != "REVERSAL_WATCH":
+        return False
+    profile = f.candidate_profile or {}
+    multi_timeframe = profile.get("multi_timeframe") or {}
+    promotion = profile.get("promotion_trace") or {}
+    gates = promotion.get("gates") or {}
+    box = profile.get("box") or {}
+    rejection_reasons = {str(reason).upper() for reason in f.rejection_reasons or []}
+    return bool(
+        multi_timeframe.get("qualified") is True
+        and float(profile.get("velocity") or 0) >= 80
+        and float(profile.get("participation") or 0) >= 80
+        and float(profile.get("structure") or 0) >= 80
+        and bool(box.get("breakout"))
+        and gates.get("fresh_impulse") is True
+        and gates.get("bullish_confirmed") is True
+        and gates.get("not_bearish_short") is True
+        and not rejection_reasons.intersection({"LOW PARTICIPATION", "SPARSE PRINTS", "STALE TRADES"})
+    )
+
+
 def can_notify_opportunity(f: Finding) -> bool:
     classification = opportunity_class(f)
     if classification == "EVENT":
+        return True
+    if is_continuation_watch(f):
         return True
     return is_group_a(f)
 

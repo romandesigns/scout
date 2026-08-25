@@ -5,7 +5,7 @@ const CRITICAL = new Set(["FIRST_LEG", "SURGE", "IGNITION", "HALT_PRESSURE", "CA
 const SETUP = new Set(["EARLY"]);
 const CONFIRMED = new Set(["IGNITION", "BREAKOUT", "SURGE"]);
 const SPECIAL = new Set(["CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME", "HALT_WATCH", "HALT_PRESSURE"]);
-const USER_NOTIFY = new Set([...SETUP, ...CONFIRMED, ...SPECIAL]);
+const USER_NOTIFY = new Set([...SETUP, ...CONFIRMED, ...SPECIAL, "REVERSAL_WATCH"]);
 const claimedDecisions = new Set<string>();
 const nativePending = new Map<string, { finding: Finding; prefs: NotificationPreferences; timer: ReturnType<typeof setTimeout> }>();
 const stagePriority: Record<string,number> = { ACTIVITY_WATCH:0, REVERSAL_WATCH:0, FIRST_LEG_WATCH:0, PRE_IGNITION:0, EARLY:2, STAIRCASE:2, FIRST_LEG:3, EMA_RECLAIM:3, SURGE:4, VWAP_RECLAIM:4, BREAKOUT:5, REARM:6, IGNITION:7, CATALYST_WATCH:8, CATALYST_ACTIVE:10, RESUME:9, HALT:10 };
@@ -81,6 +81,22 @@ function quietNow(finding: Finding, prefs: NotificationPreferences) {
   return true;
 }
 
+export function isContinuationWatch(finding: Finding) {
+  if (finding.stage !== "REVERSAL_WATCH") return false;
+  const profile = finding.candidate_profile || {};
+  const gates = profile.promotion_trace?.gates || {};
+  const rejected = new Set((finding.rejection_reasons || []).map((reason) => String(reason).toUpperCase()));
+  return profile.multi_timeframe?.qualified === true
+    && Number(profile.velocity || 0) >= 80
+    && Number(profile.participation || 0) >= 80
+    && Number(profile.structure || 0) >= 80
+    && Boolean(profile.box?.breakout)
+    && gates.fresh_impulse === true
+    && gates.bullish_confirmed === true
+    && gates.not_bearish_short === true
+    && !["LOW PARTICIPATION", "SPARSE PRINTS", "STALE TRADES"].some((reason) => rejected.has(reason));
+}
+
 // Shared gates for every client-side delivery path (Tauri desktop toast, PWA foreground
 // toast, plain-browser shadcn toast) -- 2026-08-19 refactor mirrors the same split made
 // server-side in app/notifiers.py for Web Push: platform-agnostic checks once, then each
@@ -89,9 +105,10 @@ function quietNow(finding: Finding, prefs: NotificationPreferences) {
 function coreAllowed(finding: Finding, prefs: NotificationPreferences) {
   if (opportunityClass(finding) === "LATE_INFORMATION_ONLY") return false;
   if (!USER_NOTIFY.has(finding.stage)) return false;
-  if (!SPECIAL.has(finding.stage) && !finding.candidate_profile?.edge_validation?.validated) return false;
-  if (!["CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "HALT_WATCH", "HALT_PRESSURE", "RESUME"].includes(finding.stage) && finding.actionable_rank !== "A") return false;
-  if (!["CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"].includes(finding.stage) && finding.quality_label !== "CLEAN") return false;
+  const continuation = isContinuationWatch(finding);
+  if (!SPECIAL.has(finding.stage) && !continuation && !finding.candidate_profile?.edge_validation?.validated) return false;
+  if (!["CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "HALT_WATCH", "HALT_PRESSURE", "RESUME"].includes(finding.stage) && !continuation && finding.actionable_rank !== "A") return false;
+  if (!["CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"].includes(finding.stage) && !continuation && finding.quality_label !== "CLEAN") return false;
   if (!prefs.master_enabled) return false;
   if (signalMode(finding, prefs) !== "notify") return false;
   if (finding.score < prefs.minimum_score) return false;

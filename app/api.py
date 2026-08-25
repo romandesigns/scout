@@ -408,6 +408,8 @@ class ScoutApi:
             detected_at = float(detected_at_raw) if detected_at_raw else None
             bucket_seconds = _int(request.query.get("bucket_seconds"), 15, 15, 300)
             finding_id = int(finding_id_raw) if finding_id_raw else None
+            range_start_ts = float(request.query["range_start_ts"]) if request.query.get("range_start_ts") else None
+            range_end_ts = float(request.query["range_end_ts"]) if request.query.get("range_end_ts") else None
         except (TypeError, ValueError):
             raise web.HTTPBadRequest(text="invalid chart window")
         force_historical = str(request.query.get("historical", "")).strip().lower() in {"1", "true", "yes"}
@@ -419,7 +421,10 @@ class ScoutApi:
         )
         if detected_at and (force_historical or not live_covers_detection):
             try:
-                payload = await asyncio.to_thread(self.market.historical_snapshot_sync, ticker, detected_at, bucket_seconds)
+                payload = await asyncio.to_thread(
+                    self.market.historical_snapshot_sync, ticker, detected_at, bucket_seconds,
+                    range_start_ts, range_end_ts,
+                )
             except Exception as exc:
                 if not payload:
                     raise web.HTTPBadGateway(text=f"historical chart unavailable: {exc}")
