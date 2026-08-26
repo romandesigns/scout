@@ -320,6 +320,9 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
         const color=markerTone(primary);
         const selected=cluster.selected;
         const y=layout.y(f.price);
+        const labelWidth=190;
+        const labelLeft=x>layout.width-layout.right-labelWidth-20?x-labelWidth-10:x+10;
+        const labelTop=Math.max(layout.top+4,Math.min(layout.priceBottom-42,y-34));
         const label=selected?`${f.stage.replaceAll("_"," ")} · ${exactEtTime(f.detected_at)}`:`${cluster.items.length} Scout event${cluster.items.length===1?"":"s"}`;
         return <g key={`fc-${cluster.bucket}`} className="chart-event-chip" role="button" tabIndex={0} aria-label={label}
           onClick={event=>{event.stopPropagation();onSelectFinding?.(f);}}
@@ -327,7 +330,13 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
           {selected&&<line x1={x} x2={x} y1={layout.top} y2={layout.priceBottom} stroke={color} strokeDasharray="1 0" opacity=".72"/>}
           <circle cx={x} cy={y} r={selected?6:cluster.items.length>1?6:4} fill={color} opacity={selected?1:.9}/>
           {cluster.items.length>1&&<text x={x} y={y+3} textAnchor="middle" className="chart-cluster-count">{cluster.items.length>9?"9+":cluster.items.length}</text>}
-          {selected&&<text x={x+8} y={Math.max(layout.top+14,y-8)} className="chart-event-label" fill={color}>DETECTED · {primary.replaceAll("_"," ")}</text>}
+          {selected&&<g className="chart-selected-event-label">
+            <rect x={labelLeft} y={labelTop} width={labelWidth} height="38" rx="6" className="chart-selected-label-bg"/>
+            <text x={labelLeft+10} y={labelTop+15} className="chart-selected-label" fill={color}>
+              <tspan fontWeight="800">DETECTED · {primary.replaceAll("_"," ")}</tspan>
+              <tspan x={labelLeft+10} dy="14" className="chart-selected-label-time">{exactEtTime(f.detected_at)}</tspan>
+            </text>
+          </g>}
         </g>;
       })}
       {deliveryMarkers.map((event,idx)=>{const x=markerX(event.event_at);const sent=event.status==="sent"||event.status==="delivered";return <g key={`delivery-${event.id}`} className="chart-delivery-marker"><line x1={x} x2={x} y1={layout.top} y2={layout.priceBottom} stroke={sent?"var(--green)":"var(--orange)"} strokeDasharray="1 4" opacity=".75"/><circle cx={x} cy={layout.top+8+(idx%2)*8} r="2.5" fill={sent?"var(--green)":"var(--orange)"}/></g>})}
