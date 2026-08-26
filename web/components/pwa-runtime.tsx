@@ -11,20 +11,23 @@ export function PwaRuntime(){
   const [online,setOnline]=useState(true);
   useEffect(()=>{
     const nativeShell="__TAURI_INTERNALS__" in window||"__TAURI__" in window||window.location.hostname==="tauri.localhost";
+    const development=process.env.NODE_ENV!=="production";
     const clientVersion=process.env.NEXT_PUBLIC_SCOUT_VERSION||"dev";
     setOnline(navigator.onLine);
     const onOnline=()=>setOnline(true),onOffline=()=>setOnline(false);
     const onInstall=(event:Event)=>{event.preventDefault();setInstall(event as InstallPrompt);};
     window.addEventListener("online",onOnline);window.addEventListener("offline",onOffline);window.addEventListener("beforeinstallprompt",onInstall);
-    if(nativeShell&&"serviceWorker" in navigator){
-      // Native releases ship their assets with the executable. Remove any
-      // service worker left by pre-6.1 builds so it cannot mix release files.
-      const migrationKey=`stockhunter-native-assets-${clientVersion}`;
-      if(localStorage.getItem(migrationKey)!=="ready"){
+    if((nativeShell||development)&&"serviceWorker" in navigator){
+      // Native releases ship their assets with the executable, while Next's
+      // development chunk names change between rebuilds. In either case a
+      // web-app worker can mix incompatible HTML, CSS, and JavaScript files.
+      const migrationKey=`stockhunter-${nativeShell?"native-assets":"development-assets"}-${clientVersion}`;
+      if(development||localStorage.getItem(migrationKey)!=="ready"){
         void Promise.all([navigator.serviceWorker.getRegistrations(),"caches" in window?caches.keys():Promise.resolve([] as string[])]).then(async([workers,keys])=>{
-          await Promise.all([...workers.map(item=>item.unregister()),...keys.map(key=>caches.delete(key))]);
+          const scoutKeys=keys.filter(key=>key.startsWith("scout-shell-"));
+          await Promise.all([...workers.map(item=>item.unregister()),...scoutKeys.map(key=>caches.delete(key))]);
           localStorage.setItem(migrationKey,"ready");
-          if(workers.length||keys.length)window.location.reload();
+          if(workers.length||scoutKeys.length)window.location.reload();
         });
       }
     }else if("serviceWorker" in navigator){void navigator.serviceWorker.register("/sw.js").then(registration=>{

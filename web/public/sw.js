@@ -1,5 +1,5 @@
 const VERSION="6.11.2";
-const SHELL=`scout-shell-${VERSION}`;
+const SHELL=`scout-shell-${VERSION}-v2`;
 const APP_SHELL=["/","/manifest.webmanifest","/icons/scout-192.png","/icons/scout-512.png"];
 
 self.addEventListener("install",event=>event.waitUntil(caches.open(SHELL).then(cache=>cache.addAll(APP_SHELL)).then(()=>self.skipWaiting())));
@@ -8,11 +8,20 @@ self.addEventListener("fetch",event=>{
   const request=event.request;
   if(request.method!=="GET")return;
   const url=new URL(request.url);
+  if(url.origin!==self.location.origin)return;
   if(url.pathname.startsWith("/api/")||url.pathname.startsWith("/charts/")){
     event.respondWith(fetch(request));
     return;
   }
-  event.respondWith(fetch(request).then(response=>{const copy=response.clone();caches.open(SHELL).then(cache=>cache.put(request,copy));return response;}).catch(()=>caches.match(request).then(match=>match||caches.match("/"))));
+  event.respondWith(fetch(request).then(response=>{
+    if(response.ok){const copy=response.clone();event.waitUntil(caches.open(SHELL).then(cache=>cache.put(request,copy)));}
+    return response;
+  }).catch(async()=>{
+    const match=await caches.match(request);
+    if(match)return match;
+    if(request.mode==="navigate")return caches.match("/");
+    return Response.error();
+  }));
 });
 self.addEventListener("push",event=>{
   let payload={};
