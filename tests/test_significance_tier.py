@@ -125,6 +125,13 @@ def test_would_notify_false_when_edge_not_validated():
     assert result["reason"] == "edge_not_validated"
 
 
+def test_would_notify_true_during_edge_validation_cold_start():
+    result = would_notify(finding(candidate_profile={"edge_validation": {
+        "validated": False, "status": "EVALUATING", "samples": 0, "minimum_samples": 30,
+    }}))
+    assert result["would_notify"] is True
+
+
 def test_would_notify_false_when_quality_not_clean():
     result = would_notify(finding(quality_label="DEVELOPING", actionable_rank="A"))
     # actionable_rank A alone cannot happen with non-CLEAN quality in the real

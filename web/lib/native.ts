@@ -106,7 +106,16 @@ function coreAllowed(finding: Finding, prefs: NotificationPreferences) {
   if (opportunityClass(finding) === "LATE_INFORMATION_ONLY") return false;
   if (!USER_NOTIFY.has(finding.stage)) return false;
   const continuation = isContinuationWatch(finding);
-  if (!SPECIAL.has(finding.stage) && !continuation && !finding.candidate_profile?.edge_validation?.validated) return false;
+  const edge = finding.candidate_profile?.edge_validation;
+  const samples = Number(edge?.samples);
+  const minimumSamples = Number(edge?.minimum_samples);
+  const edgeAllows = edge?.validated === true || (
+    edge?.status === "EVALUATING"
+    && Number.isInteger(samples) && samples >= 0
+    && Number.isInteger(minimumSamples) && minimumSamples > 0
+    && samples < minimumSamples
+  );
+  if (!SPECIAL.has(finding.stage) && !continuation && !edgeAllows) return false;
   if (!["CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "HALT_WATCH", "HALT_PRESSURE", "RESUME"].includes(finding.stage) && !continuation && finding.actionable_rank !== "A") return false;
   if (!["CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"].includes(finding.stage) && !continuation && finding.quality_label !== "CLEAN") return false;
   if (!prefs.master_enabled) return false;

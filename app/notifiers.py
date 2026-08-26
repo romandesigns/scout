@@ -157,6 +157,21 @@ def _is_critical(f: Finding) -> bool:
     return any(signal in CRITICAL_STAGES for signal in dict.fromkeys([f.stage, *(f.signals or [])]))
 
 
+def edge_validation_allows_notification(f: Finding) -> bool:
+    """Allow proven cohorts and a tightly scoped cold-start learning window."""
+    edge = (f.candidate_profile or {}).get("edge_validation") or {}
+    if edge.get("validated") is True:
+        return True
+    if str(edge.get("status") or "").upper() != "EVALUATING":
+        return False
+    try:
+        samples = int(edge["samples"])
+        minimum_samples = int(edge["minimum_samples"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return minimum_samples > 0 and 0 <= samples < minimum_samples
+
+
 def _session_name(ts: float) -> str:
     local = datetime.fromtimestamp(ts, ZoneInfo(settings.timezone))
     minutes = local.hour * 60 + local.minute
@@ -224,9 +239,10 @@ def _allowed_platform_agnostic(f: Finding, prefs: dict[str, Any] | None) -> bool
     if f.stage not in USER_NOTIFY_STAGES:
         return False
     # Market-status and verified-catalyst events are informational. Momentum
-    # entry notifications, however, must be backed by a profitable completed
-    # paper cohort; clean/A-rank alone is not represented as a trading edge.
-    if f.stage not in SPECIAL_STAGES and not is_continuation_watch(f) and not bool((f.candidate_profile or {}).get("edge_validation", {}).get("validated")):
+    # entry notifications require a validated edge after the cohort matures;
+    # during cold start, clean A-rank opportunities may surface while the
+    # explicitly EVALUATING cohort accumulates its minimum sample.
+    if f.stage not in SPECIAL_STAGES and not is_continuation_watch(f) and not edge_validation_allows_notification(f):
         return False
     if f.stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"} and not is_continuation_watch(f) and f.quality_label != "CLEAN":
         return False
@@ -263,8 +279,7 @@ def notification_ineligibility_reason(f: Finding, prefs: dict[str, Any] | None, 
         return "opportunity_gate"
     if f.stage not in USER_NOTIFY_STAGES:
         return "internal_or_silent_stage"
-    edge = (f.candidate_profile or {}).get("edge_validation", {})
-    if f.stage not in SPECIAL_STAGES and not is_continuation_watch(f) and not bool(edge.get("validated")):
+    if f.stage not in SPECIAL_STAGES and not is_continuation_watch(f) and not edge_validation_allows_notification(f):
         return "edge_not_validated"
     if f.stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"} and not is_continuation_watch(f) and f.quality_label != "CLEAN":
         return "quality_not_clean"

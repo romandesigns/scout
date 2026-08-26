@@ -32,7 +32,7 @@ from __future__ import annotations
 from typing import Any
 
 from .config import settings
-from .notifiers import SPECIAL_STAGES, USER_NOTIFY_STAGES
+from .notifiers import SPECIAL_STAGES, USER_NOTIFY_STAGES, edge_validation_allows_notification
 from .opportunity import can_notify_opportunity, opportunity_class
 
 CONFIRMED_IMPULSE_STAGES = {"BREAKOUT", "IGNITION", "SURGE"}
@@ -75,8 +75,7 @@ def would_notify(source: Any) -> dict[str, Any]:
         stage = str(_get(source, "stage") or "").upper()
         if stage not in USER_NOTIFY_STAGES:
             return {"would_notify": False, "opportunity_class": opportunity_class(view), "reason": "stage_not_user_facing"}
-        candidate_profile = _get(source, "candidate_profile") or {}
-        if stage not in SPECIAL_STAGES and not bool((candidate_profile.get("edge_validation") or {}).get("validated")):
+        if stage not in SPECIAL_STAGES and not edge_validation_allows_notification(view):
             return {"would_notify": False, "opportunity_class": opportunity_class(view), "reason": "edge_not_validated"}
         quality = str(_get(source, "quality_label") or "").upper()
         if stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"} and quality != "CLEAN":
