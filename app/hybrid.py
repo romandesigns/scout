@@ -62,6 +62,15 @@ class HybridMemory:
         observation = self.recent.get(ticker.upper(), {}).get("python")
         return bool(observation and 0 <= float(detected_at) - observation.detected_at <= self.dedupe_seconds)
 
+    def rust_observation_is_duplicate(self, ticker: str, detected_at: float, stage: str) -> bool:
+        observation = self.recent.get(ticker.upper(), {}).get("rust")
+        age = float(detected_at) - observation.detected_at if observation else -1.0
+        return bool(
+            observation
+            and observation.stage.upper() == stage.upper()
+            and 0 <= age <= self.dedupe_seconds
+        )
+
     def episode_key(self, ticker: str, session_key: str, detected_at: float) -> str:
         ticker = ticker.upper()
         previous = self._episode_state.get(ticker)

@@ -67,6 +67,15 @@ def test_recent_python_alert_suppresses_redundant_rust_notification():
     assert not memory.rust_notification_is_duplicate("TEST", 125.0)
 
 
+def test_repeated_rust_stage_is_deduplicated_within_window():
+    memory = HybridMemory(merge_window_seconds=45, dedupe_seconds=20)
+    assert not memory.rust_observation_is_duplicate("TEST", 100.0, "SHAPING_UP")
+    memory.observe("TEST", "rust", 100.0, "SHAPING_UP")
+    assert memory.rust_observation_is_duplicate("TEST", 115.0, "SHAPING_UP")
+    assert not memory.rust_observation_is_duplicate("TEST", 115.0, "CONFIRMED")
+    assert not memory.rust_observation_is_duplicate("TEST", 125.0, "SHAPING_UP")
+
+
 def test_pipeline_trace_reports_stage_latency(tmp_path: Path):
     store = Store(tmp_path / "trace.db")
     try:
@@ -176,7 +185,7 @@ def test_rust_bridge_jsonl_transport_with_fake_binary(tmp_path: Path):
 
     asyncio.run(run_test())
 
-def test_market_rust_candidate_becomes_actionable_awakening(tmp_path: Path):
+def test_market_rust_candidate_is_evidence_only_awakening(tmp_path: Path):
     import asyncio
     from app.market import MarketWatcher
     from app.models import SymbolState
@@ -212,8 +221,15 @@ def test_market_rust_candidate_becomes_actionable_awakening(tmp_path: Path):
     finding = dispatcher.items[0]
     assert finding.stage == "AWAKENING"
     assert finding.engine_source == "rust"
-    assert finding.shadow_mode is False
+    assert finding.actionable_rank == "C"
+    assert finding.shadow_mode is True
     assert finding.lifecycle_phase == "AWAKENING"
+    assert finding.candidate_profile["orchestration"] == {
+        "strategy_role": "scout",
+        "promotion_authority": "python",
+        "decision": "EVIDENCE_ONLY",
+        "sources": ["rust"],
+    }
     assert finding.hybrid_key
     store.close()
 
@@ -371,8 +387,8 @@ def test_shaping_up_transition_becomes_evidence_rich_early_watch(tmp_path: Path)
     asyncio.run(market.handle_rust_candidate(candidate))
     finding = dispatcher.items[0]
     assert finding.stage == "AWAKENING"
-    assert finding.actionable_rank == "B"
-    assert finding.shadow_mode is False
+    assert finding.actionable_rank == "C"
+    assert finding.shadow_mode is True
     assert finding.trigger_level == .50 and finding.invalidation_level == .46
     assert any("6.0x its dormant baseline" in item for item in finding.evidence)
     assert finding.candidate_profile["transition_confidence"] == 82

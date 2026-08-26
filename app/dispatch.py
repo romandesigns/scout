@@ -43,6 +43,8 @@ class Dispatcher:
         self._dispatch_queue: asyncio.PriorityQueue = asyncio.PriorityQueue(maxsize=settings.dispatch_queue_max)
         self._dispatch_workers_started = False
         self._dispatch_ticker_locks: dict[str, asyncio.Lock] = {}
+        self._dispatch_ticker_pending: dict[str, int] = {}
+        self._dispatch_ticker_priority: dict[str, int] = {}
         self._dispatch_dropped = 0
         self._dispatch_shed_low_priority = 0
 
@@ -120,19 +122,36 @@ class Dispatcher:
         result = loop.create_future()
         stage_priority = self._stage_priority(f.stage)
         priority = -stage_priority
-        item = (priority, next(self._sequence), f, buckets, current, result)
+        ticker = f.ticker.upper()
+        # Preserve global urgency without allowing a later lifecycle event to
+        # overtake an earlier event for the same ticker. Notification queues
+        # apply their own urgency after persistence has established order.
+        queue_priority = self._dispatch_ticker_priority.get(ticker, priority)
+        self._dispatch_ticker_priority.setdefault(ticker, queue_priority)
+        self._dispatch_ticker_pending[ticker] = self._dispatch_ticker_pending.get(ticker, 0) + 1
+        item = (queue_priority, next(self._sequence), f, buckets, current, result)
         low_priority_limit = int(settings.dispatch_queue_max * settings.dispatch_low_priority_max_utilization)
         if stage_priority == 0 and self._dispatch_queue.qsize() >= low_priority_limit:
+            self._finish_ticker_dispatch(ticker)
             self._dispatch_shed_low_priority += 1
             result.set_exception(RuntimeError(f"dispatch backpressure shed {f.ticker} {f.stage}"))
             return result
         try:
             self._dispatch_queue.put_nowait(item)
         except asyncio.QueueFull:
+            self._finish_ticker_dispatch(ticker)
             self._dispatch_dropped += 1
             result.set_exception(RuntimeError(f"dispatch queue full; dropped {f.ticker} {f.stage}"))
             log.error("dispatch queue full; dropped %s %s before persistence", f.ticker, f.stage)
         return result
+
+    def _finish_ticker_dispatch(self, ticker: str) -> None:
+        remaining = self._dispatch_ticker_pending.get(ticker, 1) - 1
+        if remaining > 0:
+            self._dispatch_ticker_pending[ticker] = remaining
+            return
+        self._dispatch_ticker_pending.pop(ticker, None)
+        self._dispatch_ticker_priority.pop(ticker, None)
 
     async def _dispatch_worker(self) -> None:
         while True:
@@ -148,6 +167,7 @@ class Dispatcher:
                     result.set_exception(exc)
                 log.exception("background dispatch failed for %s %s", finding.ticker, finding.stage)
             finally:
+                self._finish_ticker_dispatch(finding.ticker.upper())
                 self._dispatch_queue.task_done()
 
     async def _queue(self, channel: str, finding_id: int, f: Finding, prefs: dict) -> None:

@@ -706,6 +706,17 @@ class MarketWatcher:
         if not finding.hybrid_key:
             state = self.states.get(finding.ticker.upper())
             finding.hybrid_key = self._hybrid_key(state, finding.detected_at) if state else f"{finding.ticker}:{trading_session_key(finding.detected_at)}:0"
+        finding.candidate_profile = dict(finding.candidate_profile or {})
+        finding.candidate_profile["orchestration"] = {
+            "strategy_role": "promoter" if source == "python" else "scout",
+            "promotion_authority": "python",
+            "decision": (
+                "TRADE_GRADE"
+                if source == "python" and finding.actionable_rank == "A" and not finding.shadow_mode
+                else "EVIDENCE_ONLY"
+            ),
+            "sources": sources,
+        }
         if len(sources) > 1:
             finding.evidence.append("Rust + Python candidate agreement")
             finding.notification_reason = "dual-engine confirmation"
@@ -780,7 +791,11 @@ class MarketWatcher:
                 and float(metrics.get("change15") or 0) >= settings.hybrid_awakening_min_change_15s_pct
             )
         duplicate = self.hybrid_memory.rust_notification_is_duplicate(symbol, detected_at)
-        stage = "AWAKENING" if actionable and not duplicate else "PRE_IGNITION"
+        if duplicate:
+            return
+        stage = "AWAKENING" if actionable else "PRE_IGNITION"
+        if self.hybrid_memory.rust_observation_is_duplicate(symbol, detected_at, stage):
+            return
         catalyst = self.store.recent_catalyst(symbol)
         evidence = [
             f"Rust transition state: {rust_stage}",
@@ -808,7 +823,7 @@ class MarketWatcher:
             accel_15s_pp=metrics.get("accel15_pp"), dollar_volume_15s=metrics.get("dollar15"), dollar_volume_30s=metrics.get("dollar30"),
             trades_15s=metrics.get("trades15"), trades_30s=metrics.get("trades30"), breakout_level=metrics.get("breakout_level"),
             breakout_window=metrics.get("breakout_window"), signals=signals, quality_label=str(metrics.get("quality_label") or "DEVELOPING"),
-            quality_score=int(metrics.get("quality_score") or 0), actionable_rank=("A" if actionable and catalyst else "B" if actionable else "C"),
+            quality_score=int(metrics.get("quality_score") or 0), actionable_rank="C",
             rejection_reasons=list(metrics.get("rejection_reasons") or []), directional_efficiency=metrics.get("directional_efficiency"),
             active_bucket_ratio=metrics.get("active_bucket_ratio"), direction_reversals=metrics.get("direction_reversals"), previous_close=metrics.get("previous_close"),
             gap_pct=metrics.get("gap_pct"), day_volume=metrics.get("day_volume"), projected_session_volume=metrics.get("projected_session_volume"),
@@ -817,8 +832,8 @@ class MarketWatcher:
             formation_end_at=detected_at, formation_low=metrics.get("base_low"), formation_high=metrics.get("base_high"),
             trigger_level=float(candidate.get("trigger_level") or metrics.get("micro_resistance") or 0) or None,
             invalidation_level=float(candidate.get("invalidation_level") or metrics.get("base_low") or 0) or None,
-            urgency=("EARLY" if actionable else "WATCH"), engine_version=settings.app_version, lifecycle_phase=("AWAKENING" if actionable else "ARMED"),
-            shadow_mode=not actionable or duplicate, recipe_score=recipe_score,
+            urgency="WATCH", engine_version=settings.app_version, lifecycle_phase=("AWAKENING" if actionable else "ARMED"),
+            shadow_mode=True, recipe_score=recipe_score,
             recipe_present=[str(x) for x in candidate.get("recipe_present") or []], recipe_missing=[str(x) for x in candidate.get("recipe_missing") or []],
             trigger_distance_pct=float(candidate.get("trigger_distance_pct") or 0),
             base_extension_at_detection_pct=float(candidate.get("base_extension_pct") or 0),
@@ -865,7 +880,7 @@ class MarketWatcher:
         if catalyst:
             finding.trace_timestamps["catalyst_associated"] = now_trace
         if actionable:
-            finding.trace_timestamps["actionable_promoted"] = now_trace
+            finding.trace_timestamps["evidence_qualified"] = now_trace
         self._decorate_hybrid(finding, "rust")
         snap = self.snapshot(symbol)
         buckets, current = snap if snap else ([], None)

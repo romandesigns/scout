@@ -25,10 +25,12 @@ class RecordingDispatcher(Dispatcher):
     def __init__(self):
         super().__init__(store=None)
         self.completed: list[str] = []
+        self.completed_stages: list[tuple[str, str]] = []
 
     async def emit(self, f, buckets=None, current=None):
         await asyncio.sleep(.01)
         self.completed.append(f.ticker)
+        self.completed_stages.append((f.ticker, f.stage))
         return len(self.completed)
 
 
@@ -61,6 +63,16 @@ class DispatchBackpressureTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("URGENT", dispatcher.completed[:8])
         await asyncio.gather(*normal)
 
+    async def test_same_ticker_lifecycle_events_never_overtake_each_other(self):
+        dispatcher = RecordingDispatcher()
+        first = dispatcher.submit(finding("ORDERED", "EARLY"))
+        later = dispatcher.submit(finding("ORDERED", "HALT"))
+        await asyncio.gather(first, later)
+        self.assertEqual(
+            [stage for ticker, stage in dispatcher.completed_stages if ticker == "ORDERED"],
+            ["EARLY", "HALT"],
+        )
+
     async def test_low_priority_load_cannot_consume_reserved_capacity(self):
         tuned = dataclasses.replace(
             settings, dispatch_queue_max=10, dispatch_worker_count=1,
@@ -75,6 +87,7 @@ class DispatchBackpressureTests(unittest.IsolatedAsyncioTestCase):
                 await shed
             await urgent
             self.assertEqual(dispatcher._dispatch_shed_low_priority, 1)
+            self.assertNotIn("SHED", dispatcher._dispatch_ticker_pending)
             await asyncio.gather(*accepted)
 
 
