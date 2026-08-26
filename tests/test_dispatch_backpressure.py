@@ -35,12 +35,19 @@ class RecordingDispatcher(Dispatcher):
 class DispatchBackpressureTests(unittest.IsolatedAsyncioTestCase):
     async def test_burst_submission_does_not_wait_for_persistence(self):
         dispatcher = RecordingDispatcher()
-        started = time.perf_counter()
-        futures = [dispatcher.submit(finding(f"T{i:03d}")) for i in range(100)]
-        submission_seconds = time.perf_counter() - started
+        release_persistence = asyncio.Event()
 
-        self.assertLess(submission_seconds, .1)
+        async def blocked_emit(f, buckets=None, current=None):
+            await release_persistence.wait()
+            dispatcher.completed.append(f.ticker)
+            return len(dispatcher.completed)
+
+        dispatcher.emit = blocked_emit
+        futures = [dispatcher.submit(finding(f"T{i:03d}")) for i in range(100)]
+
+        self.assertTrue(all(not future.done() for future in futures))
         self.assertGreater(dispatcher._dispatch_queue.qsize(), 0)
+        release_persistence.set()
         await asyncio.gather(*futures)
         self.assertEqual(len(dispatcher.completed), 100)
         self.assertEqual(dispatcher._dispatch_queue.qsize(), 0)
