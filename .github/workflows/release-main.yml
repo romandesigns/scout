@@ -103,25 +103,3 @@ jobs:
               assert key in queues, (key, queues)
           print(f"Scout {expected} is live; dispatch metrics: {queues}")
           PY
-
-  rebuild-install-desktop:
-    name: Rebuild and install Windows desktop
-    needs: deploy-vps-pwa
-    runs-on: [self-hosted, Windows, X64, scout-desktop]
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          clean: true
-          persist-credentials: false
-      - name: Build and silently install desktop
-        shell: pwsh
-        run: .\release-all.ps1 -SkipVpsDeploy -SkipApiCheck
-      - name: Record installed release
-        shell: pwsh
-        run: |
-          $version = (Get-Content -Raw -LiteralPath VERSION).Trim()
-          $installer = Get-ChildItem -LiteralPath release\windows -Filter "*${version}*setup.exe" -File |
-            Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $installer) { throw "Desktop installer for $version was not produced." }
-          "Installed Scout desktop $version from $($installer.FullName)"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import Future
 from pathlib import Path
 
 from app.db import Store
@@ -7,6 +8,19 @@ from app.hybrid import HybridMemory
 from app.models import Finding
 from app.notifiers import notification_allowed
 from app.preferences import normalize_notification_preferences
+
+
+class _CaptureDispatcher:
+    """Synchronous test double for the production dispatch queue contract."""
+
+    def __init__(self):
+        self.items = []
+
+    def submit(self, finding, buckets=None, current=None):
+        self.items.append(finding)
+        result: Future[int] = Future()
+        result.set_result(len(self.items))
+        return result
 
 
 def _finding(**overrides) -> Finding:
@@ -167,15 +181,8 @@ def test_market_rust_candidate_becomes_actionable_awakening(tmp_path: Path):
     from app.market import MarketWatcher
     from app.models import SymbolState
 
-    class CaptureDispatcher:
-        def __init__(self):
-            self.items = []
-        async def emit(self, finding, buckets=None, current=None):
-            self.items.append(finding)
-            return len(self.items)
-
     store = Store(tmp_path / "state.db")
-    dispatcher = CaptureDispatcher()
+    dispatcher = _CaptureDispatcher()
     market = MarketWatcher(store, dispatcher)  # type: ignore[arg-type]
     state = SymbolState("TEST", 15, 160)
     market.states["TEST"] = state
@@ -216,13 +223,8 @@ def test_rust_market_state_vetoes_python_actionable_promotion(tmp_path: Path):
     from app.market import MarketWatcher
     from app.models import SymbolState
 
-    class CaptureDispatcher:
-        def __init__(self): self.items = []
-        async def emit(self, finding, buckets=None, current=None):
-            self.items.append(finding); return len(self.items)
-
     store = Store(tmp_path / "state.db")
-    dispatcher = CaptureDispatcher()
+    dispatcher = _CaptureDispatcher()
     market = MarketWatcher(store, dispatcher)  # type: ignore[arg-type]
     market.states["VETO"] = SymbolState("VETO", 15, 160)
     market._metrics = lambda _state, _ts: {  # type: ignore[method-assign]
@@ -339,13 +341,8 @@ def test_shaping_up_transition_becomes_evidence_rich_early_watch(tmp_path: Path)
     from app.market import MarketWatcher
     from app.models import SymbolState
 
-    class CaptureDispatcher:
-        def __init__(self): self.items = []
-        async def emit(self, finding, buckets=None, current=None):
-            self.items.append(finding); return len(self.items)
-
     store = Store(tmp_path / "state.db")
-    dispatcher = CaptureDispatcher()
+    dispatcher = _CaptureDispatcher()
     market = MarketWatcher(store, dispatcher)  # type: ignore[arg-type]
     market.states["WAKE"] = SymbolState("WAKE", 15, 160)
     metrics = {

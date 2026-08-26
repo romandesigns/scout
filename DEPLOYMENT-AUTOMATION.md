@@ -2,9 +2,10 @@
 
 Every push to `main` triggers `.github/workflows/release-main.yml`.
 
-The workflow validates release metadata, deploys the backend/PWA to the Hostinger VPS,
-and rebuilds plus silently installs the Windows desktop application on the registered
-self-hosted workstation. Releases are serialized so two pushes cannot deploy concurrently.
+The workflow validates release metadata and deploys the backend/PWA to the Hostinger VPS.
+Releases are serialized so two pushes cannot deploy concurrently. Desktop rebuilds are
+started separately with the `Install Scout desktop` workflow after a workstation runner
+has been registered and brought online.
 
 ## GitHub production configuration
 
@@ -63,6 +64,6 @@ prerequisites must be available in that account's service environment.
 - The VPS deployment preserves `.env`, `data`, and `charts` and creates a backup first.
 - The deployment fails if version/health, PWA service-worker, universe, Rust bridge, startup
   drop count, or new dispatch metrics fail verification.
-- The desktop job starts only after the VPS/PWA deployment verifies successfully. If the
-  Windows runner is offline, production still deploys and the desktop job remains queued
-  until the workstation runner comes online.
+- Desktop installation is manual so an offline Windows runner cannot leave production
+  releases queued indefinitely. Run `Install Scout desktop` after bringing the
+  `scout-desktop` runner online.
