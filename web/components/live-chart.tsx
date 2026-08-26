@@ -164,7 +164,11 @@ export function LiveChart({ finding, frozen = false, active = true, pollOffsetMs
 
   if (!finding) return <div className="chart-empty">Select a ticker</div>;
   if (frozen && finding.chart_url && API_CONFIGURED) {
-    return <div className="chart-stage"><img src={`${API_BASE}${finding.chart_url}`} alt={`${finding.ticker} frozen detection chart`} className="chart-image"/></div>;
+    const chartSrc=`${API_BASE}${finding.chart_url}`;
+    return <button type="button" className="chart-stage chart-image-button" onClick={()=>window.open(chartSrc,"_blank","noopener,noreferrer")} aria-label={`Open ${finding.ticker} frozen detection chart at full resolution`} title="Open full-resolution chart">
+      <img src={chartSrc} alt={`${finding.ticker} frozen detection chart`} className="chart-image"/>
+      <span className="chart-image-zoom">OPEN FULL SIZE</span>
+    </button>;
   }
   if (!snapshot?.buckets?.length) return <div className="chart-empty"><span>{error || (loading ? `Loading ${finding.ticker}…` : "Waiting for live buckets…")}</span></div>;
 

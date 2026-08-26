@@ -48,7 +48,7 @@ def render_detection_chart(finding: Finding, buckets: list[Bucket], current: Buc
         vwaps.append(pv / vv if vv > 0 else b.close)
 
     x = list(range(len(rows)))
-    fig = plt.figure(figsize=(12, 7), dpi=140)
+    fig = plt.figure(figsize=(10, 6), dpi=120)
     gs = fig.add_gridspec(4, 1, height_ratios=[3, 3, 3, 2], hspace=0.05)
     ax = fig.add_subplot(gs[:3, 0])
     av = fig.add_subplot(gs[3, 0], sharex=ax)
@@ -68,7 +68,7 @@ def render_detection_chart(finding: Finding, buckets: list[Bucket], current: Buc
     ax.axvline(len(rows) - 1, linewidth=1.4, linestyle=":", label="Scout detection")
     if finding.breakout_level is not None:
         ax.axhline(finding.breakout_level, linewidth=1.0, linestyle="--", alpha=0.7, label=f"{finding.breakout_window or 'range'} breakout")
-    ax.legend(loc="upper left", ncols=5, fontsize=8)
+    ax.legend(loc="upper left", ncols=3, fontsize=11, framealpha=0.92)
     ax.grid(alpha=0.15)
     av.grid(alpha=0.12)
 
@@ -76,9 +76,11 @@ def render_detection_chart(finding: Finding, buckets: list[Bucket], current: Buc
     step = max(1, len(rows) // 8)
     ticks = list(range(0, len(rows), step))
     av.set_xticks(ticks)
-    av.set_xticklabels([times[i] for i in ticks], rotation=0, fontsize=8)
+    av.set_xticklabels([times[i] for i in ticks], rotation=0, fontsize=10)
     plt.setp(ax.get_xticklabels(), visible=False)
-    av.set_ylabel("Volume")
+    av.set_ylabel("Volume", fontsize=11)
+    ax.tick_params(axis="y", labelsize=10)
+    av.tick_params(axis="y", labelsize=10)
 
     catalyst = finding.catalyst_category or "not yet confirmed"
     signals = " · ".join(finding.signals or [finding.stage])
@@ -93,9 +95,11 @@ def render_detection_chart(finding: Finding, buckets: list[Bucket], current: Buc
         f"{finding.ticker} — {signals} — frozen at detection\n"
         f"${finding.price:.4f} | score {finding.score}/10 | {velocity} | 15s RVOL {finding.vol_ratio_15s:.1f}× | "
         f"ext {finding.extension_pct:+.1f}% | catalyst: {catalyst}",
-        fontsize=11,
+        fontsize=16,
+        fontweight="bold",
+        linespacing=1.3,
     )
-    fig.text(0.01, 0.01, "Chart contains no candles after the finding timestamp.", fontsize=8)
+    fig.text(0.01, 0.01, "Chart contains no candles after the finding timestamp.", fontsize=10)
 
     out_dir = out_dir or settings.chart_dir
     out_dir.mkdir(parents=True, exist_ok=True)
