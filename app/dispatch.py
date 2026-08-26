@@ -12,7 +12,7 @@ from .db import Store
 from .models import Bucket, Finding
 from .events import EventHub
 from .imminent_gate import score_finding as score_imminent_finding
-from .notifiers import channel_rate_limited, notification_allowed, notification_allowed_any_platform, notification_phase, send_ntfy, send_ntfy_chart, send_resend_email, send_web_push_all
+from .notifiers import channel_rate_limited, notification_allowed, notification_allowed_any_platform, notification_ineligibility_reason, notification_phase, send_ntfy, send_ntfy_chart, send_resend_email, send_web_push_all
 from .opportunity import opportunity_class
 from .significance_tier import classify_tier, would_notify as preview_would_notify
 
@@ -36,6 +36,36 @@ class Dispatcher:
         self._pending_email: dict[str, tuple[int, Finding, dict]] = {}
         self._pending_email_tasks: dict[str, asyncio.Task] = {}
         self._notified_episode_phases: set[tuple[str, str, str, str]] = set()
+        self._prefs_cache: dict | None = None
+        self._prefs_cached_at = 0.0
+        self._subscription_count_cache = 0
+        self._subscription_count_cached_at = 0.0
+        self._dispatch_queue: asyncio.PriorityQueue = asyncio.PriorityQueue(maxsize=settings.dispatch_queue_max)
+        self._dispatch_workers_started = False
+        self._dispatch_ticker_locks: dict[str, asyncio.Lock] = {}
+        self._dispatch_dropped = 0
+        self._dispatch_shed_low_priority = 0
+
+    async def _notification_preferences(self) -> dict:
+        now = time.monotonic()
+        if self._prefs_cache is None or now - self._prefs_cached_at >= settings.notification_preferences_cache_seconds:
+            self._prefs_cache = await asyncio.to_thread(self.store.get_notification_preferences)
+            self._prefs_cached_at = now
+        return self._prefs_cache
+
+    async def _webpush_subscription_count(self) -> int:
+        now = time.monotonic()
+        if now - self._subscription_count_cached_at >= settings.webpush_subscription_cache_seconds:
+            self._subscription_count_cache = await asyncio.to_thread(self.store.web_push_subscription_count)
+            self._subscription_count_cached_at = now
+        return self._subscription_count_cache
+
+    @staticmethod
+    def _stale_reason(f: Finding, now: float | None = None) -> str | None:
+        age = max(0.0, float(now if now is not None else time.time()) - float(f.detected_at))
+        special = {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME", "HALT_WATCH", "HALT_PRESSURE"}
+        maximum = settings.notification_special_max_candidate_age_seconds if f.stage in special else settings.notification_max_candidate_age_seconds
+        return f"stale_candidate age={age:.1f}s max={maximum:.1f}s" if age > maximum else None
 
     def _claim_episode_phase(self, channel: str, f: Finding, prefs: dict) -> bool:
         """Allow at most one setup and one confirmation per symbol episode.
@@ -71,6 +101,54 @@ class Dispatcher:
         asyncio.create_task(self._notification_worker("ntfy"), name="scout-ntfy-worker")
         asyncio.create_task(self._notification_worker("email"), name="scout-email-worker")
         asyncio.create_task(self._notification_worker("webpush"), name="scout-webpush-worker")
+
+    def _ensure_dispatch_workers(self) -> None:
+        if self._dispatch_workers_started:
+            return
+        self._dispatch_workers_started = True
+        for index in range(settings.dispatch_worker_count):
+            asyncio.create_task(self._dispatch_worker(), name=f"scout-dispatch-worker-{index}")
+
+    def submit(self, f: Finding, buckets: list[Bucket] | None = None, current: Bucket | None = None) -> asyncio.Future:
+        """Queue persistence/delivery without blocking the market websocket.
+
+        Workers run concurrently across symbols while a per-ticker lock preserves the
+        lifecycle order for findings belonging to the same ticker.
+        """
+        self._ensure_dispatch_workers()
+        loop = asyncio.get_running_loop()
+        result = loop.create_future()
+        stage_priority = self._stage_priority(f.stage)
+        priority = -stage_priority
+        item = (priority, next(self._sequence), f, buckets, current, result)
+        low_priority_limit = int(settings.dispatch_queue_max * settings.dispatch_low_priority_max_utilization)
+        if stage_priority == 0 and self._dispatch_queue.qsize() >= low_priority_limit:
+            self._dispatch_shed_low_priority += 1
+            result.set_exception(RuntimeError(f"dispatch backpressure shed {f.ticker} {f.stage}"))
+            return result
+        try:
+            self._dispatch_queue.put_nowait(item)
+        except asyncio.QueueFull:
+            self._dispatch_dropped += 1
+            result.set_exception(RuntimeError(f"dispatch queue full; dropped {f.ticker} {f.stage}"))
+            log.error("dispatch queue full; dropped %s %s before persistence", f.ticker, f.stage)
+        return result
+
+    async def _dispatch_worker(self) -> None:
+        while True:
+            _, _, finding, buckets, current, result = await self._dispatch_queue.get()
+            lock = self._dispatch_ticker_locks.setdefault(finding.ticker.upper(), asyncio.Lock())
+            try:
+                async with lock:
+                    finding_id = await self.emit(finding, buckets, current)
+                if not result.cancelled():
+                    result.set_result(finding_id)
+            except Exception as exc:
+                if not result.cancelled():
+                    result.set_exception(exc)
+                log.exception("background dispatch failed for %s %s", finding.ticker, finding.stage)
+            finally:
+                self._dispatch_queue.task_done()
 
     async def _queue(self, channel: str, finding_id: int, f: Finding, prefs: dict) -> None:
         if channel == "ntfy" and channel_rate_limited("ntfy"):
@@ -188,6 +266,9 @@ class Dispatcher:
             "resend": self._email_queue.qsize(),
             "pending_ntfy_consolidations": len(self._pending_ntfy),
             "pending_email_consolidations": len(self._pending_email),
+            "dispatch": self._dispatch_queue.qsize(),
+            "dispatch_dropped": self._dispatch_dropped,
+            "dispatch_shed_low_priority": self._dispatch_shed_low_priority,
         }
 
     def set_snapshot_provider(self, provider: Callable[[str], tuple[list[Bucket], Bucket | None] | None]) -> None:
@@ -201,6 +282,12 @@ class Dispatcher:
 
     async def emit(self, f: Finding, buckets: list[Bucket] | None = None, current: Bucket | None = None) -> int:
         # Persist + push first. Rendering/email must never block the first alert.
+        dispatch_started = time.time()
+        trace = dict(f.trace_timestamps or {})
+        trace.setdefault("source_received", float(f.detected_at))
+        trace.setdefault("normalized", trace["source_received"])
+        trace.setdefault("dispatch_started", dispatch_started)
+        trace.setdefault("candidate_created", dispatch_started)
         f.candidate_profile = dict(f.candidate_profile or {})
         f.candidate_profile["opportunity_class"] = opportunity_class(f)
         # Advisory-only significance tiering (JUNS/WEN chart-review framework,
@@ -220,17 +307,16 @@ class Dispatcher:
         f.candidate_profile["would_notify_preview"] = preview_would_notify(f)
         finding_id = await asyncio.to_thread(self.store.save_finding, f)
         f.finding_id = finding_id
-        trace = dict(f.trace_timestamps or {})
-        trace.setdefault("source_received", float(f.detected_at))
-        trace.setdefault("normalized", trace["source_received"])
-        trace.setdefault("candidate_created", time.time())
         if f.catalyst_headline:
             trace.setdefault("catalyst_associated", trace["candidate_created"])
         if f.actionable_rank == "A" and not f.shadow_mode:
             trace.setdefault("actionable_promoted", trace["candidate_created"])
         f.trace_timestamps = trace
-        for stage, event_at in sorted(trace.items(), key=lambda item: item[1]):
-            await asyncio.to_thread(self.store.record_pipeline_trace, finding_id, stage, event_at)
+        await asyncio.to_thread(
+            self.store.record_pipeline_traces,
+            finding_id,
+            [(stage, event_at, None, None) for stage, event_at in sorted(trace.items(), key=lambda item: item[1])],
+        )
         if self.finding_listener:
             try:
                 self.finding_listener(finding_id, f)
@@ -240,7 +326,8 @@ class Dispatcher:
             asyncio.create_task(self.trade_listener(finding_id, f), name=f"scout-paper-trade-{f.ticker}")
 
         self._ensure_workers()
-        prefs = await asyncio.to_thread(self.store.get_notification_preferences)
+        prefs = await self._notification_preferences()
+        stale_reason = self._stale_reason(f)
         # Silent/off/watch findings are persisted and streamed to the UI but
         # never occupy delivery queues.
         # Web Push can reach subscribers on any platform (it filters per-subscriber
@@ -248,12 +335,15 @@ class Dispatcher:
         # android-specific check -- only ntfy is intentionally the mobile-only
         # fallback channel ("Mobile / ntfy" in Settings) and is correctly gated
         # by the android platform toggle specifically.
-        if notification_allowed_any_platform(f, prefs) and self._claim_episode_phase("webpush", f, prefs) and settings.vapid_public_key and settings.vapid_private_key and await asyncio.to_thread(self.store.web_push_subscription_count) > 0:
+        if not stale_reason and notification_allowed_any_platform(f, prefs) and self._claim_episode_phase("webpush", f, prefs) and settings.vapid_public_key and settings.vapid_private_key and await self._webpush_subscription_count() > 0:
             await self._queue("webpush", finding_id, f, prefs)
-        elif notification_allowed(f, prefs, "android") and self._claim_episode_phase("ntfy", f, prefs):
+        elif not stale_reason and notification_allowed(f, prefs, "android") and settings.ntfy_topic and self._claim_episode_phase("ntfy", f, prefs):
             await self._queue_consolidated_ntfy(finding_id, f, prefs)
         else:
-            await asyncio.to_thread(self.store.record_delivery, finding_id, "ntfy", "not_eligible")
+            eligible_reason = notification_ineligibility_reason(f, prefs, "android")
+            reason = stale_reason or eligible_reason or ("ntfy_not_configured" if not settings.ntfy_topic else "episode_already_notified")
+            status = "not_configured" if reason == "ntfy_not_configured" else "not_eligible"
+            await asyncio.to_thread(self.store.record_delivery, finding_id, "ntfy", status, reason)
 
         if self.events:
             row = await asyncio.to_thread(self.store.get_finding, finding_id)
@@ -289,9 +379,14 @@ class Dispatcher:
                         "chart_url": f"/charts/{path.rsplit('/', 1)[-1]}",
                     })
                 await asyncio.to_thread(send_ntfy_chart, f, prefs)
-            if notification_allowed(f, prefs, "email") and self._claim_episode_phase("email", f, prefs):
+            stale_reason = self._stale_reason(f)
+            email_configured = bool(settings.resend_api_key and settings.resend_from and settings.resend_to)
+            if not stale_reason and email_configured and notification_allowed(f, prefs, "email") and self._claim_episode_phase("email", f, prefs):
                 await self._queue_consolidated_email(finding_id, f, prefs)
             else:
-                await asyncio.to_thread(self.store.record_delivery, finding_id, "email", "not_eligible")
+                eligible_reason = notification_ineligibility_reason(f, prefs, "email")
+                reason = stale_reason or eligible_reason or ("email_not_configured" if not email_configured else "episode_already_notified")
+                status = "not_configured" if reason == "email_not_configured" else "not_eligible"
+                await asyncio.to_thread(self.store.record_delivery, finding_id, "email", status, reason)
         except Exception:
             log.exception("finding enrichment/email failed for %s %s", f.ticker, f.stage)

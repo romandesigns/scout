@@ -822,7 +822,7 @@ class MarketWatcher:
             recipe_present=[str(x) for x in candidate.get("recipe_present") or []], recipe_missing=[str(x) for x in candidate.get("recipe_missing") or []],
             trigger_distance_pct=float(candidate.get("trigger_distance_pct") or 0),
             base_extension_at_detection_pct=float(candidate.get("base_extension_pct") or 0),
-            timeliness_label="EARLY", precursor_finding_id=state.pre_ignition_finding_id,
+            timeliness_label="EARLY", precursor_finding_id=(state.pre_ignition_finding_id if (state.pre_ignition_finding_id or 0) > 0 else None),
             hybrid_key=f"{symbol}:{trading_session_key(detected_at)}:{int(candidate.get('episode_id') or 0)}",
             trace_timestamps={str(k): float(v) for k, v in dict(candidate.get("trace") or {}).items() if isinstance(v, (int, float))},
         )
@@ -869,9 +869,7 @@ class MarketWatcher:
         self._decorate_hybrid(finding, "rust")
         snap = self.snapshot(symbol)
         buckets, current = snap if snap else ([], None)
-        finding_id = await self.dispatcher.emit(finding, buckets, current)
-        if state.pre_ignition_finding_id is None:
-            state.pre_ignition_finding_id = finding_id
+        self._dispatch_background(finding, buckets, current, state, claim_precursor=state.pre_ignition_finding_id is None)
         log.info("%s %s $%.4f rust_recipe=%d actionable=%s duplicate=%s", stage, symbol, finding.price, recipe_score, actionable, duplicate)
 
     async def apply_scanner_range(self, minimum: float, maximum: float) -> dict[str, float]:
@@ -888,6 +886,32 @@ class MarketWatcher:
         if self.overnight_ws:
             await self._reconcile(self.overnight_ws, self.overnight_subscribed, "BOATS")
         return value
+
+    def _dispatch_background(
+        self,
+        finding: Finding,
+        buckets: list[Bucket],
+        current: Bucket | None,
+        state: SymbolState | None = None,
+        *,
+        claim_precursor: bool = False,
+    ) -> None:
+        """Detach persistence/delivery from market ingestion while preserving ticker order."""
+        if claim_precursor and state is not None:
+            state.pre_ignition_finding_id = -1  # reserve the episode until persistence returns an id
+        future = self.dispatcher.submit(finding, buckets, current)
+
+        def completed(result: asyncio.Future) -> None:
+            try:
+                finding_id = int(result.result())
+            except Exception:
+                if claim_precursor and state is not None and state.pre_ignition_finding_id == -1:
+                    state.pre_ignition_finding_id = None
+                return
+            if claim_precursor and state is not None and state.pre_ignition_finding_id == -1:
+                state.pre_ignition_finding_id = finding_id
+
+        future.add_done_callback(completed)
 
     def snapshot(self, ticker: str):
         s = self.states.get(ticker.upper())
@@ -1312,7 +1336,7 @@ class MarketWatcher:
             )
             snap = self.snapshot(symbol)
             buckets, current = snap if snap else ([], None)
-            await self.dispatcher.emit(finding, buckets, current)
+            self._dispatch_background(finding, buckets, current)
 
         log.info(
             "Market status %s %s code=%s reason=%s",
@@ -2130,7 +2154,7 @@ class MarketWatcher:
                 self._decorate_hybrid(watch, "python")
                 snap = self.snapshot(s.symbol)
                 buckets, current = snap if snap else ([], None)
-                s.pre_ignition_finding_id = await self.dispatcher.emit(watch, buckets, current)
+                self._dispatch_background(watch, buckets, current, s, claim_precursor=True)
         else:
             s.first_leg_candidate_at = 0.0
             s.first_leg_context = None
@@ -2287,7 +2311,7 @@ class MarketWatcher:
                 self._decorate_hybrid(watch, "python")
                 snap = self.snapshot(s.symbol)
                 buckets, current = snap if snap else ([], None)
-                await self.dispatcher.emit(watch, buckets, current)
+                self._dispatch_background(watch, buckets, current)
             return
 
         early_qualifies = bool(
@@ -2547,7 +2571,7 @@ class MarketWatcher:
             lifecycle_phase=("REARM" if stage == "REARM" else "CONFIRMED" if stage in {"IGNITION","BREAKOUT","SURGE"} else "IGNITING"),
             shadow_mode=False, recipe_score=recipe_score, recipe_present=recipe_present, recipe_missing=recipe_missing,
             trigger_distance_pct=trigger_distance_pct, base_extension_at_detection_pct=base_extension,
-            timeliness_label=timeliness_label(base_extension), precursor_finding_id=s.pre_ignition_finding_id,
+            timeliness_label=timeliness_label(base_extension), precursor_finding_id=(s.pre_ignition_finding_id if (s.pre_ignition_finding_id or 0) > 0 else None),
         )
         if early_signal_qualifies:
             f.evidence.extend([
@@ -2617,7 +2641,7 @@ class MarketWatcher:
         self._decorate_hybrid(f, "python")
         snap = self.snapshot(s.symbol)
         buckets, current = snap if snap else ([], None)
-        await self.dispatcher.emit(f, buckets, current)
+        self._dispatch_background(f, buckets, current)
 
         log.info(
             "%s %s $%.4f score=%d signals=%s 3s=%+.2f%% 5s=%+.2f%% 15s=%+.2f%% 30s=%+.2f%% "

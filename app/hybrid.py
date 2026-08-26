@@ -104,6 +104,7 @@ class RustPerceptionBridge:
         self.restarts = 0
         self.submitted = 0
         self.dropped = 0
+        self.shed_quotes = 0
         self.candidates = 0
         self.written = 0
         self.writer_batches = 0
@@ -160,6 +161,12 @@ class RustPerceptionBridge:
 
     def _submit_event(self, *, event_type: str, symbol: str, ts: float, feed: str, payload: dict[str, float]) -> bool:
         if not self.enabled:
+            return False
+        # Quotes are replaceable context; trades are detector ground truth. Under
+        # sustained backpressure shed quote updates before they can crowd trades out
+        # of the bounded bridge queue. The next per-symbol quote refreshes context.
+        if event_type == "quote" and self.queue.qsize() >= int(settings.rust_bridge_queue_max * 0.75):
+            self.shed_quotes += 1
             return False
         event = {
             "schema": "scout.market-event.v1",
@@ -319,6 +326,7 @@ class RustPerceptionBridge:
             "writer_avg_batch": round(self.written / self.writer_batches, 2) if self.writer_batches else 0.0,
             "max_queue_depth": self.max_queue_depth,
             "dropped": self.dropped,
+            "shed_quotes": self.shed_quotes,
             "candidates": self.candidates,
             "restarts": self.restarts,
             "started_at": self.started_at,

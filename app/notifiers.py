@@ -255,6 +255,36 @@ def _allowed(f: Finding, prefs: dict[str, Any] | None, platform: str) -> bool:
     return _allowed_platform_agnostic(f, prefs) and _platform_allowed(prefs, platform)
 
 
+def notification_ineligibility_reason(f: Finding, prefs: dict[str, Any] | None, platform: str | None = None) -> str | None:
+    """Return the first failed gate so production audits explain suppression."""
+    if f.shadow_mode:
+        return "shadow_mode"
+    if not can_notify_opportunity(f):
+        return "opportunity_gate"
+    if f.stage not in USER_NOTIFY_STAGES:
+        return "internal_or_silent_stage"
+    edge = (f.candidate_profile or {}).get("edge_validation", {})
+    if f.stage not in SPECIAL_STAGES and not is_continuation_watch(f) and not bool(edge.get("validated")):
+        return "edge_not_validated"
+    if f.stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"} and not is_continuation_watch(f) and f.quality_label != "CLEAN":
+        return "quality_not_clean"
+    if prefs:
+        if not prefs.get("master_enabled", True):
+            return "master_disabled"
+        if int(f.score) < int(prefs.get("minimum_score", 0)):
+            return "below_minimum_score"
+        if not bool(prefs.get("sessions", {}).get(_session_name(f.detected_at), True)):
+            return "session_disabled"
+        mode = _signal_mode(f, prefs)
+        if mode != "notify":
+            return f"signal_{mode}"
+        if _quiet_now(f, prefs):
+            return "quiet_hours"
+        if platform and not _platform_allowed(prefs, platform):
+            return f"platform_{platform}_disabled"
+    return None
+
+
 def infer_platform(user_agent: str) -> str:
     """Best-effort platform classification from a stored subscription's user_agent.
 

@@ -329,6 +329,15 @@ class Settings:
     email_every_finding: bool = _b("EMAIL_EVERY_FINDING", True)
     notification_queue_max: int = _i("NOTIFICATION_QUEUE_MAX", 250, 20)
     notification_consolidation_seconds: float = _f("NOTIFICATION_CONSOLIDATION_SECONDS", 8.0, 0.0)
+    # Persist stale findings for audit, but do not turn an old queued market event
+    # into a fresh device notification after its trading value has expired.
+    notification_max_candidate_age_seconds: float = _f("NOTIFICATION_MAX_CANDIDATE_AGE_SECONDS", 15.0, 1.0)
+    notification_special_max_candidate_age_seconds: float = _f("NOTIFICATION_SPECIAL_MAX_CANDIDATE_AGE_SECONDS", 45.0, 1.0)
+    notification_preferences_cache_seconds: float = _f("NOTIFICATION_PREFERENCES_CACHE_SECONDS", 2.0, 0.1)
+    webpush_subscription_cache_seconds: float = _f("WEBPUSH_SUBSCRIPTION_CACHE_SECONDS", 5.0, 0.1)
+    dispatch_queue_max: int = _i("DISPATCH_QUEUE_MAX", 2000, 100)
+    dispatch_worker_count: int = _i("DISPATCH_WORKER_COUNT", 4, 1)
+    dispatch_low_priority_max_utilization: float = _f("DISPATCH_LOW_PRIORITY_MAX_UTILIZATION", 0.75, 0.1)
     ntfy_min_interval_seconds: float = _f("NTFY_MIN_INTERVAL_SECONDS", 2.0, 0.25)
     resend_min_interval_seconds: float = _f("RESEND_MIN_INTERVAL_SECONDS", 1.0, 0.25)
     notification_retry_attempts: int = _i("NOTIFICATION_RETRY_ATTEMPTS", 5, 1)

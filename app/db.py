@@ -675,6 +675,21 @@ class Store:
             self.db.commit()
             return int(cur.lastrowid)
 
+    def record_pipeline_traces(self, finding_id: int, traces: list[tuple[str, float, str | None, str | None]]) -> None:
+        """Persist one finding's trace in one transaction instead of one commit per stage."""
+        if not traces:
+            return
+        rows = [
+            (int(finding_id), str(stage)[:48], float(event_at), (channel or "")[:32], (detail or "")[:500])
+            for stage, event_at, channel, detail in traces
+        ]
+        with self.lock:
+            self.db.executemany(
+                "INSERT INTO pipeline_trace_events(finding_id,stage,event_at,channel,detail) VALUES(?,?,?,?,?)",
+                rows,
+            )
+            self.db.commit()
+
     def finding_pipeline_trace(self, finding_id: int) -> list[dict[str, Any]]:
         with self.lock:
             rows = self.db.execute(

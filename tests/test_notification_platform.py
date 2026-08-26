@@ -25,8 +25,9 @@ def with_vapid(**overrides):
 from app.models import Finding
 from app.notifiers import (
     _message, _user_title, infer_platform, notification_allowed_any_platform,
-    notification_phase, send_web_push_all,
+    notification_ineligibility_reason, notification_phase, send_web_push_all,
 )
+from app.dispatch import Dispatcher
 from app.preferences import DEFAULT_NOTIFICATION_PREFERENCES
 
 
@@ -197,6 +198,40 @@ class DecisionNotificationTests(unittest.TestCase):
     def test_special_event_notification_does_not_claim_trade_edge(self):
         finding = make_finding(stage="HALT", candidate_profile={})
         self.assertTrue(notification_allowed_any_platform(finding, DEFAULT_NOTIFICATION_PREFERENCES))
+
+    def test_ineligibility_reason_explains_unvalidated_momentum(self):
+        finding = make_finding(candidate_profile={"edge_validation": {"validated": False}})
+        self.assertEqual(
+            notification_ineligibility_reason(finding, DEFAULT_NOTIFICATION_PREFERENCES, "windows"),
+            "edge_not_validated",
+        )
+
+
+class DispatchLatencyGuardTests(unittest.IsolatedAsyncioTestCase):
+    def test_stale_momentum_is_suppressed_but_recent_momentum_is_not(self):
+        finding = make_finding(detected_at=1_000.0)
+        self.assertIsNone(Dispatcher._stale_reason(finding, now=1_010.0))
+        self.assertIn("stale_candidate", Dispatcher._stale_reason(finding, now=1_020.0))
+
+    def test_special_events_have_a_longer_stale_window(self):
+        finding = make_finding(stage="HALT", detected_at=1_000.0, candidate_profile={})
+        self.assertIsNone(Dispatcher._stale_reason(finding, now=1_040.0))
+        self.assertIn("stale_candidate", Dispatcher._stale_reason(finding, now=1_050.0))
+
+    async def test_preferences_are_cached_during_a_burst(self):
+        class PreferenceStore:
+            calls = 0
+
+            def get_notification_preferences(self):
+                self.calls += 1
+                return copy.deepcopy(DEFAULT_NOTIFICATION_PREFERENCES)
+
+        store = PreferenceStore()
+        dispatcher = Dispatcher(store)
+        first = await dispatcher._notification_preferences()
+        second = await dispatcher._notification_preferences()
+        self.assertIs(first, second)
+        self.assertEqual(store.calls, 1)
 
 
 class ClientNotificationParityTests(unittest.TestCase):
