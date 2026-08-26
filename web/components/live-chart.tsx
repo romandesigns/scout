@@ -44,6 +44,32 @@ function aggregateBuckets(rows: Bucket[], seconds: number): Bucket[] {
   return Array.from(groups.values()).sort((a,b)=>a.start_ts-b.start_ts);
 }
 
+function fillBucketGaps(rows: Bucket[], seconds: number): Bucket[] {
+  if (rows.length < 2) return rows;
+  const filled: Bucket[] = [rows[0]];
+  const maxFillIntervals = Math.max(1, Math.floor((15 * 60) / seconds));
+  for (const row of rows.slice(1)) {
+    const previous = filled.at(-1)!;
+    const missingIntervals = Math.round((row.start_ts - previous.start_ts) / seconds) - 1;
+    if (missingIntervals > 0 && missingIntervals <= maxFillIntervals) {
+      for (let step = 1; step <= missingIntervals; step += 1) {
+        filled.push({
+          ...previous,
+          start_ts: previous.start_ts + step * seconds,
+          open: previous.close,
+          high: previous.close,
+          low: previous.close,
+          close: previous.close,
+          volume: 0,
+          trades: 0,
+        });
+      }
+    }
+    filled.push(row);
+  }
+  return filled;
+}
+
 function demoSnapshot(finding?: Finding): MarketSnapshot {
   const now = 1_800_000_000; // deterministic demo timestamp; prevents SSR hydration drift
   const base = finding?.price || 2.4;
@@ -146,8 +172,8 @@ export function LiveChart({ finding, frozen = false, active = true, pollOffsetMs
 }
 
 function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnnotations, annotations, onSelectFinding }: { snapshot: MarketSnapshot; selectedFinding: Finding; error?: string; timeframeSeconds:15|30|60|300; showAnnotations:boolean; annotations:ChartAnnotations; onSelectFinding?: (finding: Finding) => void }) {
-  const allRows = useMemo(() => aggregateBuckets(snapshot.buckets, timeframeSeconds), [snapshot.buckets,timeframeSeconds]);
-  const [visibleCount,setVisibleCount]=useState(80);
+  const allRows = useMemo(() => fillBucketGaps(aggregateBuckets(snapshot.buckets, timeframeSeconds), timeframeSeconds), [snapshot.buckets,timeframeSeconds]);
+  const [visibleCount,setVisibleCount]=useState(64);
   const [rightOffset,setRightOffset]=useState(0);
   const [hoverIndex,setHoverIndex]=useState<number|null>(null);
   const drag=useRef<{x:number;offset:number}|null>(null);
@@ -176,18 +202,21 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
     const lastTs = rows.at(-1)?.start_ts ?? firstTs + 15;
     const domainEnd = lastTs + timeframeSeconds;
     const timeSpan = Math.max(15, domainEnd - firstTs);
-    const x = (ts: number) => left + ((ts - firstTs) / timeSpan) * (width - left - right);
-    const bodyW = Math.max(2.5, Math.min(18, ((width - left - right) * timeframeSeconds / timeSpan) * 0.58));
+    const plotWidth = width - left - right;
+    const x = (ts: number) => left + ((ts - firstTs) / timeSpan) * plotWidth;
+    const candleSlot = plotWidth * timeframeSeconds / timeSpan;
+    const candleX = (startTs: number) => x(startTs + timeframeSeconds / 2);
+    const bodyW = Math.max(3.5, Math.min(18, candleSlot * 0.72));
     const y = (price: number) => top + ((max - price) / Math.max(max - min, 1e-9)) * (priceBottom - top);
     const maxVol = Math.max(1, ...rows.map((b) => b.volume));
     const vy = (vol: number) => bottom - (vol / maxVol) * (bottom - volumeTop);
-    return { width, height, left, right, top, priceBottom, volumeTop, bottom, min, max, firstTs, lastTs, domainEnd, timeSpan, bodyW, x, y, vy };
+    return { width, height, left, right, top, priceBottom, volumeTop, bottom, min, max, firstTs, lastTs, domainEnd, timeSpan, candleSlot, bodyW, x, candleX, y, vy };
   }, [rows,timeframeSeconds]);
 
   const ema9 = useMemo(() => emaSeries(rows.map((b) => b.close), 9), [rows]);
   const ema21 = useMemo(() => emaSeries(rows.map((b) => b.close), 21), [rows]);
   const vwap = useMemo(() => vwapSeries(rows), [rows]);
-  const path = (values: number[]) => values.map((v, i) => `${i ? "L" : "M"}${layout.x(rows[i].start_ts).toFixed(1)},${layout.y(v).toFixed(1)}`).join(" ");
+  const path = (values: number[]) => values.map((v, i) => `${i ? "L" : "M"}${layout.candleX(rows[i].start_ts).toFixed(1)},${layout.y(v).toFixed(1)}`).join(" ");
   const firstTs = rows[0]?.start_ts ?? 0;
   const lastTs = rows.at(-1)?.start_ts ?? firstTs;
   const markerX = (ts: number) => layout.x(ts);
@@ -225,7 +254,7 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
     const ratio=Math.max(0,Math.min(1,(x-layout.left)/(layout.width-layout.left-layout.right)));
     return Math.max(0,Math.min(rows.length-1,Math.round(ratio*(rows.length-1))));
   };
-  const resetViewport=()=>{setVisibleCount(Math.min(80,Math.max(12,allRows.length)));setRightOffset(0);setHoverIndex(null);};
+  const resetViewport=()=>{setVisibleCount(Math.min(64,Math.max(12,allRows.length)));setRightOffset(0);setHoverIndex(null);};
   const zoom=(delta:number)=>setVisibleCount(value=>Math.max(12,Math.min(160,value+delta)));
   const touchDistance=(touches:React.TouchList)=>touches.length<2?0:Math.hypot(touches[0].clientX-touches[1].clientX,touches[0].clientY-touches[1].clientY);
 
@@ -244,27 +273,32 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
         {priceTicks.map((p) => <line key={p} x1={layout.left} x2={layout.width-layout.right} y1={layout.y(p)} y2={layout.y(p)}/>) }
         {timeTicks.slice(1,-1).map((ts) => <line key={ts} x1={layout.x(ts)} x2={layout.x(ts)} y1={layout.top} y2={layout.bottom}/>) }
       </g>
-      {showAnnotations&&annotations.detection!==false&&detectionCandle&&<rect className="detection-candle-highlight" x={layout.x(detectionCandle.start_ts)-layout.bodyW*.72} y={layout.top} width={layout.bodyW*1.44} height={layout.priceBottom-layout.top}/>}
-      <g>
-        {rows.map((b, i) => {
-          const cx = layout.x(b.start_ts);
+      <line className="chart-volume-separator" x1={layout.left} x2={layout.width-layout.right} y1={layout.volumeTop-8} y2={layout.volumeTop-8}/>
+      <g className="chart-volume-bars">
+        {rows.map((b) => {
+          const up = b.close >= b.open;
+          return <rect key={`volume-${b.start_ts}`} className={`chart-volume-bar chart-volume-bar-${up?"up":"down"}`} x={layout.candleX(b.start_ts)-layout.bodyW/2} y={layout.vy(b.volume)} width={layout.bodyW} height={layout.bottom-layout.vy(b.volume)}/>;
+        })}
+      </g>
+      <path d={path(ema9)} fill="none" stroke="var(--blue)" strokeWidth="1.25" vectorEffect="non-scaling-stroke" opacity=".66"/>
+      <path d={path(ema21)} fill="none" stroke="var(--orange)" strokeWidth="1.1" vectorEffect="non-scaling-stroke" opacity=".62"/>
+      <path d={path(vwap)} fill="none" stroke="var(--cyan)" strokeWidth="1" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" opacity=".6"/>
+      {showAnnotations&&annotations.detection!==false&&detectionCandle&&<rect className="detection-candle-highlight" x={layout.candleX(detectionCandle.start_ts)-layout.candleSlot/2} y={layout.top} width={layout.candleSlot} height={layout.priceBottom-layout.top}/>}
+      <g className="chart-candles">
+        {rows.map((b) => {
+          const cx = layout.candleX(b.start_ts);
           const bodyW = layout.bodyW;
           const yo = layout.y(b.open);
           const yc = layout.y(b.close);
           const up = b.close >= b.open;
-          const bodyY = Math.min(yo, yc);
-          const bodyH = Math.max(1.2, Math.abs(yc - yo));
-          const fill = up ? "var(--green)" : "var(--red)";
-          return <g key={b.start_ts} opacity={b.trades ? 0.9 : 0.38}>
-            <line x1={cx} x2={cx} y1={layout.y(b.high)} y2={layout.y(b.low)} stroke={fill} strokeWidth="1" vectorEffect="non-scaling-stroke"/>
-            <rect x={cx-bodyW/2} y={bodyY} width={bodyW} height={bodyH} fill={fill}/>
-            <rect x={cx-bodyW/2} y={layout.vy(b.volume)} width={bodyW} height={layout.bottom-layout.vy(b.volume)} fill={fill} opacity="0.22"/>
+          const bodyH = Math.max(2.2, Math.abs(yc - yo));
+          const bodyY = (yo + yc) / 2 - bodyH / 2;
+          return <g key={b.start_ts} className={`chart-candle chart-candle-${up?"up":"down"}${b.trades?"":" chart-candle-empty"}`}>
+            <line className="chart-candle-wick" x1={cx} x2={cx} y1={layout.y(b.high)} y2={layout.y(b.low)}/>
+            <rect className="chart-candle-body" x={cx-bodyW/2} y={bodyY} width={bodyW} height={bodyH} rx="0.35"/>
           </g>;
         })}
       </g>
-      <path d={path(ema9)} fill="none" stroke="var(--blue)" strokeWidth="1.4" vectorEffect="non-scaling-stroke" opacity=".92"/>
-      <path d={path(ema21)} fill="none" stroke="var(--orange)" strokeWidth="1.15" vectorEffect="non-scaling-stroke" opacity=".8"/>
-      <path d={path(vwap)} fill="none" stroke="var(--cyan)" strokeWidth="1" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" opacity=".78"/>
 
       {showAnnotations && annotations.formation !== false && selectedFinding.formation_start_at && selectedFinding.formation_end_at && <g className="chart-formation-region">
         <rect x={markerX(selectedFinding.formation_start_at)} y={layout.top} width={Math.max(4,markerX(selectedFinding.formation_end_at)-markerX(selectedFinding.formation_start_at))} height={layout.priceBottom-layout.top} fill="var(--blue)" opacity=".08"/>
@@ -309,7 +343,7 @@ function SvgChart({ snapshot, selectedFinding, error, timeframeSeconds, showAnno
       {timeTicks.map((ts, i) => <text key={`time-${i}`} x={layout.x(ts)} y="510" textAnchor={i===0?"start":i===timeTicks.length-1?"end":"middle"} className="chart-time-label">{etTime(ts)}</text>)}
       <text x={layout.width-layout.right+7} y="510" className="chart-timezone-label">ET</text>
       {hovered&&<g className="chart-crosshair">
-        <line x1={layout.x(hovered.start_ts)} x2={layout.x(hovered.start_ts)} y1={layout.top} y2={layout.bottom}/>
+        <line x1={layout.candleX(hovered.start_ts)} x2={layout.candleX(hovered.start_ts)} y1={layout.top} y2={layout.bottom}/>
         <line x1={layout.left} x2={layout.width-layout.right} y1={layout.y(hovered.close)} y2={layout.y(hovered.close)}/>
       </g>}
     </svg>

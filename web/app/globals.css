@@ -173,6 +173,15 @@ html[data-scout-markers="off"] .chart-event-marker{display:none}
 .event-icon::after{content:attr(data-tooltip);position:fixed;z-index:220;max-width:260px;transform:translate(0,31px);border-radius:6px;background:#151d27;color:var(--text);padding:6px 8px;box-shadow:0 12px 32px rgba(0,0,0,.55),inset 0 0 0 1px var(--line-strong);font-size:9px;font-weight:500;line-height:1.35;letter-spacing:0;white-space:normal;pointer-events:none;opacity:0;transition:opacity .12s}
 .event-icon:hover::after,.event-icon:focus-visible::after{opacity:1}
 .chart-interactive{cursor:crosshair;touch-action:none;user-select:none}
+.chart-candle{--candle-color:var(--green)}
+.chart-candle-down{--candle-color:var(--red)}
+.chart-candle-empty{--candle-color:rgba(139,159,181,.55);opacity:.58}
+.chart-candle-wick{stroke:var(--candle-color);stroke-width:1.15;vector-effect:non-scaling-stroke;shape-rendering:crispEdges}
+.chart-candle-body{fill:var(--candle-color);stroke:var(--candle-color);stroke-width:.45;vector-effect:non-scaling-stroke;shape-rendering:crispEdges}
+.chart-volume-bar{opacity:.42;shape-rendering:crispEdges}
+.chart-volume-bar-up{fill:var(--green)}
+.chart-volume-bar-down{fill:var(--red)}
+.chart-volume-separator{stroke:rgba(139,159,181,.1);stroke-width:1;vector-effect:non-scaling-stroke}
 .chart-interactive:active{cursor:grabbing}
 .chart-crosshair line{stroke:rgba(217,228,240,.42);stroke-width:1;stroke-dasharray:3 3;vector-effect:non-scaling-stroke;pointer-events:none}
 .candle-tooltip{position:absolute;z-index:12;right:74px;top:8px;display:grid;grid-template-columns:repeat(3,auto);gap:3px 9px;border-radius:6px;background:rgba(16,23,32,.94);padding:7px 9px;box-shadow:0 10px 28px rgba(0,0,0,.42),inset 0 0 0 1px var(--line-strong);color:var(--muted);font-size:9px;pointer-events:none}

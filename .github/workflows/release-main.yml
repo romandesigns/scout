@@ -1,0 +1,127 @@
+name: Release main
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scout-production-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate coordinated release metadata
+        run: python scripts/check_release_integrity.py
+      - name: Compile backend
+        run: python -m compileall -q app scripts
+
+  deploy-vps-pwa:
+    name: Deploy VPS and PWA
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      VPS_HOST: ${{ secrets.SCOUT_VPS_HOST }}
+      VPS_USER: ${{ secrets.SCOUT_VPS_USER }}
+      VPS_PORT: ${{ secrets.SCOUT_VPS_PORT || '22' }}
+      REMOTE_APP: ${{ vars.SCOUT_REMOTE_APP || '/opt/apps/scout' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SCOUT_VPS_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SCOUT_VPS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_KNOWN_HOSTS"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/scout_deploy
+          chmod 600 ~/.ssh/scout_deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Package server release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n' < VERSION)"
+          stage="$RUNNER_TEMP/stockhunter-scout-$version"
+          archive="$RUNNER_TEMP/stockhunter-scout-$version-server.zip"
+          mkdir -p "$stage"
+          rsync -a \
+            --exclude='.git/' --exclude='.github/' --exclude='.env' \
+            --exclude='.next/' --exclude='node_modules/' --exclude='target/' \
+            --exclude='release/' --exclude='data/' --exclude='charts/' \
+            --exclude='__pycache__/' --exclude='.pytest_cache/' \
+            ./ "$stage/"
+          (cd "$RUNNER_TEMP" && zip -qr "$archive" "stockhunter-scout-$version")
+          echo "SCOUT_VERSION=$version" >> "$GITHUB_ENV"
+          echo "SCOUT_ARCHIVE=$archive" >> "$GITHUB_ENV"
+
+      - name: Upload and deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_opts=(-i ~/.ssh/scout_deploy -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
+          scp "${ssh_opts[@]}" -P "$VPS_PORT" "$SCOUT_ARCHIVE" scripts/deploy-vps-release.sh "$VPS_USER@$VPS_HOST:/tmp/"
+          remote_archive="/tmp/$(basename "$SCOUT_ARCHIVE")"
+          ssh "${ssh_opts[@]}" -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" \
+            "bash '/tmp/deploy-vps-release.sh' '$remote_archive' '$SCOUT_VERSION' '$REMOTE_APP' '0'"
+
+      - name: Verify production through SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_opts=(-i ~/.ssh/scout_deploy -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=20)
+          payload="$(ssh "${ssh_opts[@]}" -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" \
+            "curl --fail --silent --show-error http://127.0.0.1:18081/api/status")"
+          STATUS_PAYLOAD="$payload" python - "$SCOUT_VERSION" <<'PY'
+          import json, os, sys
+          expected = sys.argv[1]
+          status = json.loads(os.environ["STATUS_PAYLOAD"])
+          assert status.get("ok") is True, status
+          assert status.get("version") == expected, status.get("version")
+          queues = status.get("notifications", {}).get("queues", {})
+          for key in ("dispatch", "dispatch_dropped", "dispatch_shed_low_priority"):
+              assert key in queues, (key, queues)
+          print(f"Scout {expected} is live; dispatch metrics: {queues}")
+          PY
+
+  rebuild-install-desktop:
+    name: Rebuild and install Windows desktop
+    needs: deploy-vps-pwa
+    runs-on: [self-hosted, Windows, X64, scout-desktop]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: true
+          persist-credentials: false
+      - name: Build and silently install desktop
+        shell: pwsh
+        run: .\release-all.ps1 -SkipVpsDeploy -SkipApiCheck
+      - name: Record installed release
+        shell: pwsh
+        run: |
+          $version = (Get-Content -Raw -LiteralPath VERSION).Trim()
+          $installer = Get-ChildItem -LiteralPath release\windows -Filter "*${version}*setup.exe" -File |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $installer) { throw "Desktop installer for $version was not produced." }
+          "Installed Scout desktop $version from $($installer.FullName)"
