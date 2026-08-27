@@ -73,6 +73,32 @@ class DispatchBackpressureTests(unittest.IsolatedAsyncioTestCase):
             ["EARLY", "HALT"],
         )
 
+    async def test_same_ticker_promotion_escalates_queued_watch_without_reordering(self):
+        tuned = dataclasses.replace(settings, dispatch_worker_count=1)
+        with patch("app.dispatch.settings", tuned):
+            dispatcher = RecordingDispatcher()
+            release = asyncio.Event()
+
+            async def blocked_emit(f, buckets=None, current=None):
+                if f.ticker == "BLOCKER":
+                    await release.wait()
+                dispatcher.completed.append(f.ticker)
+                dispatcher.completed_stages.append((f.ticker, f.stage))
+                return len(dispatcher.completed)
+
+            dispatcher.emit = blocked_emit
+            blocker = dispatcher.submit(finding("BLOCKER", "HALT"))
+            await asyncio.sleep(0)
+            first = dispatcher.submit(finding("PROMOTE", "PRE_IGNITION"))
+            normal = [dispatcher.submit(finding(f"NORMAL{i}", "EARLY")) for i in range(20)]
+            ignition = dispatcher.submit(finding("PROMOTE", "IGNITION"))
+            release.set()
+            await asyncio.gather(blocker, first, ignition, *normal)
+
+            promoted = [item for item in dispatcher.completed_stages if item[0] == "PROMOTE"]
+            self.assertEqual(promoted, [("PROMOTE", "PRE_IGNITION"), ("PROMOTE", "IGNITION")])
+            self.assertLess(dispatcher.completed.index("PROMOTE"), dispatcher.completed.index("NORMAL0"))
+
     async def test_low_priority_load_cannot_consume_reserved_capacity(self):
         tuned = dataclasses.replace(
             settings, dispatch_queue_max=10, dispatch_worker_count=1,

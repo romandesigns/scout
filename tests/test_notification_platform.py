@@ -189,27 +189,37 @@ class DecisionNotificationTests(unittest.TestCase):
         finding = make_finding(actionable_rank="B")
         self.assertFalse(notification_allowed_any_platform(finding, DEFAULT_NOTIFICATION_PREFERENCES))
 
-    def test_clean_a_rank_momentum_is_suppressed_while_cohort_is_accumulating(self):
+    def test_clean_a_rank_momentum_surfaces_while_cohort_is_accumulating(self):
         finding = make_finding(stage="BREAKOUT", candidate_profile={"edge_validation": {
             "validated": False, "status": "EVALUATING", "samples": 13, "minimum_samples": 30,
         }})
-        self.assertFalse(notification_allowed_any_platform(finding, DEFAULT_NOTIFICATION_PREFERENCES))
+        self.assertTrue(notification_allowed_any_platform(finding, DEFAULT_NOTIFICATION_PREFERENCES))
 
-    def test_mature_unprofitable_momentum_cohort_is_suppressed(self):
+    def test_clean_a_rank_momentum_surfaces_when_trade_cohort_is_unprofitable(self):
         finding = make_finding(stage="BREAKOUT", candidate_profile={"edge_validation": {
             "validated": False, "status": "EVALUATING", "samples": 30, "minimum_samples": 30,
         }})
-        self.assertFalse(notification_allowed_any_platform(finding, DEFAULT_NOTIFICATION_PREFERENCES))
+        self.assertTrue(notification_allowed_any_platform(finding, DEFAULT_NOTIFICATION_PREFERENCES))
 
     def test_special_event_notification_does_not_claim_trade_edge(self):
         finding = make_finding(stage="HALT", candidate_profile={})
         self.assertTrue(notification_allowed_any_platform(finding, DEFAULT_NOTIFICATION_PREFERENCES))
 
-    def test_ineligibility_reason_explains_unvalidated_momentum(self):
+    def test_unvalidated_clean_a_momentum_has_no_ineligibility_reason(self):
         finding = make_finding(candidate_profile={"edge_validation": {"validated": False}})
+        self.assertIsNone(
+            notification_ineligibility_reason(finding, DEFAULT_NOTIFICATION_PREFERENCES, "windows"),
+        )
+
+    def test_unvalidated_non_clean_momentum_remains_suppressed(self):
+        finding = make_finding(
+            quality_label="DEVELOPING",
+            candidate_profile={"edge_validation": {"validated": False}},
+        )
+        self.assertFalse(notification_allowed_any_platform(finding, DEFAULT_NOTIFICATION_PREFERENCES))
         self.assertEqual(
             notification_ineligibility_reason(finding, DEFAULT_NOTIFICATION_PREFERENCES, "windows"),
-            "edge_not_validated",
+            "opportunity_gate",
         )
 
 

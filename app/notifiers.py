@@ -158,9 +158,23 @@ def _is_critical(f: Finding) -> bool:
 
 
 def edge_validation_allows_notification(f: Finding) -> bool:
-    """Only user-alert cohorts with demonstrated edge; paper outcomes mature cold starts."""
+    """Return whether the paper-trading cohort has demonstrated entry edge.
+
+    This remains advisory for clean A-rank momentum. Scout is decision support:
+    an immature or unprofitable automated-entry cohort must not hide a real,
+    timely bullish expansion from the operator.
+    """
     edge = (f.candidate_profile or {}).get("edge_validation") or {}
     return edge.get("validated") is True
+
+
+def significant_momentum_allows_notification(f: Finding) -> bool:
+    """Surface trustworthy momentum independently of automated-entry profitability."""
+    return (
+        f.actionable_rank == "A"
+        and f.quality_label == "CLEAN"
+        and f.stage in SETUP_STAGES | CONFIRMATION_STAGES
+    )
 
 
 def _session_name(ts: float) -> str:
@@ -233,7 +247,12 @@ def _allowed_platform_agnostic(f: Finding, prefs: dict[str, Any] | None) -> bool
     # entry notifications require validated edge. Suppressed candidates still
     # accumulate paper outcomes, so learning no longer requires risking noisy
     # user-facing cold-start alerts.
-    if f.stage not in SPECIAL_STAGES and not is_continuation_watch(f) and not edge_validation_allows_notification(f):
+    if (
+        f.stage not in SPECIAL_STAGES
+        and not is_continuation_watch(f)
+        and not edge_validation_allows_notification(f)
+        and not significant_momentum_allows_notification(f)
+    ):
         return False
     if f.stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"} and not is_continuation_watch(f) and f.quality_label != "CLEAN":
         return False
@@ -270,7 +289,12 @@ def notification_ineligibility_reason(f: Finding, prefs: dict[str, Any] | None, 
         return "opportunity_gate"
     if f.stage not in USER_NOTIFY_STAGES:
         return "internal_or_silent_stage"
-    if f.stage not in SPECIAL_STAGES and not is_continuation_watch(f) and not edge_validation_allows_notification(f):
+    if (
+        f.stage not in SPECIAL_STAGES
+        and not is_continuation_watch(f)
+        and not edge_validation_allows_notification(f)
+        and not significant_momentum_allows_notification(f)
+    ):
         return "edge_not_validated"
     if f.stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"} and not is_continuation_watch(f) and f.quality_label != "CLEAN":
         return "quality_not_clean"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import heapq
 import logging
 import itertools
 import time
@@ -127,7 +128,23 @@ class Dispatcher:
         # overtake an earlier event for the same ticker. Notification queues
         # apply their own urgency after persistence has established order.
         queue_priority = self._dispatch_ticker_priority.get(ticker, priority)
-        self._dispatch_ticker_priority.setdefault(ticker, queue_priority)
+        if priority < queue_priority:
+            # A ticker often enters through PRE_IGNITION and promotes while its
+            # earlier audit events are still queued. The old implementation
+            # permanently inherited that first low priority, so a timely EARLY,
+            # IGNITION, or HALT could wait behind the market-open watch backlog.
+            # Promote the queued ticker group while sequence preserves order.
+            queue_priority = priority
+            self._dispatch_ticker_priority[ticker] = queue_priority
+            changed = False
+            for index, queued in enumerate(self._dispatch_queue._queue):
+                if queued[2].ticker.upper() == ticker and queued[0] > queue_priority:
+                    self._dispatch_queue._queue[index] = (queue_priority, *queued[1:])
+                    changed = True
+            if changed:
+                heapq.heapify(self._dispatch_queue._queue)
+        else:
+            self._dispatch_ticker_priority.setdefault(ticker, queue_priority)
         self._dispatch_ticker_pending[ticker] = self._dispatch_ticker_pending.get(ticker, 0) + 1
         item = (queue_priority, next(self._sequence), f, buckets, current, result)
         low_priority_limit = int(settings.dispatch_queue_max * settings.dispatch_low_priority_max_utilization)

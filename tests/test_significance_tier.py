@@ -119,17 +119,16 @@ def test_would_notify_false_when_stage_not_user_facing():
     assert result["reason"] == "stage_not_user_facing"
 
 
-def test_would_notify_false_when_edge_not_validated():
+def test_would_notify_true_for_clean_a_momentum_when_edge_not_validated():
     result = would_notify(finding(candidate_profile={"edge_validation": {"validated": False}}))
-    assert result["would_notify"] is False
-    assert result["reason"] == "edge_not_validated"
+    assert result["would_notify"] is True
 
 
-def test_would_notify_false_during_edge_validation_cold_start():
+def test_would_notify_true_for_clean_a_during_edge_validation_cold_start():
     result = would_notify(finding(candidate_profile={"edge_validation": {
         "validated": False, "status": "EVALUATING", "samples": 0, "minimum_samples": 30,
     }}))
-    assert result["would_notify"] is False
+    assert result["would_notify"] is True
 
 
 def test_would_notify_false_when_quality_not_clean():

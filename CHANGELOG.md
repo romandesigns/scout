@@ -1,3 +1,8 @@
+## 6.11.3 — Timely significant-momentum visibility
+
+- Escalate a ticker's queued dispatch priority when it promotes from a watch event into EARLY, IGNITION, BREAKOUT, or another urgent lifecycle stage, preserving chronological order while preventing market-open backlog delays.
+- Surface CLEAN A-rank setup and confirmation notifications even when the automated paper-entry cohort is still evaluating or historically unprofitable; keep edge validation visible as advisory risk metadata.
+- Keep non-clean, non-actionable, late, disabled-session, and operator-muted opportunities suppressed.
 ## 6.11.2 — Qualified continuation alerts and chart history ranges
 
 - Allow only strongly qualified `REVERSAL_WATCH` findings to notify as continuation opportunities across server, desktop, browser, and installed-PWA clients.
