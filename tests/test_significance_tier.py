@@ -125,11 +125,11 @@ def test_would_notify_false_when_edge_not_validated():
     assert result["reason"] == "edge_not_validated"
 
 
-def test_would_notify_true_during_edge_validation_cold_start():
+def test_would_notify_false_during_edge_validation_cold_start():
     result = would_notify(finding(candidate_profile={"edge_validation": {
         "validated": False, "status": "EVALUATING", "samples": 0, "minimum_samples": 30,
     }}))
-    assert result["would_notify"] is True
+    assert result["would_notify"] is False
 
 
 def test_would_notify_false_when_quality_not_clean():

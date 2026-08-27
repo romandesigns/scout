@@ -158,18 +158,9 @@ def _is_critical(f: Finding) -> bool:
 
 
 def edge_validation_allows_notification(f: Finding) -> bool:
-    """Allow proven cohorts and a tightly scoped cold-start learning window."""
+    """Only user-alert cohorts with demonstrated edge; paper outcomes mature cold starts."""
     edge = (f.candidate_profile or {}).get("edge_validation") or {}
-    if edge.get("validated") is True:
-        return True
-    if str(edge.get("status") or "").upper() != "EVALUATING":
-        return False
-    try:
-        samples = int(edge["samples"])
-        minimum_samples = int(edge["minimum_samples"])
-    except (KeyError, TypeError, ValueError):
-        return False
-    return minimum_samples > 0 and 0 <= samples < minimum_samples
+    return edge.get("validated") is True
 
 
 def _session_name(ts: float) -> str:
@@ -239,9 +230,9 @@ def _allowed_platform_agnostic(f: Finding, prefs: dict[str, Any] | None) -> bool
     if f.stage not in USER_NOTIFY_STAGES:
         return False
     # Market-status and verified-catalyst events are informational. Momentum
-    # entry notifications require a validated edge after the cohort matures;
-    # during cold start, clean A-rank opportunities may surface while the
-    # explicitly EVALUATING cohort accumulates its minimum sample.
+    # entry notifications require validated edge. Suppressed candidates still
+    # accumulate paper outcomes, so learning no longer requires risking noisy
+    # user-facing cold-start alerts.
     if f.stage not in SPECIAL_STAGES and not is_continuation_watch(f) and not edge_validation_allows_notification(f):
         return False
     if f.stage not in {"CATALYST", "CATALYST_WATCH", "CATALYST_ACTIVE", "HALT", "RESUME"} and not is_continuation_watch(f) and f.quality_label != "CLEAN":

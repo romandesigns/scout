@@ -35,6 +35,8 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+from app.significance_tier import would_notify
+
 BASE = "https://srv1170872.tail86523.ts.net:8444"
 THRESHOLDS = (5.0, 10.0, 20.0, 50.0)
 ET = ZoneInfo("America/New_York")
@@ -53,10 +55,18 @@ def load_env() -> dict[str, str]:
     return env
 
 
-def regular_hours_window(target_date: str) -> tuple[float, float]:
+SESSION_HOURS = {
+    "premarket": ((4, 0), (9, 30)),
+    "regular": ((9, 30), (16, 0)),
+    "afterhours": ((16, 0), (20, 0)),
+}
+
+
+def session_window(target_date: str, session: str) -> tuple[float, float]:
     d = datetime.fromisoformat(target_date).date()
-    start = datetime.combine(d, datetime.min.time(), ET).replace(hour=9, minute=30)
-    end = datetime.combine(d, datetime.min.time(), ET).replace(hour=16, minute=0)
+    (start_hour, start_minute), (end_hour, end_minute) = SESSION_HOURS[session]
+    start = datetime.combine(d, datetime.min.time(), ET).replace(hour=start_hour, minute=start_minute)
+    end = datetime.combine(d, datetime.min.time(), ET).replace(hour=end_hour, minute=end_minute)
     return start.astimezone(timezone.utc).timestamp(), end.astimezone(timezone.utc).timestamp()
 
 
@@ -125,8 +135,42 @@ def chunks(seq, n):
         yield seq[i:i + n]
 
 
+def notification_eligible(finding: dict) -> bool:
+    """Evaluate the production opportunity contract, not the old A/B proxy."""
+    # Always recompute. Stored previews describe the code deployed when the
+    # finding was captured and would contaminate a post-change replay.
+    return would_notify(finding).get("would_notify") is True
+
+
+def delivered(finding: dict) -> bool:
+    return finding.get("notification_delivered_at") is not None
+
+
+def qualified(finding: dict) -> bool:
+    return bool(
+        not finding.get("shadow_mode")
+        and str(finding.get("actionable_rank") or "").upper() == "A"
+        and str(finding.get("quality_label") or "").upper() == "CLEAN"
+    )
+
+
+def episode_phase(finding: dict) -> tuple[str, str]:
+    stage = str(finding.get("stage") or "").upper()
+    phase = "setup" if stage == "EARLY" else "confirmed" if stage in {"IGNITION", "BREAKOUT", "SURGE"} else stage.lower()
+    episode = str(finding.get("hybrid_key") or f"{finding.get('ticker')}:{finding.get('episode_id', 0)}")
+    return episode, phase
+
+
+def first_per_episode_phase(findings: list[dict]) -> list[dict]:
+    selected: dict[tuple[str, str], dict] = {}
+    for finding in sorted(findings, key=lambda f: (float(f.get("detected_at") or 0), int(f.get("id") or 0))):
+        selected.setdefault(episode_phase(finding), finding)
+    return list(selected.values())
+
+
 def score_recall(movers: list[dict], findings_by_ticker: dict[str, list[dict]]) -> dict:
-    counts = {str(int(t)): {"movers": 0, "seen": 0, "seen_before": 0, "actionable_before": 0} for t in THRESHOLDS}
+    counts = {str(int(t)): {"movers": 0, "seen": 0, "seen_before": 0, "qualified_before": 0,
+                            "eligible_before": 0, "delivered_before": 0} for t in THRESHOLDS}
     per_ticker_detail = []
     for row in movers:
         if not row.get("is_mover"):
@@ -134,9 +178,15 @@ def score_recall(movers: list[dict], findings_by_ticker: dict[str, list[dict]]) 
         ticker = row["ticker"]
         f_list = sorted(findings_by_ticker.get(ticker, []), key=lambda f: f.get("detected_at") or 0)
         first_seen = f_list[0]["detected_at"] if f_list else None
-        actionable_list = [f for f in f_list if str(f.get("actionable_rank") or "").upper() in ("A", "B")]
-        first_actionable = actionable_list[0]["detected_at"] if actionable_list else None
-        detail = {"ticker": ticker, "max_pct": row.get("max_pct"), "first_seen": first_seen, "first_actionable": first_actionable, "crossings": {}}
+        qualified_list = first_per_episode_phase([f for f in f_list if qualified(f)])
+        eligible_list = first_per_episode_phase([f for f in f_list if notification_eligible(f)])
+        delivered_list = first_per_episode_phase([f for f in f_list if delivered(f)])
+        first_qualified = qualified_list[0]["detected_at"] if qualified_list else None
+        first_eligible = eligible_list[0]["detected_at"] if eligible_list else None
+        first_delivered = delivered_list[0]["notification_delivered_at"] if delivered_list else None
+        detail = {"ticker": ticker, "max_pct": row.get("max_pct"), "first_seen": first_seen,
+                  "first_qualified": first_qualified, "first_notification_eligible": first_eligible,
+                  "first_delivered": first_delivered, "crossings": {}}
         for t in THRESHOLDS:
             key = str(int(t))
             crossing = row.get("crossings", {}).get(key)
@@ -146,14 +196,22 @@ def score_recall(movers: list[dict], findings_by_ticker: dict[str, list[dict]]) 
             cross_at = crossing["at"]
             seen = first_seen is not None
             seen_before = first_seen is not None and first_seen < cross_at
-            actionable_before = first_actionable is not None and first_actionable < cross_at
+            qualified_before = first_qualified is not None and first_qualified < cross_at
+            eligible_before = first_eligible is not None and first_eligible < cross_at
+            delivered_before = first_delivered is not None and first_delivered < cross_at
             if seen:
                 counts[key]["seen"] += 1
             if seen_before:
                 counts[key]["seen_before"] += 1
-            if actionable_before:
-                counts[key]["actionable_before"] += 1
-            detail["crossings"][key] = {"at": cross_at, "seen_before": seen_before, "actionable_before": actionable_before}
+            if qualified_before:
+                counts[key]["qualified_before"] += 1
+            if eligible_before:
+                counts[key]["eligible_before"] += 1
+            if delivered_before:
+                counts[key]["delivered_before"] += 1
+            detail["crossings"][key] = {"at": cross_at, "seen_before": seen_before,
+                "qualified_before": qualified_before, "notification_eligible_before": eligible_before,
+                "delivered_before": delivered_before}
         per_ticker_detail.append(detail)
 
     summary = {}
@@ -165,7 +223,9 @@ def score_recall(movers: list[dict], findings_by_ticker: dict[str, list[dict]]) 
             "movers": c["movers"],
             "seen_pct": round(100.0 * c["seen"] / n, 1),
             "seen_before_cross_pct": round(100.0 * c["seen_before"] / n, 1),
-            "actionable_before_cross_pct": round(100.0 * c["actionable_before"] / n, 1),
+            "qualified_before_cross_pct": round(100.0 * c["qualified_before"] / n, 1),
+            "notification_eligible_before_cross_pct": round(100.0 * c["eligible_before"] / n, 1),
+            "delivered_before_cross_pct": round(100.0 * c["delivered_before"] / n, 1),
         }
     return {"by_threshold": summary, "detail": per_ticker_detail}
 
@@ -229,6 +289,8 @@ def main() -> int:
     p.add_argument("--movers", required=True)
     p.add_argument("--output", required=True)
     p.add_argument("--date", default=None, help="YYYY-MM-DD, default today (ET)")
+    p.add_argument("--session", choices=sorted(SESSION_HOURS), default="regular")
+    p.add_argument("--findings", help="Optional local JSON findings export; avoids querying production")
     args = p.parse_args()
 
     env = load_env()
@@ -236,8 +298,8 @@ def main() -> int:
         raise SystemExit("ALPACA_API_KEY not found in .env")
 
     target_date = args.date or datetime.now(ET).strftime("%Y-%m-%d")
-    day_start_ts, day_end_ts = regular_hours_window(target_date)
-    print(f"Regular-hours window for {target_date}: "
+    day_start_ts, day_end_ts = session_window(target_date, args.session)
+    print(f"{args.session} window for {target_date}: "
           f"{datetime.fromtimestamp(day_start_ts, timezone.utc).strftime('%H:%M')} - "
           f"{datetime.fromtimestamp(day_end_ts, timezone.utc).strftime('%H:%M')} UTC")
 
@@ -245,8 +307,13 @@ def main() -> int:
     mover_rows = [m for m in movers if m.get("is_mover")]
     print(f"Ground truth: {len(mover_rows)} regular-hours movers, {len(movers) - len(mover_rows)} control rows")
 
-    print("Fetching all of today's Scout findings (comprehensive pull, all tickers)...")
-    all_findings = fetch_all_findings(day_start_ts, day_end_ts)
+    if args.findings:
+        exported = json.loads(Path(args.findings).read_text(encoding="utf-8"))
+        all_findings = [f for f in exported if day_start_ts <= float(f.get("detected_at") or 0) <= day_end_ts]
+        print(f"Loaded local findings export: {args.findings}")
+    else:
+        print("Fetching all of today's Scout findings (comprehensive pull, all tickers)...")
+        all_findings = fetch_all_findings(day_start_ts, day_end_ts)
     print(f"Total findings in regular-hours window: {len(all_findings)}")
 
     findings_by_ticker: dict[str, list[dict]] = {}
@@ -258,10 +325,13 @@ def main() -> int:
     for t in THRESHOLDS:
         s = recall["by_threshold"][str(int(t))]
         print(f"  +{int(t):>3}%: movers={s['movers']:4d}  seen={s['seen_pct']:5.1f}%  "
-              f"seen_before_cross={s['seen_before_cross_pct']:5.1f}%  actionable_before_cross={s['actionable_before_cross_pct']:5.1f}%")
+              f"seen_before_cross={s['seen_before_cross_pct']:5.1f}%  eligible_before_cross={s['notification_eligible_before_cross_pct']:5.1f}%  "
+              f"delivered_before_cross={s['delivered_before_cross_pct']:5.1f}%")
 
-    actionable_findings = [f for f in all_findings if str(f.get("actionable_rank") or "").upper() in ("A", "B")]
-    print(f"\nActionable (A/B) findings during regular hours: {len(actionable_findings)}")
+    qualified_findings = first_per_episode_phase([f for f in all_findings if qualified(f)])
+    actionable_findings = first_per_episode_phase([f for f in all_findings if notification_eligible(f)])
+    delivered_findings = first_per_episode_phase([f for f in all_findings if delivered(f)])
+    print(f"\nQualified={len(qualified_findings)} eligible={len(actionable_findings)} delivered={len(delivered_findings)} (episode/phase deduplicated)")
     print("Scoring precision (independent Alpaca forward bars)...")
     precision = score_precision(env, actionable_findings)
     if precision["summary"]:
@@ -269,9 +339,10 @@ def main() -> int:
         print(f"  n={s['n']}  mean={s['mean']}  median={s['median']}  sum={s['sum']}  positive_rate={s['positive_rate']:.1%}")
 
     report = {
-        "date": target_date, "window": "regular_hours",
+        "date": target_date, "window": args.session,
         "movers_total": len(mover_rows), "control_total": len(movers) - len(mover_rows),
-        "findings_total": len(all_findings), "actionable_total": len(actionable_findings),
+        "findings_total": len(all_findings), "qualified_total": len(qualified_findings),
+        "notification_eligible_total": len(actionable_findings), "delivered_total": len(delivered_findings),
         "recall": recall, "precision": precision,
     }
     out_path = Path(args.output)

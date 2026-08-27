@@ -189,11 +189,11 @@ class DecisionNotificationTests(unittest.TestCase):
         finding = make_finding(actionable_rank="B")
         self.assertFalse(notification_allowed_any_platform(finding, DEFAULT_NOTIFICATION_PREFERENCES))
 
-    def test_clean_a_rank_momentum_notifies_while_cohort_is_accumulating(self):
+    def test_clean_a_rank_momentum_is_suppressed_while_cohort_is_accumulating(self):
         finding = make_finding(stage="BREAKOUT", candidate_profile={"edge_validation": {
             "validated": False, "status": "EVALUATING", "samples": 13, "minimum_samples": 30,
         }})
-        self.assertTrue(notification_allowed_any_platform(finding, DEFAULT_NOTIFICATION_PREFERENCES))
+        self.assertFalse(notification_allowed_any_platform(finding, DEFAULT_NOTIFICATION_PREFERENCES))
 
     def test_mature_unprofitable_momentum_cohort_is_suppressed(self):
         finding = make_finding(stage="BREAKOUT", candidate_profile={"edge_validation": {
